@@ -45,8 +45,8 @@ func (m Model) helpPairs() [][2]string {
 	case m.comp.active:
 		return [][2]string{{"↑↓", "select"}, {"tab", "accept"}, {"esc", "dismiss"}}
 	}
-	// The rest follows Crush's help bar: focus, mode, commands, models and
-	// sidebar, then whatever the focused pane adds, then quit and help.
+	// The rest follows Crush's help bar, trimmed: focus, mode and commands,
+	// the chat keys when the transcript has focus, then help.
 	var out [][2]string
 	if m.busy {
 		out = append(out, [2]string{"esc", "interrupt"})
@@ -59,16 +59,11 @@ func (m Model) helpPairs() [][2]string {
 	if !m.chatFocus && m.input.Value() == "" {
 		commands = [2]string{"/ or ctrl+p", "commands"}
 	}
-	out = append(out, focus, [2]string{"shift+tab", "mode"}, commands, [2]string{"ctrl+t", "models"})
-	if m.width >= 100 {
-		out = append(out, [2]string{"ctrl+b", "toggle sidebar"})
-	}
+	out = append(out, focus, [2]string{"shift+tab", "mode"}, commands)
 	if m.chatFocus {
 		out = append(out, [2]string{"↑↓", "select"}, [2]string{"space", "expand/collapse"}, [2]string{"d/u", "page"}, [2]string{"y", "copy"})
-	} else {
-		out = append(out, [2]string{"ctrl+j", "newline"})
 	}
-	return append(out, [2]string{"ctrl+d", "quit"}, [2]string{"ctrl+g", "more"})
+	return append(out, [2]string{"ctrl+g", "more"})
 }
 
 var helpSections = []struct {
