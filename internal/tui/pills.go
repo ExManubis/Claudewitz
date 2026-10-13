@@ -23,7 +23,11 @@ func (m Model) pillsView(width int) string {
 
 	if n := len(m.queued); n > 0 {
 		label := fmt.Sprintf("%d queued", n)
-		if first := firstLine(m.queued[0]); first != "" {
+		first := firstLine(m.queued[0].text)
+		if first == "" && len(m.queued[0].images) > 0 {
+			first = "▣ " + m.queued[0].images[0]
+		}
+		if first != "" {
 			label += " · " + truncate(first, 30)
 		}
 		pills = append(pills, pill("▲", th.second, label))

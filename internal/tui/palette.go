@@ -143,6 +143,19 @@ func (m *Model) actions() []action {
 	add("Prompt", "Edit prompt in $EDITOR", "write long prompts in your editor", "ctrl+x", func(m *Model) tea.Cmd {
 		return m.openEditor()
 	})
+	add("Prompt", "Attach image…", "pick an image file from the project", "ctrl+f", func(m *Model) tea.Cmd {
+		m.input.SetValue("/image ")
+		m.input.CursorEnd()
+		m.comp.update(m)
+		return nil
+	})
+	add("Prompt", "Paste image", "from the clipboard", "ctrl+v", func(m *Model) tea.Cmd { return readClipboardImage() })
+	if len(m.attachments) > 0 {
+		add("Prompt", "Remove attached images", fmt.Sprintf("%d attached", len(m.attachments)), "", func(m *Model) tea.Cmd {
+			m.attachments = nil
+			return m.notify(toastInfo, "Removed attachments", "")
+		})
+	}
 	for _, mode := range notifyModes {
 		mode := mode
 		cur := ""
