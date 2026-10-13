@@ -202,9 +202,10 @@ func waitEvent(p *claude.Process) tea.Cmd {
 }
 
 type transcriptMsg struct {
-	info sessions.Info
-	msgs []sessions.Message
-	err  error
+	info      sessions.Info
+	msgs      []sessions.Message
+	subagents map[string][]sessions.Message // by the Agent call's tool_use_id
+	err       error
 }
 
 // loadTranscript reads a session from disk for replay. An empty id means the
@@ -217,7 +218,7 @@ func loadTranscript(cwd, id string) tea.Cmd {
 		}
 		info, _ := sessions.Read(path)
 		msgs, err := sessions.Load(path)
-		return transcriptMsg{info: info, msgs: msgs, err: err}
+		return transcriptMsg{info: info, msgs: msgs, subagents: sessions.Subagents(path), err: err}
 	}
 }
 
@@ -833,6 +834,11 @@ func (m *Model) replay(t transcriptMsg) {
 	for _, msg := range t.msgs {
 		m.applyBlocks(msg.Role, msg.Content, false)
 	}
+	for id, msgs := range t.subagents {
+		for _, msg := range msgs {
+			m.track.subagentMessage(id, claude.Message{Role: msg.Role, Content: msg.Content})
+		}
+	}
 	// Agents in history are finished even if no completion event was
 	// saved, and replay timings are meaningless.
 	for _, a := range m.track.agents {
@@ -968,7 +974,7 @@ func (m *Model) resume(s sessions.Info) tea.Cmd {
 	if err != nil {
 		m.chat.error("could not load transcript: %v", err)
 	} else {
-		m.replay(transcriptMsg{info: s, msgs: msgs})
+		m.replay(transcriptMsg{info: s, msgs: msgs, subagents: sessions.Subagents(s.Path)})
 	}
 	m.refresh()
 	m.gitLoaded = false

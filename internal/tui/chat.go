@@ -75,11 +75,9 @@ func (c *chat) open(e *entry) bool { return c.expanded || e.expanded }
 type chat struct {
 	entries   []*entry
 	byToolID  map[string]*entry
-	streaming map[int]*entry // content block index -> live entry
-	md        *glamour.TermRenderer
-	mdWidth   int
-	quiet     *glamour.TermRenderer // thinking
-	quietW    int
+	streaming map[int]*entry                // content block index -> live entry
+	md        map[int]*glamour.TermRenderer // by wrap width
+	quiet     map[int]*glamour.TermRenderer // thinking, by wrap width
 	expanded  bool
 	track     *tracker
 	cwd       string
@@ -125,7 +123,7 @@ func (c *chat) markAllDirty() {
 	for _, e := range c.entries {
 		e.dirty, e.md = true, streamMD{}
 	}
-	c.md, c.quiet = nil, nil
+	c.md, c.quiet = nil, nil // rebuilt in the new theme
 }
 
 // markAgentsDirty forces re-rendering of running sub-agent entries.
@@ -140,21 +138,29 @@ func (c *chat) markAgentsDirty() {
 }
 
 func (c *chat) renderer(width int) *glamour.TermRenderer {
-	if c.md == nil || c.mdWidth != width {
-		if r, err := glamour.NewTermRenderer(glamour.WithStyles(markdownStyle()), glamour.WithChromaFormatter("terminal16m"), glamour.WithWordWrap(width)); err == nil {
-			c.md, c.mdWidth = r, width
-		}
-	}
-	return c.md
+	return cachedRenderer(&c.md, width, glamour.WithStyles(markdownStyle()), glamour.WithChromaFormatter("terminal16m"))
 }
 
 func (c *chat) quietRenderer(width int) *glamour.TermRenderer {
-	if c.quiet == nil || c.quietW != width {
-		if r, err := glamour.NewTermRenderer(glamour.WithStyles(quietMarkdownStyle()), glamour.WithWordWrap(width)); err == nil {
-			c.quiet, c.quietW = r, width
-		}
+	return cachedRenderer(&c.quiet, width, glamour.WithStyles(quietMarkdownStyle()))
+}
+
+// cachedRenderer returns the renderer for width from cache, building it
+// with opts on first use. Replies, thinking and agent reports each wrap
+// at their own width, so one renderer per width avoids rebuilding.
+func cachedRenderer(cache *map[int]*glamour.TermRenderer, width int, opts ...glamour.TermRendererOption) *glamour.TermRenderer {
+	if r, ok := (*cache)[width]; ok {
+		return r
 	}
-	return c.quiet
+	r, err := glamour.NewTermRenderer(append(opts, glamour.WithWordWrap(width))...)
+	if err != nil {
+		return nil
+	}
+	if len(*cache) >= 8 || *cache == nil { // resizing walks through many widths
+		*cache = map[int]*glamour.TermRenderer{}
+	}
+	(*cache)[width] = r
+	return r
 }
 
 func (c *chat) View(width int) string {
@@ -399,7 +405,9 @@ func (c *chat) agentBody(e *entry, width int) string {
 		if len(stats) > 0 {
 			lines = append(lines, mutedStyle.Render("⎿ "+strings.Join(stats, " · ")))
 		}
-		if a.running() {
+		if len(a.steps) > 0 {
+			lines = append(lines, c.agentSteps(e, a, width))
+		} else if a.running() {
 			for _, r := range a.recent {
 				lines = append(lines, mutedStyle.Render("  "+truncate(r, width-2)))
 			}
@@ -415,19 +423,74 @@ func (c *chat) agentBody(e *entry, width int) string {
 			}
 			lines = append(lines, mutedStyle.Render("⎿ "+clipText(a.summary, width-2, lim)))
 		}
-	} else if e.toolStatus != toolPending && e.toolOutput != "" {
+	} else if e.toolStatus == toolFailed && e.toolOutput != "" {
 		lim := 3
 		if c.open(e) {
 			lim = 40
 		}
-		out := agentReport(e.toolOutput)
-		st := mutedStyle
-		if e.toolStatus == toolFailed {
-			st = errStyle
-		}
-		lines = append(lines, st.Render("⎿ "+clipText(out, width-2, lim)))
+		lines = append(lines, errStyle.Render("⎿ "+clipText(agentReport(e.toolOutput), width-2, lim)))
+	} else if e.toolStatus == toolOK && e.toolOutput != "" {
+		lines = append(lines, c.agentResult(e, width))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// maxAgentSteps is how many of a sub-agent's tool calls show while its
+// entry is closed: the newest, so a running agent reads as a live tail.
+const maxAgentSteps = 5
+
+// agentSteps draws a sub-agent's tool calls as a tree, one line each.
+func (c *chat) agentSteps(e *entry, a *agentState, width int) string {
+	th := currentTheme()
+	steps := a.steps
+	var lines []string
+	if hidden := len(steps) - maxAgentSteps; hidden > 0 && !c.open(e) {
+		steps = steps[hidden:]
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("├─ ⋯ %d earlier steps", hidden)))
+	}
+	for i, st := range steps {
+		branch := "├─ "
+		if i == len(steps)-1 {
+			branch = "└─ "
+		}
+		var icon string
+		switch {
+		case st.status == toolOK:
+			icon = okStyle.Render("●")
+		case st.status == toolFailed:
+			icon = errStyle.Render("●")
+		case a.running():
+			icon = lipgloss.NewStyle().Foreground(th.warn).Render("●")
+		default: // never answered: the agent was stopped mid-call
+			icon = mutedStyle.Render("●")
+		}
+		room := max(10, width-lipgloss.Width(st.name)-6)
+		summary := summarizeInput(st.name, st.input, room)
+		if fp := filePathOf(st.input); fp != "" {
+			summary = truncateLeft(relPath(fp, c.cwd), room)
+		}
+		lines = append(lines, mutedStyle.Render(branch)+icon+" "+toolName.Render(st.name)+" "+mutedStyle.Render(summary))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// maxAgentResultLines is how much of a sub-agent's report shows closed.
+const maxAgentResultLines = 10
+
+// agentResult renders a finished sub-agent's report as Markdown.
+func (c *chat) agentResult(e *entry, width int) string {
+	report := agentReport(e.toolOutput)
+	body := mutedStyle.Render(clipText(report, width-2, maxAgentResultLines))
+	if r := c.renderer(width); r != nil {
+		if out, err := r.Render(report); err == nil {
+			lines := strings.Split(strings.Trim(out, "\n"), "\n")
+			if hidden := len(lines) - maxAgentResultLines; hidden > 0 && !c.open(e) {
+				lines = append(lines[:maxAgentResultLines], mutedStyle.Render(fmt.Sprintf("  … %d more lines (ctrl+o)", hidden)))
+			}
+			body = strings.Join(lines, "\n")
+		}
+	}
+	return body
 }
 
 // agentReport strips the harness frame around a sub-agent's final report:

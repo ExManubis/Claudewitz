@@ -69,3 +69,37 @@ func TestPrompts(t *testing.T) {
 		t.Fatalf("limit should keep the newest: %q", got)
 	}
 }
+
+func TestSubagents(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "abc.jsonl")
+	sub := filepath.Join(dir, "abc", "subagents")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		p:                                        `{"type":"user","message":{"role":"user","content":"go"}}` + "\n",
+		filepath.Join(sub, "agent-a1.meta.json"): `{"agentType":"Explore","toolUseId":"toolu_1"}`,
+		filepath.Join(sub, "agent-a1.jsonl"): `{"type":"user","isSidechain":true,"message":{"role":"user","content":"find it"}}
+{"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":[{"type":"tool_use","id":"s1","name":"Grep","input":{"pattern":"x"}}]}}
+{"type":"user","isSidechain":true,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"s1","content":"a.go"}]}}
+`,
+		// No meta, so no parent to hang it on.
+		filepath.Join(sub, "agent-a2.jsonl"): `{"type":"user","isSidechain":true,"message":{"role":"user","content":"orphan"}}` + "\n",
+	}
+	for f, data := range files {
+		if err := os.WriteFile(f, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := Subagents(p)
+	if len(got) != 1 || len(got["toolu_1"]) != 3 {
+		t.Fatalf("got %+v", got)
+	}
+	if b := got["toolu_1"][1].Content[0]; b.Type != "tool_use" || b.Name != "Grep" {
+		t.Fatalf("second message: %+v", got["toolu_1"][1])
+	}
+	if len(Subagents(filepath.Join(dir, "none.jsonl"))) != 0 {
+		t.Fatal("a session without sub-agents should load none")
+	}
+}

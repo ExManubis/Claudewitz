@@ -238,7 +238,33 @@ type Message struct {
 }
 
 // Load reads the main-thread conversation of a session for replay.
-func Load(path string) ([]Message, error) {
+func Load(path string) ([]Message, error) { return load(path, false) }
+
+// Subagents reads the transcripts of a session's sub-agents, keyed by the
+// tool_use_id of the Agent call that started each. Claude Code keeps them
+// beside the session as <id>/subagents/agent-<agent>.jsonl, with the
+// parent call recorded in a .meta.json next to each.
+func Subagents(path string) map[string][]Message {
+	metas, _ := filepath.Glob(filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents", "agent-*.meta.json"))
+	out := map[string][]Message{}
+	for _, mp := range metas {
+		var meta struct {
+			ToolUseID string `json:"toolUseId"`
+		}
+		b, err := os.ReadFile(mp)
+		if err != nil || json.Unmarshal(b, &meta) != nil || meta.ToolUseID == "" {
+			continue
+		}
+		if msgs, err := load(strings.TrimSuffix(mp, ".meta.json")+".jsonl", true); err == nil {
+			out[meta.ToolUseID] = msgs
+		}
+	}
+	return out
+}
+
+// load reads user and assistant messages; sidechain picks a sub-agent's
+// own transcript, whose lines are all marked as sidechain.
+func load(path string, sidechain bool) ([]Message, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -252,7 +278,7 @@ func Load(path string) ([]Message, error) {
 		if json.Unmarshal(sc.Bytes(), &l) != nil {
 			continue
 		}
-		if (l.Type != "user" && l.Type != "assistant") || l.IsSidechain || l.IsMeta {
+		if (l.Type != "user" && l.Type != "assistant") || l.IsSidechain != sidechain || l.IsMeta {
 			continue
 		}
 		var m rawMessage
