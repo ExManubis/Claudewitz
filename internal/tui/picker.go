@@ -147,7 +147,7 @@ func (p *picker) view(width, height int) string {
 			top += strings.Repeat(" ", max(1, inner-lipgloss.Width(top)-lipgloss.Width(when))) + when
 			meta := []string{fmt.Sprintf("%d msgs", s.Messages)}
 			if s.Branch != "" {
-				meta = append(meta, "\ue0a0 "+s.Branch)
+				meta = append(meta, "\uec6f "+s.Branch)
 			}
 			if p.all && s.CWD != "" {
 				meta = append(meta, prettyPath(s.CWD))
