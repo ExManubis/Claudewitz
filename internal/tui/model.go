@@ -625,6 +625,9 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 		m.status = ""
 		m.chat.streaming = map[int]*entry{}
 		m.costUSD += r.TotalCostUSD
+		if w := r.ContextWindow(m.model); w > 0 {
+			m.ctxWindow = w
+		}
 		if r.SessionID != "" {
 			m.sessionID = r.SessionID
 		}
@@ -728,7 +731,14 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 			m.chat.streaming[e.Index] = m.chat.add(&entry{kind: kindAssistant, text: e.ContentBlock.Text})
 		case "thinking":
 			m.activity = "Thinking"
-			m.chat.streaming[e.Index] = m.chat.add(&entry{kind: kindThinking, text: e.ContentBlock.Thinking})
+			// Joins the transcript with its first text: models that keep
+			// their thinking hidden send none, and the activity line
+			// already says Claude is thinking.
+			th := &entry{kind: kindThinking, text: e.ContentBlock.Thinking}
+			if th.text != "" {
+				m.chat.add(th)
+			}
+			m.chat.streaming[e.Index] = th
 		case "tool_use":
 			m.activity = "Running " + e.ContentBlock.Name
 		}
@@ -741,6 +751,9 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 		case "text_delta":
 			live.setText(live.text + e.Delta.Text)
 		case "thinking_delta":
+			if live.text == "" && e.Delta.Thinking != "" {
+				m.chat.add(live)
+			}
 			live.setText(live.text + e.Delta.Thinking)
 		}
 	}
@@ -1230,9 +1243,14 @@ func (m *Model) cwd() string {
 	return m.opts.CWD
 }
 
+// contextWindow is the size the CLI reported with the last turn's result;
+// before the first one it's guessed from the model name.
 func (m *Model) contextWindow() int {
 	if m.ctxWindow > 0 {
 		return m.ctxWindow
+	}
+	if strings.HasSuffix(m.model, "[1m]") {
+		return 1000000
 	}
 	return 200000
 }

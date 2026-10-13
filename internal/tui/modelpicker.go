@@ -141,6 +141,7 @@ func (m *Model) applyModel(mi claude.ModelInfo, effort string) tea.Cmd {
 			m.opts.Model = ""
 		}
 		m.model = firstNonEmpty(mi.ResolvedModel, mi.Value)
+		m.ctxWindow = 0 // the next result reports the new model's
 		changes = append(changes, firstNonEmpty(mi.DisplayName, mi.Value))
 	}
 	if effort != m.opts.Effort && effort != "" {
