@@ -62,6 +62,7 @@ type entry struct {
 	rendered string
 	width    int
 	dirty    bool
+	md       streamMD // assistant and thinking Markdown
 }
 
 func (e *entry) setText(s string) { e.text = s; e.dirty = true }
@@ -122,7 +123,7 @@ func (c *chat) reset(t *tracker) {
 
 func (c *chat) markAllDirty() {
 	for _, e := range c.entries {
-		e.dirty = true
+		e.dirty, e.md = true, streamMD{}
 	}
 	c.md, c.quiet = nil, nil
 }
@@ -219,8 +220,9 @@ func (c *chat) renderEntry(e *entry, width int) string {
 		return userBlock.Width(width - 2).Render(body)
 	case kindAssistant:
 		body := e.text
-		if r := c.renderer(min(width-2, maxProseWidth)); r != nil {
-			if out, err := r.Render(e.text); err == nil {
+		w := min(width-2, maxProseWidth)
+		if r := c.renderer(w); r != nil {
+			if out, err := e.md.render(e.text, w, r); err == nil {
 				body = strings.Trim(out, "\n")
 			}
 		}
@@ -258,7 +260,7 @@ func (c *chat) renderThinking(e *entry, width int) string {
 	inner := min(width-4, maxProseWidth-2) - 2 // left margin, then 1 col of padding each side
 	body := lipgloss.NewStyle().Width(inner).Render(t)
 	if r := c.quietRenderer(inner); r != nil {
-		if out, err := r.Render(t); err == nil {
+		if out, err := e.md.render(t, inner, r); err == nil {
 			body = strings.Trim(out, "\n")
 		}
 	}
