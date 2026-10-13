@@ -104,6 +104,8 @@ on macOS; they're moved over automatically the first time you start a new versio
 **Prompt**
 - `↑`/`↓` on an empty input recalls earlier prompts for this project, including ones from past
   sessions; kept in `history.jsonl` next to the config
+- After each turn Claude Code predicts your next prompt and shows it in the empty input: `→`
+  takes it to edit, `enter` sends it as-is
 - `ctrl+x` (or `/edit`) opens the prompt in `$VISUAL`/`$EDITOR` for long prompts
 - Images: `ctrl+v` pastes one from the clipboard (pngpaste/osascript on macOS, wl-paste/xclip
   on Linux), dragging image files into the terminal attaches them, and `ctrl+f` or `/image path`

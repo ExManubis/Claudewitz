@@ -43,8 +43,11 @@ type Event struct {
 	// PermissionMode is set when the CLI changes mode itself (e.g. leaving
 	// plan mode after a plan is approved).
 	PermissionMode string
-	Err            error // stdout closed or unparseable output
-	Exited         bool
+	// Suggestion is the CLI's guess at the user's next prompt, sent after
+	// a turn's result.
+	Suggestion string
+	Err        error // stdout closed or unparseable output
+	Exited     bool
 }
 
 // Process is a running `claude` CLI.
@@ -71,6 +74,7 @@ func Start(ctx context.Context, opts Options) (*Process, error) {
 		"--permission-prompt-tool", "stdio",
 		"--forward-subagent-text",
 		"--replay-user-messages",
+		"--prompt-suggestions",
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -184,6 +188,13 @@ func parseLine(line []byte) (Event, bool) {
 		var e ResultEvent
 		if json.Unmarshal(line, &e) == nil {
 			return Event{Result: &e}, true
+		}
+	case "prompt_suggestion":
+		var ps struct {
+			Suggestion string `json:"suggestion"`
+		}
+		if json.Unmarshal(line, &ps) == nil && strings.TrimSpace(ps.Suggestion) != "" {
+			return Event{Suggestion: ps.Suggestion}, true
 		}
 	case "rate_limit_event":
 		var e RateLimitEvent

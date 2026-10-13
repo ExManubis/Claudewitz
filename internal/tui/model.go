@@ -53,6 +53,8 @@ type Model struct {
 	lastTurn     time.Duration // how long the last turn took, for "Done in …"
 	lastTurnAt   time.Time
 
+	suggestion string // predicted next prompt, shown in the empty input
+
 	chatFocus   bool // keys drive the transcript instead of the input
 	textSel     *textSelection
 	mouseDown   bool   // left button held in the transcript
@@ -107,6 +109,8 @@ type Model struct {
 	plan        *planState     // ExitPlanMode at the head of pending
 }
 
+const inputPlaceholder = "Ask Claude anything…  / for commands · @ to mention files"
+
 // New builds the model; the CLI is started from Init.
 // The config's theme and appearance are applied here; callers that want a
 // one-off theme (the -theme flag) set cfg.Theme without saving it.
@@ -119,7 +123,7 @@ func New(ctx context.Context, opts claude.Options, cfg config.Config) Model {
 		opts.CWD, _ = os.Getwd()
 	}
 	ta := textarea.New()
-	ta.Placeholder = "Ask Claude anything…  / for commands · @ to mention files"
+	ta.Placeholder = inputPlaceholder
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
 	ta.CharLimit = 0
@@ -480,6 +484,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.focusChat()
 			return m, nil
+		case "right":
+			if m.input.Value() == "" && m.suggestion != "" {
+				m.input.SetValue(m.suggestion)
+				m.input.CursorEnd()
+				m.setSuggestion("")
+				m.comp.update(&m)
+				m.layout()
+				return m, nil
+			}
 		case "up", "down":
 			recall := m.hist.prev
 			if msg.String() == "down" {
@@ -509,7 +522,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" && len(m.attachments) == 0 {
-				return m, nil
+				if m.suggestion == "" {
+					return m, nil
+				}
+				text = m.suggestion
 			}
 			m.input.Reset()
 			m.comp.update(&m)
@@ -573,6 +589,9 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 		if ev.Init.CWD != "" {
 			m.chat.cwd = ev.Init.CWD
 		}
+
+	case ev.Suggestion != "":
+		m.setSuggestion(ev.Suggestion)
 
 	case ev.ContextWindow > 0:
 		m.ctxWindow = ev.ContextWindow
@@ -1058,7 +1077,18 @@ func (m *Model) agentStatus(toolUseID, taskID string) string {
 	return ""
 }
 
+// setSuggestion shows s as the input's placeholder, or restores the default
+// when s is empty.
+func (m *Model) setSuggestion(s string) {
+	m.suggestion = strings.TrimSpace(s)
+	m.input.Placeholder = inputPlaceholder
+	if m.suggestion != "" {
+		m.input.Placeholder = m.suggestion + "  → edit · enter send"
+	}
+}
+
 func (m *Model) submit(text string) tea.Cmd {
+	m.setSuggestion("")
 	m.hist.add(text)
 	if strings.HasPrefix(text, "/") {
 		if cmd, handled := m.slash(text); handled {
@@ -1240,6 +1270,7 @@ func (m *Model) restart(o claude.Options) tea.Cmd {
 	m.pending = nil
 	m.question, m.plan = nil, nil
 	m.queued = nil
+	m.setSuggestion("")
 	m.attachments = nil
 	m.chatFocus = false
 	m.busy = false

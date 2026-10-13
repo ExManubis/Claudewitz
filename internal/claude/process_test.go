@@ -31,6 +31,8 @@ func TestParseLine(t *testing.T) {
 			func(e Event) bool { return e.Message != nil && e.Message.Message.Content[0].ToolUseID == "toolu_1" }},
 		{`{"type":"result","subtype":"success","total_cost_usd":0.0038,"num_turns":3,"session_id":"s1"}`,
 			func(e Event) bool { return e.Result != nil && e.Result.NumTurns == 3 }},
+		{`{"type":"prompt_suggestion","suggestion":"Create these files.","uuid":"u1","session_id":"s1"}`,
+			func(e Event) bool { return e.Suggestion == "Create these files." }},
 	}
 	for _, c := range cases {
 		ev, ok := parseLine([]byte(c.line))
