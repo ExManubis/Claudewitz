@@ -77,6 +77,18 @@ func (m *Model) actions() []action {
 		return tea.SetWindowTitle("claudewitz · " + m.sessionID)
 	})
 
+	add("Model", "Switch model…", "pick a model and effort level", "ctrl+t", func(m *Model) tea.Cmd {
+		m.openModelPicker()
+		return nil
+	})
+	for _, l := range defaultEffortLevels {
+		l := l
+		cur := ""
+		if l == m.opts.Effort {
+			cur = "current"
+		}
+		add("Effort", l, effortDesc[l], cur, func(m *Model) tea.Cmd { m.slash("/effort " + l); return nil })
+	}
 	if m.initResp != nil && len(m.initResp.Models) > 0 {
 		for _, mi := range m.initResp.Models {
 			mi := mi

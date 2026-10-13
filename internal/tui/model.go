@@ -32,6 +32,7 @@ type Model struct {
 	comp      *completer
 	picker    *picker
 	palette   *palette
+	modelPick *modelPicker
 	showHelp  bool
 	files     []string
 	vp        viewport.Model
@@ -242,7 +243,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, animTick(m.animID)
 
 	case tea.MouseMsg:
-		if m.picker == nil && m.palette == nil && !m.showHelp {
+		if m.picker == nil && m.palette == nil && m.modelPick == nil && !m.showHelp {
 			var c tea.Cmd
 			m.vp, c = m.vp.Update(msg)
 			m.follow = m.vp.AtBottom()
@@ -256,6 +257,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHelp = false
 			}
 			return m, nil
+		}
+		if m.modelPick != nil {
+			return m, m.handleModelPickerKey(msg)
 		}
 		if m.palette != nil {
 			return m, m.handlePaletteKey(msg)
@@ -322,6 +326,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.openPicker()
 		case "ctrl+p":
 			m.openPalette()
+			return m, nil
+		case "ctrl+t":
+			m.openModelPicker()
 			return m, nil
 		case "ctrl+g":
 			m.showHelp = true
@@ -790,15 +797,30 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		return tea.Batch(m.restart(claude.Options{Resume: arg}), loadTranscript(m.opts.CWD, arg)), true
 	case "/model":
 		if arg == "" {
-			m.chat.info("model: %s", m.model)
+			m.openModelPicker()
 			return nil, true
 		}
-		if m.proc != nil {
-			_ = m.proc.SetModel(arg)
+		mi := claude.ModelInfo{Value: arg}
+		for _, x := range m.availableModels() {
+			if x.Value == arg {
+				mi = x
+			}
 		}
-		m.opts.Model = arg
-		m.model = arg
-		m.chat.info("model → %s", arg)
+		m.applyModel(mi, m.opts.Effort)
+	case "/effort":
+		if arg == "" {
+			m.chat.info("effort: %s (levels: %s)", firstNonEmpty(m.opts.Effort, "default"), strings.Join(defaultEffortLevels, ", "))
+			return nil, true
+		}
+		valid := false
+		for _, l := range defaultEffortLevels {
+			valid = valid || l == arg
+		}
+		if !valid {
+			m.chat.error("unknown effort %q (levels: %s)", arg, strings.Join(defaultEffortLevels, ", "))
+			return nil, true
+		}
+		m.applyModel(claude.ModelInfo{Value: m.modelValue()}, arg)
 	case "/mode":
 		if arg == "" {
 			m.chat.info("permission mode: %s (modes: %s)", m.permMode, strings.Join(permissionModes, ", "))
@@ -930,6 +952,8 @@ func (m Model) View() string {
 	switch {
 	case m.showHelp:
 		screen = center(screen, helpDialog(m.width-4), m.width, h)
+	case m.modelPick != nil:
+		screen = center(screen, m.modelPick.view(m.width), m.width, h)
 	case m.palette != nil:
 		screen = center(screen, m.palette.view(m.width), m.width, h)
 	case m.picker != nil:
@@ -944,7 +968,7 @@ func (m Model) showHeader() bool { return !m.showSidebar() && len(m.chat.entries
 func (m Model) headerInfo() string {
 	var parts []string
 	if m.model != "" {
-		parts = append(parts, m.model)
+		parts = append(parts, strings.TrimSpace(m.model+" "+m.opts.Effort))
 	}
 	parts = append(parts, prettyPath(m.cwd()))
 	return mutedStyle.Render(truncateLeft(strings.Join(parts, " • "), max(10, m.mainWidth()/2)))
@@ -1064,7 +1088,7 @@ func (m Model) statusView() string {
 	parts = append(parts, mode+mutedStyle.Render(" ⇧⇥"))
 	if !m.showSidebar() {
 		if m.model != "" {
-			parts = append(parts, m.model)
+			parts = append(parts, strings.TrimSpace(m.model+" "+mutedStyle.Render(m.opts.Effort)))
 		}
 		if ctx := contextTokens(m.lastUsage); ctx > 0 {
 			parts = append(parts, "ctx "+humanTokens(ctx))
@@ -1143,7 +1167,7 @@ func (m Model) splash() string {
 		mutedStyle.Render("  A terminal front end for Claude Code, running on your Claude subscription."),
 		"",
 		"  "+key("/", "commands")+"     "+key("@", "mention a file")+"     "+key("ctrl+p", "palette"),
-		"  "+key("ctrl+r", "sessions")+"   "+key("⇧⇥", "permission mode")+"   "+key("ctrl+g", "shortcuts"),
+		"  "+key("ctrl+r", "sessions")+"   "+key("ctrl+t", "model")+"      "+key("ctrl+g", "shortcuts"),
 		"",
 		"  "+textStyle.Render(prettyPath(m.opts.CWD)),
 	)
@@ -1160,7 +1184,8 @@ func (m Model) splash() string {
 const helpText = `commands
   /new, /clear        start a fresh session
   /resume [id]        browse sessions (or resume one by id)
-  /model <name>       switch model (opus, sonnet, haiku, …)
+  /model [name]       switch model (no name opens the picker, ctrl+t)
+  /effort <level>     effort: low, medium, high, xhigh, max
   /mode <mode>        permission mode: default, acceptEdits, plan
   /theme <name>       colour theme: claude, charm, mono
   /sidebar            toggle the sidebar

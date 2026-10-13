@@ -30,6 +30,8 @@ func (m Model) helpPairs() [][2]string {
 	switch {
 	case m.showHelp:
 		return [][2]string{{"esc", "close"}}
+	case m.modelPick != nil:
+		return [][2]string{{"↑↓", "model"}, {"←→", "effort"}, {"enter", "apply"}, {"esc", "cancel"}}
 	case m.palette != nil:
 		return [][2]string{{"↑↓", "move"}, {"enter", "run"}, {"esc", "close"}}
 	case m.picker != nil:
@@ -43,7 +45,7 @@ func (m Model) helpPairs() [][2]string {
 	}
 	return [][2]string{
 		{"enter", "send"}, {"ctrl+j", "newline"}, {"/", "commands"}, {"@", "files"},
-		{"ctrl+p", "palette"}, {"ctrl+r", "sessions"}, {"ctrl+g", "help"},
+		{"ctrl+p", "palette"}, {"ctrl+t", "model"}, {"ctrl+r", "sessions"}, {"ctrl+g", "help"},
 	}
 }
 
@@ -63,6 +65,7 @@ var helpSections = []struct {
 		{"esc", "interrupt Claude"},
 		{"shift+tab", "cycle permission mode"},
 		{"ctrl+r", "resume a session"},
+		{"ctrl+t", "model & effort"},
 		{"ctrl+p", "command palette"},
 		{"ctrl+d", "quit"},
 	}},

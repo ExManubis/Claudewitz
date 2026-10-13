@@ -29,7 +29,7 @@ skills, hooks, `CLAUDE.md` and session history.
 
 ```sh
 go run .                      # in the project you want to work on
-go run . -model opus -mode acceptEdits
+go run . -model opus -effort high -mode acceptEdits
 go run . -continue            # pick up the latest session in this directory
 go run . -resume <session-id>
 go run . -- --add-dir ../lib  # anything after -- goes straight to claude
@@ -65,6 +65,11 @@ go run . -- --add-dir ../lib  # anything after -- goes straight to claude
 - Edit/Write requests preview the diff; sub-agent requests name the agent asking
 - Permission modes: `shift+tab` cycles default → accept edits → plan
 
+**Model picker** (`ctrl+t`, `/model`, or the palette)
+- Every model the CLI offers, with descriptions and the resolved model id
+- Effort level per model (low → max) with a meter; applied to the running session, and kept
+  for `/new` and resumes. Also `/effort <level>` and `-effort` on the command line
+
 **Themes**: `claude` (default), `charm`, `mono`, via `-theme` or `/theme`, each with light and
 dark variants.
 
@@ -73,6 +78,7 @@ dark variants.
 - Starts `claude -p` in stream-json mode with `--permission-prompt-tool stdio` and
   `--forward-subagent-text`
 - Sends an `initialize` control request on startup to get commands, models and account info
+- Switches model with `set_model` and effort with `apply_flag_settings` (`effortLevel`), mid-session
 - Renders `stream_event` deltas live and takes tool calls and results from complete messages
 - Follows sub-agents through `task_started` / `task_progress` / `task_updated` /
   `task_notification` events and messages tagged with `parent_tool_use_id`

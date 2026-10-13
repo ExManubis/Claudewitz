@@ -345,7 +345,7 @@ func (m Model) sidebarView(height int) string {
 	}
 	meta := []string{}
 	if m.model != "" {
-		meta = append(meta, m.model)
+		meta = append(meta, strings.TrimSpace(m.model+" "+m.opts.Effort))
 	}
 	if m.sessionID != "" {
 		meta = append(meta, m.sessionID[:min(8, len(m.sessionID))])

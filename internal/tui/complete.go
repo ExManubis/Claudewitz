@@ -38,7 +38,8 @@ var localCommands = []suggestion{
 	{label: "/help", desc: "show commands and keys"},
 	{label: "/new", desc: "start a fresh session"},
 	{label: "/resume", desc: "browse and resume sessions"},
-	{label: "/model", desc: "switch model"},
+	{label: "/model", desc: "switch model (opens the picker)"},
+	{label: "/effort", desc: "set effort level"},
 	{label: "/mode", desc: "permission mode"},
 	{label: "/theme", desc: "switch colour theme"},
 	{label: "/sidebar", desc: "toggle the sidebar"},
@@ -180,6 +181,10 @@ func (m *Model) argSuggestions(cmd string) []suggestion {
 		desc := map[string]string{"default": "ask before edits and commands", "acceptEdits": "auto-approve file edits", "plan": "read-only planning"}
 		for _, pm := range permissionModes {
 			out = append(out, suggestion{label: pm, insert: pm, desc: desc[pm]})
+		}
+	case "/effort":
+		for _, l := range defaultEffortLevels {
+			out = append(out, suggestion{label: l, insert: l, desc: effortDesc[l]})
 		}
 	case "/theme":
 		for _, n := range themeNames() {
