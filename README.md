@@ -113,9 +113,9 @@ on macOS; they're moved over automatically the first time you start a new versio
   agents when the sidebar is hidden
 
 **Desktop notifications**: when a permission prompt, question or plan is waiting, or a turn
-finishes, while the terminal isn't focused. Native (`notify-send`, macOS Notification Center)
-locally, terminal escape codes (OSC 9/99/777, tmux passthrough) over SSH, or the bell.
-`/notifications auto|native|osc|bell|off`, saved in the config. Needs a terminal that reports focus
+finishes, while the terminal isn't focused. Sent through the terminal with escape codes
+(OSC 9/99/777, tmux passthrough), so they work over SSH too, or as just the bell.
+`/notifications auto|osc|bell|off`, saved in the config. Needs a terminal that reports focus
 
 **Sidebar** (`ctrl+b`, auto-hidden below 100 columns)
 - Session title, directory, model and account type

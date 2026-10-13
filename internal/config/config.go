@@ -16,7 +16,7 @@ type Config struct {
 	// (the default, detected from the terminal), "dark" or "light".
 	Appearance string `json:"appearance,omitempty"`
 	// Notifications controls desktop notifications sent while the terminal
-	// is unfocused: "auto" (default), "native", "osc", "bell" or "off".
+	// is unfocused: "auto" (default), "osc", "bell" or "off".
 	Notifications string `json:"notifications,omitempty"`
 }
 

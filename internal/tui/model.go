@@ -1591,7 +1591,7 @@ const helpText = `commands
   /sidebar            toggle the sidebar
   /edit               write the prompt in $EDITOR (ctrl+x)
   /image <path>       attach an image (ctrl+f; ctrl+v pastes one; or drag a file in)
-  /notifications [m]  desktop notifications: auto, native, osc, bell, off
+  /notifications [m]  desktop notifications: auto, osc, bell, off
   /session            show session id and cwd
   /quit               exit
   other /commands are passed through to Claude Code

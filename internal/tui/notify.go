@@ -1,23 +1,19 @@
 package tui
 
 import (
-	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-var notifyModes = []string{"auto", "native", "osc", "bell", "off"}
+var notifyModes = []string{"auto", "osc", "bell", "off"}
 
 var notifyModeDesc = map[string]string{
-	"auto":   "native locally, terminal escape codes over SSH",
-	"native": "the OS notification centre",
-	"osc":    "terminal notifications (iTerm2, WezTerm, Ghostty, kitty, foot)",
-	"bell":   "just ring the terminal bell",
-	"off":    "no desktop notifications",
+	"auto": "terminal notifications (the default)",
+	"osc":  "terminal notifications (iTerm2, WezTerm, Ghostty, kitty, foot)",
+	"bell": "just ring the terminal bell",
+	"off":  "no desktop notifications",
 }
 
 // desktopNotify alerts the user when they've switched away from the
@@ -29,52 +25,19 @@ func (m *Model) desktopNotify(title, body string) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		sendNotification(mode, title, body)
+		writeTerminal(notificationSeq(mode, title, body))
 		return nil
 	}
 }
 
-func sendNotification(mode, title, body string) {
-	if mode == "auto" {
-		mode = "osc"
-		if os.Getenv("SSH_CONNECTION") == "" && os.Getenv("SSH_TTY") == "" && nativeNotifier() != nil {
-			mode = "native"
-		}
+// notificationSeq is what to write to the terminal for mode. Anything but
+// the bell is a terminal notification, including "native" from configs
+// saved before that mode was removed.
+func notificationSeq(mode, title, body string) string {
+	if mode == "bell" {
+		return "\a"
 	}
-	switch mode {
-	case "native":
-		if argv := nativeNotifier(); argv != nil {
-			args := argv(title, body)
-			if exec.Command(args[0], args[1:]...).Run() == nil {
-				return
-			}
-		}
-		fallthrough
-	case "osc":
-		writeTerminal(oscNotification(title, body))
-	case "bell":
-		writeTerminal("\a")
-	}
-}
-
-// nativeNotifier returns a command builder for the platform's notifier.
-func nativeNotifier() func(title, body string) []string {
-	switch runtime.GOOS {
-	case "darwin":
-		if _, err := exec.LookPath("osascript"); err == nil {
-			return func(title, body string) []string {
-				q := func(s string) string { return strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) }
-				return []string{"osascript", "-e", fmt.Sprintf(`display notification "%s" with title "%s"`, q(body), q(title))}
-			}
-		}
-	case "linux", "freebsd", "openbsd", "netbsd":
-		if _, err := exec.LookPath("notify-send"); err == nil {
-			return func(title, body string) []string {
-				return []string{"notify-send", "--app-name=claudewitz", title, body}
-			}
-		}
-	}
-	return nil
+	return oscNotification(title, body)
 }
 
 // oscNotification picks the escape sequence the terminal understands, with
