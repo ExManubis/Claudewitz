@@ -1,11 +1,33 @@
 package tui
 
 import (
+	"bytes"
+	"fmt"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestIcon(t *testing.T) {
+	if svg := iconSVG(themes[0]); strings.Count(svg, "<circle") < 300 {
+		t.Errorf("icon SVG has only %d dots", strings.Count(svg, "<circle"))
+	}
+	for _, size := range []int{256, 32} {
+		img := iconPNG(themes[0], size)
+		if img.Bounds().Dx() != size {
+			t.Fatalf("icon is %dpx, want %d", img.Bounds().Dx(), size)
+		}
+		// Corners are transparent, the middle is painted.
+		if _, _, _, a := img.At(0, 0).RGBA(); a != 0 {
+			t.Errorf("%dpx icon corner isn't transparent", size)
+		}
+		if _, _, _, a := img.At(size/2, size/2).RGBA(); a == 0 {
+			t.Errorf("%dpx icon centre is empty", size)
+		}
+	}
+}
 
 func TestLogoSVG(t *testing.T) {
 	svg := logoSVG(themes[0], true)
@@ -25,9 +47,19 @@ func TestWriteLogo(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for name, dark := range map[string]bool{"logo-dark.svg": true, "logo-light.svg": false} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(logoSVG(themes[0], dark)), 0o644); err != nil {
+	write := func(name string, data []byte) {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	write("logo-dark.svg", []byte(logoSVG(themes[0], true)))
+	write("logo-light.svg", []byte(logoSVG(themes[0], false)))
+	write("icon.svg", []byte(iconSVG(themes[0])))
+	for _, size := range []int{1024, 512, 256, 128, 64, 32, 16} {
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, iconPNG(themes[0], size)); err != nil {
+			t.Fatal(err)
+		}
+		write(fmt.Sprintf("icon-%d.png", size), buf.Bytes())
 	}
 }
