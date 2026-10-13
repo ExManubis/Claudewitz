@@ -44,6 +44,15 @@ type agentState struct {
 	started    time.Time
 	duration   time.Duration
 	recent     []string
+	steps      []*agentStep // the sub-agent's own tool calls, in order
+}
+
+// agentStep is one tool call made inside a sub-agent.
+type agentStep struct {
+	id     string
+	name   string
+	input  json.RawMessage
+	status toolStatus
 }
 
 func (a *agentState) push(line string) {
@@ -257,6 +266,17 @@ func (t *tracker) subagentMessage(parent string, msg claude.Message) {
 		case "tool_use":
 			a.lastTool = b.Name
 			a.push(b.Name + " " + summarizeInput(b.Name, b.Input, 60))
+			a.steps = append(a.steps, &agentStep{id: b.ID, name: b.Name, input: b.Input})
+		case "tool_result":
+			for i := len(a.steps) - 1; i >= 0; i-- {
+				if st := a.steps[i]; st.id == b.ToolUseID {
+					st.status = toolOK
+					if b.IsError {
+						st.status = toolFailed
+					}
+					break
+				}
+			}
 		case "text":
 			if msg.Role == "assistant" {
 				a.push("“" + firstLine(b.Text) + "”")

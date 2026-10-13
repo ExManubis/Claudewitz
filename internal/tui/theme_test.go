@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/styles"
 )
 
@@ -38,5 +41,29 @@ func TestAppearanceOverride(t *testing.T) {
 	setAppearance("bogus")
 	if appearance != "auto" || darkBG != detectedBG {
 		t.Fatal("unknown appearance should fall back to auto")
+	}
+}
+
+// sgr is the 24-bit foreground escape for a hex colour.
+func sgr(hex string) string {
+	var r, g, b int
+	fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b)
+	return fmt.Sprintf("38;2;%d;%d;%d", r, g, b)
+}
+
+func TestMarkdownUsesTheme(t *testing.T) {
+	defer setAppearance("auto")
+	defer applyTheme(themes[0].name)
+	setAppearance("dark")
+	applyTheme("flexoki")
+	c := newChat(&tracker{})
+	out := c.renderEntry(&entry{kind: kindAssistant, text: "## Heading\n\n```go\nfunc main() { return }\n```"}, 80)
+	th := currentTheme()
+	if !strings.Contains(out, sgr(th.accent.Dark)) {
+		t.Errorf("heading should use the accent %s", th.accent.Dark)
+	}
+	kw := styles.Get(th.chroma).Get(chroma.Keyword).Colour.String()
+	if !strings.Contains(out, sgr(kw)) {
+		t.Errorf("code block should use the %s keyword colour %s", th.chroma, kw)
 	}
 }
