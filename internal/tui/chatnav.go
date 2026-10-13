@@ -236,26 +236,16 @@ func (m *Model) ensureSelVisible() {
 	}
 }
 
-// clickChat selects the entry under a left click in the transcript.
-func (m *Model) clickChat(msg tea.MouseMsg) bool {
-	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft || msg.X >= m.mainWidth() {
-		return false
-	}
-	top := 0
-	if m.showHeader() {
-		top = 1
-	}
-	row := msg.Y - top
-	if row < 0 || row >= m.vp.Height || len(m.chat.entries) == 0 {
-		return false
-	}
-	i := m.chat.entryAt(row + m.vp.YOffset)
+// clickEntry selects the entry covering a transcript line; clicking the
+// selected entry again expands it.
+func (m *Model) clickEntry(line int) {
+	i := m.chat.entryAt(line)
 	if i < 0 {
-		return false
+		return
 	}
 	if i == m.chat.sel && m.chatFocus {
-		m.toggleSelected() // second click on the same entry opens it
-		return true
+		m.toggleSelected()
+		return
 	}
 	m.chat.sel = i
 	m.chatFocus = true
@@ -263,5 +253,4 @@ func (m *Model) clickChat(msg tea.MouseMsg) bool {
 	m.input.Blur()
 	m.follow = false
 	m.refresh()
-	return true
 }
