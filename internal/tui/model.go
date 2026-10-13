@@ -731,7 +731,14 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 			m.chat.streaming[e.Index] = m.chat.add(&entry{kind: kindAssistant, text: e.ContentBlock.Text})
 		case "thinking":
 			m.activity = "Thinking"
-			m.chat.streaming[e.Index] = m.chat.add(&entry{kind: kindThinking, text: e.ContentBlock.Thinking})
+			// Joins the transcript with its first text: models that keep
+			// their thinking hidden send none, and the activity line
+			// already says Claude is thinking.
+			th := &entry{kind: kindThinking, text: e.ContentBlock.Thinking}
+			if th.text != "" {
+				m.chat.add(th)
+			}
+			m.chat.streaming[e.Index] = th
 		case "tool_use":
 			m.activity = "Running " + e.ContentBlock.Name
 		}
@@ -744,6 +751,9 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 		case "text_delta":
 			live.setText(live.text + e.Delta.Text)
 		case "thinking_delta":
+			if live.text == "" && e.Delta.Thinking != "" {
+				m.chat.add(live)
+			}
 			live.setText(live.text + e.Delta.Thinking)
 		}
 	}
