@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 )
@@ -49,6 +50,15 @@ func (m *Model) closePalette() {
 	}
 }
 
+// copyToClipboard uses OSC 52, which most modern terminals (and tmux with
+// set-clipboard on) honour, including over SSH.
+func copyToClipboard(s string) tea.Cmd {
+	return func() tea.Msg {
+		termenv.Copy(s)
+		return nil
+	}
+}
+
 // actions lists everything the palette can do in the current state.
 func (m *Model) actions() []action {
 	var a []action
@@ -73,8 +83,7 @@ func (m *Model) actions() []action {
 		if m.sessionID == "" {
 			return nil
 		}
-		m.chat.info("session id: %s", m.sessionID)
-		return tea.SetWindowTitle("claudewitz · " + m.sessionID)
+		return tea.Batch(copyToClipboard(m.sessionID), m.notify(toastSuccess, "Copied session id", m.sessionID))
 	})
 
 	add("Model", "Switch model…", "pick a model and effort level", "ctrl+t", func(m *Model) tea.Cmd {
@@ -87,7 +96,7 @@ func (m *Model) actions() []action {
 		if l == m.opts.Effort {
 			cur = "current"
 		}
-		add("Effort", l, effortDesc[l], cur, func(m *Model) tea.Cmd { m.slash("/effort " + l); return nil })
+		add("Effort", l, effortDesc[l], cur, func(m *Model) tea.Cmd { cmd, _ := m.slash("/effort " + l); return cmd })
 	}
 	if m.initResp != nil && len(m.initResp.Models) > 0 {
 		for _, mi := range m.initResp.Models {
@@ -97,14 +106,14 @@ func (m *Model) actions() []action {
 				cur = "current"
 			}
 			add("Model", mi.DisplayName, firstNonEmpty(mi.Description, mi.Value), cur, func(m *Model) tea.Cmd {
-				m.slash("/model " + mi.Value)
-				return nil
+				cmd, _ := m.slash("/model " + mi.Value)
+				return cmd
 			})
 		}
 	} else {
 		for _, v := range []string{"opus", "sonnet", "haiku"} {
 			v := v
-			add("Model", v, "", "", func(m *Model) tea.Cmd { m.slash("/model " + v); return nil })
+			add("Model", v, "", "", func(m *Model) tea.Cmd { cmd, _ := m.slash("/model " + v); return cmd })
 		}
 	}
 
@@ -115,7 +124,7 @@ func (m *Model) actions() []action {
 		if pm == m.permMode {
 			cur = "current"
 		}
-		add("Mode", pm, modeDesc[pm], cur, func(m *Model) tea.Cmd { m.setPermissionMode(pm); return nil })
+		add("Mode", pm, modeDesc[pm], cur, func(m *Model) tea.Cmd { return m.setPermissionMode(pm) })
 	}
 
 	for _, t := range themeNames() {
@@ -124,7 +133,7 @@ func (m *Model) actions() []action {
 		if t == currentTheme().name {
 			cur = "current"
 		}
-		add("Theme", t, "", cur, func(m *Model) tea.Cmd { m.slash("/theme " + t); return nil })
+		add("Theme", t, "", cur, func(m *Model) tea.Cmd { cmd, _ := m.slash("/theme " + t); return cmd })
 	}
 
 	add("View", "Toggle sidebar", "", "ctrl+b", func(m *Model) tea.Cmd {

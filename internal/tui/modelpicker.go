@@ -123,14 +123,14 @@ func (m *Model) handleModelPickerKey(k tea.KeyMsg) tea.Cmd {
 			eff = p.curEff
 		}
 		m.closeModelPicker()
-		m.applyModel(mi, eff)
+		return m.applyModel(mi, eff)
 	}
 	return nil
 }
 
 // applyModel switches model and effort in the running session and keeps
 // them for restarts.
-func (m *Model) applyModel(mi claude.ModelInfo, effort string) {
+func (m *Model) applyModel(mi claude.ModelInfo, effort string) tea.Cmd {
 	var changes []string
 	if mi.Value != m.modelValue() {
 		if m.proc != nil {
@@ -141,19 +141,20 @@ func (m *Model) applyModel(mi claude.ModelInfo, effort string) {
 			m.opts.Model = ""
 		}
 		m.model = firstNonEmpty(mi.ResolvedModel, mi.Value)
-		changes = append(changes, "model → "+firstNonEmpty(mi.DisplayName, mi.Value))
+		changes = append(changes, firstNonEmpty(mi.DisplayName, mi.Value))
 	}
 	if effort != m.opts.Effort && effort != "" {
 		if m.proc != nil {
 			_ = m.proc.SetEffort(effort)
 		}
 		m.opts.Effort = effort
-		changes = append(changes, "effort → "+effort)
+		changes = append(changes, effort+" effort")
 	}
-	if len(changes) > 0 {
-		m.chat.info("%s", strings.Join(changes, " · "))
-		m.refresh()
+	if len(changes) == 0 {
+		return nil
 	}
+	m.refresh()
+	return m.notify(toastSuccess, strings.Join(changes, " · "), "")
 }
 
 // effortMeter draws rising bars for a level, lit up to the chosen one.

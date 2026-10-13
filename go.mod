@@ -11,6 +11,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.8.0
 	github.com/lucasb-eyer/go-colorful v1.2.0
+	github.com/muesli/termenv v0.16.0
 )
 
 require (
@@ -30,7 +31,6 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
-	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark v1.7.8 // indirect

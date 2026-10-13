@@ -70,6 +70,10 @@ go run . -- --add-dir ../lib  # anything after -- goes straight to claude
 - Effort level per model (low → max) with a meter; applied to the running session, and kept
   for `/new` and resumes. Also `/effort <level>` and `-effort` on the command line
 
+**Toasts**: notifications slide in at the top right and fade out, for model, effort, mode and
+theme changes, resumed and new sessions, background agents finishing, long turns finishing,
+rate limits, usage crossing 80% and 90% of the 5-hour or weekly window, and Claude Code exiting
+
 **Themes**: `claude` (default), `charm`, `mono`, via `-theme` or `/theme`, each with light and
 dark variants.
 

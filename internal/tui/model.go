@@ -33,25 +33,30 @@ type Model struct {
 	picker    *picker
 	palette   *palette
 	modelPick *modelPicker
-	showHelp  bool
-	files     []string
-	vp        viewport.Model
-	input     textarea.Model
-	spin      spinner.Model
-	width     int
-	height    int
-	ready     bool
-	follow    bool // keep viewport pinned to bottom
-	busy      bool
-	stopped   bool // user interrupted the current turn
-	sidebarOn bool
-	status    string
-	activity  string // what the live turn is doing, for the shimmer label
-	turnFrom  time.Time
-	ticks     int
-	animFrame int
-	animID    int // generation of the running shimmer tick loop
-	animating bool
+
+	toasts       []toast
+	toastID      int
+	toastTicking bool
+	limitWarned  map[string]int // usage window -> highest % already warned about
+	showHelp     bool
+	files        []string
+	vp           viewport.Model
+	input        textarea.Model
+	spin         spinner.Model
+	width        int
+	height       int
+	ready        bool
+	follow       bool // keep viewport pinned to bottom
+	busy         bool
+	stopped      bool // user interrupted the current turn
+	sidebarOn    bool
+	status       string
+	activity     string // what the live turn is doing, for the shimmer label
+	turnFrom     time.Time
+	ticks        int
+	animFrame    int
+	animID       int // generation of the running shimmer tick loop
+	animating    bool
 
 	// session state
 	init         *claude.InitEvent
@@ -112,6 +117,7 @@ func New(ctx context.Context, opts claude.Options, themeName string) Model {
 		permMode:    pm,
 		model:       opts.Model,
 		limits:      map[string]claude.RateLimitWindow{},
+		limitWarned: map[string]int{},
 		alwaysAllow: map[string]bool{},
 	}
 }
@@ -231,6 +237,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 		}
 
+	case toastTickMsg:
+		if msg.id != m.toastID {
+			return m, nil
+		}
+		if m.pruneToasts(time.Now()) {
+			return m, toastTick(m.toastID)
+		}
+		m.toastTicking = false
+		return m, nil
+
 	case animTickMsg:
 		if msg.id != m.animID {
 			return m, nil
@@ -310,13 +326,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "shift+tab":
-			m.cyclePermissionMode()
-			return m, nil
+			return m, m.cyclePermissionMode()
 		case "ctrl+o":
 			m.chat.expanded = !m.chat.expanded
 			m.chat.markAllDirty()
 			m.refresh()
-			return m, nil
+			if m.chat.expanded {
+				return m, m.notify(toastInfo, "Tool output expanded", "ctrl+o to collapse")
+			}
+			return m, m.notify(toastInfo, "Tool output collapsed", "")
 		case "ctrl+b":
 			m.sidebarOn = !m.sidebarOn
 			m.layout()
@@ -428,8 +446,15 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 		}
 
 	case ev.Task != nil:
+		before := m.agentStatus(ev.Task.ToolUseID, ev.Task.TaskID)
 		m.track.task(ev.Task)
 		m.chat.markAgentsDirty()
+		if a := m.agentFor(ev.Task.ToolUseID, ev.Task.TaskID); a != nil && a.background && before == "running" && !a.running() {
+			if a.status == "completed" {
+				return m.notify(toastSuccess, a.kind+" agent finished", a.desc)
+			}
+			return m.notify(toastError, a.kind+" agent "+a.status, a.desc)
+		}
 
 	case ev.Result != nil:
 		r := ev.Result
@@ -451,17 +476,26 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 		if r.IsError && r.Subtype != "success" {
 			m.chat.error("turn ended: %s %s", r.Subtype, r.Result)
 		}
-		m.chat.info("%s · %d turns · %s",
-			(time.Duration(r.DurationMS) * time.Millisecond).Round(100*time.Millisecond),
-			r.NumTurns, formatTokens(r.Usage))
+		dur := (time.Duration(r.DurationMS) * time.Millisecond).Round(100 * time.Millisecond)
+		m.chat.info("%s · %d turns · %s", dur, r.NumTurns, formatTokens(r.Usage))
+		if r.IsError && r.Subtype != "success" {
+			return m.notify(toastError, "Turn ended with an error", r.Subtype)
+		}
+		if dur >= 30*time.Second {
+			return m.notify(toastSuccess, "Claude finished", fmt.Sprintf("took %s · %d turns", shortSecs(dur), r.NumTurns))
+		}
 
 	case ev.RateLimit != nil:
 		for k, w := range ev.RateLimit.Info.Windows {
 			m.limits[k] = w
 		}
 		if ev.RateLimit.Info.Status != "allowed" && ev.RateLimit.Info.Status != "" {
-			m.chat.error("rate limit: %s (resets %s)", ev.RateLimit.Info.Status,
-				time.Unix(ev.RateLimit.Info.ResetsAt, 0).Format("15:04"))
+			reset := time.Unix(ev.RateLimit.Info.ResetsAt, 0).Format("15:04")
+			m.chat.error("rate limit: %s (resets %s)", ev.RateLimit.Info.Status, reset)
+			return m.notify(toastError, "Rate limited", fmt.Sprintf("%s · resets at %s", ev.RateLimit.Info.Status, reset))
+		}
+		if cmd := m.usageWarnings(); cmd != nil {
+			return cmd
 		}
 
 	case ev.Permission != nil:
@@ -479,6 +513,7 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 		m.proc = nil
 		if ev.Err != nil {
 			m.chat.error("claude exited: %v", ev.Err)
+			return m.notify(toastError, "Claude Code exited", "/new to start a fresh session")
 		} else {
 			m.chat.info("claude exited — /new to start again")
 		}
@@ -713,24 +748,84 @@ func (m *Model) resume(s sessions.Info) tea.Cmd {
 		m.replay(transcriptMsg{info: s, msgs: msgs})
 	}
 	m.refresh()
-	return tea.Batch(cmd, indexFiles(m.opts.CWD))
+	return tea.Batch(cmd, indexFiles(m.opts.CWD), m.notify(toastSuccess, "Session resumed", s.Label()))
 }
 
-func (m *Model) cyclePermissionMode() {
+func (m *Model) cyclePermissionMode() tea.Cmd {
 	next := permissionModes[0]
 	for i, pm := range permissionModes {
 		if pm == m.permMode {
 			next = permissionModes[(i+1)%len(permissionModes)]
 		}
 	}
-	m.setPermissionMode(next)
+	return m.setPermissionMode(next)
 }
 
-func (m *Model) setPermissionMode(mode string) {
+var modeToast = map[string][2]string{
+	"default":           {"Default mode", "Claude asks before edits and commands"},
+	"acceptEdits":       {"Accept edits", "File edits are approved automatically"},
+	"plan":              {"Plan mode", "Claude plans without changing anything"},
+	"bypassPermissions": {"Bypassing permissions", "Nothing will ask for approval"},
+}
+
+func (m *Model) setPermissionMode(mode string) tea.Cmd {
 	m.permMode = mode
 	if m.proc != nil {
 		_ = m.proc.SetPermissionMode(mode)
 	}
+	t, ok := modeToast[mode]
+	if !ok {
+		t = [2]string{"Permission mode: " + mode, ""}
+	}
+	kind := toastInfo
+	if mode == "bypassPermissions" {
+		kind = toastWarn
+	}
+	return m.notify(kind, t[0], t[1])
+}
+
+// usageWarnings toasts once when a subscription window crosses 80% and 90%.
+func (m *Model) usageWarnings() tea.Cmd {
+	names := map[string]string{"five_hour": "5-hour", "seven_day": "Weekly"}
+	for key, label := range names {
+		w, ok := m.limits[key]
+		if !ok {
+			continue
+		}
+		pct := int(w.Utilization * 100)
+		for _, th := range []int{90, 80} {
+			if pct >= th && m.limitWarned[key] < th {
+				m.limitWarned[key] = th
+				body := fmt.Sprintf("%d%% used", pct)
+				if w.ResetsAt > 0 {
+					body += " · resets in " + shortDur(time.Until(time.Unix(w.ResetsAt, 0)).Round(time.Minute))
+				}
+				kind := toastWarn
+				if th == 90 {
+					kind = toastError
+				}
+				return m.notify(kind, label+" usage above "+fmt.Sprint(th)+"%", body)
+			}
+		}
+	}
+	return nil
+}
+
+func (m *Model) agentFor(toolUseID, taskID string) *agentState {
+	if a := m.track.agentIdx[toolUseID]; a != nil {
+		return a
+	}
+	return m.track.taskIdx[taskID]
+}
+
+func (m *Model) agentStatus(toolUseID, taskID string) string {
+	if a := m.agentFor(toolUseID, taskID); a != nil {
+		if a.running() {
+			return "running"
+		}
+		return a.status
+	}
+	return ""
 }
 
 func (m *Model) submit(text string) tea.Cmd {
@@ -789,7 +884,7 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 	case "/quit", "/exit":
 		return m.quit(), true
 	case "/new", "/clear":
-		return m.restart(claude.Options{}), true
+		return tea.Batch(m.restart(claude.Options{}), m.notify(toastInfo, "New session", prettyPath(m.opts.CWD))), true
 	case "/resume", "/sessions":
 		if arg == "" {
 			return m.openPicker(), true
@@ -806,7 +901,7 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 				mi = x
 			}
 		}
-		m.applyModel(mi, m.opts.Effort)
+		return m.applyModel(mi, m.opts.Effort), true
 	case "/effort":
 		if arg == "" {
 			m.chat.info("effort: %s (levels: %s)", firstNonEmpty(m.opts.Effort, "default"), strings.Join(defaultEffortLevels, ", "))
@@ -817,30 +912,28 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 			valid = valid || l == arg
 		}
 		if !valid {
-			m.chat.error("unknown effort %q (levels: %s)", arg, strings.Join(defaultEffortLevels, ", "))
-			return nil, true
+			return m.notify(toastError, "Unknown effort "+arg, strings.Join(defaultEffortLevels, ", ")), true
 		}
-		m.applyModel(claude.ModelInfo{Value: m.modelValue()}, arg)
+		return m.applyModel(claude.ModelInfo{Value: m.modelValue()}, arg), true
 	case "/mode":
 		if arg == "" {
 			m.chat.info("permission mode: %s (modes: %s)", m.permMode, strings.Join(permissionModes, ", "))
 			return nil, true
 		}
-		m.setPermissionMode(arg)
-		m.chat.info("permission mode → %s", arg)
+		return m.setPermissionMode(arg), true
 	case "/theme":
 		if arg == "" {
 			m.chat.info("theme: %s (themes: %s)", currentTheme().name, strings.Join(themeNames(), ", "))
 			return nil, true
 		}
 		if !applyTheme(arg) {
-			m.chat.error("unknown theme %q", arg)
-			return nil, true
+			return m.notify(toastError, "Unknown theme "+arg, strings.Join(themeNames(), ", ")), true
 		}
 		m.spin.Style = lipgloss.NewStyle().Foreground(currentTheme().accent)
 		m.input.FocusedStyle.Placeholder = mutedStyle
 		m.input.BlurredStyle.Placeholder = mutedStyle
 		m.chat.markAllDirty()
+		return m.notify(toastSuccess, "Theme: "+arg, ""), true
 	case "/sidebar":
 		m.sidebarOn = !m.sidebarOn
 		m.layout()
@@ -946,6 +1039,8 @@ func (m Model) View() string {
 		main = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(m.mainWidth()).Render(main), m.sidebarView(m.height-1))
 	}
 	screen := lipgloss.JoinVertical(lipgloss.Left, main, m.statusView())
+
+	screen = m.drawToasts(screen)
 
 	// Floating dialogs.
 	h := m.height - 1
