@@ -32,15 +32,40 @@ skills, hooks, `CLAUDE.md` and session history.
 - Go 1.24+
 - Claude Code CLI on your `PATH`, logged in (`npm i -g @anthropic-ai/claude-code`, then run `claude` once)
 
+## Install
+
+```sh
+go install github.com/exmanubis/claudewitz@latest
+```
+
+Or from a clone: `make install` (and `make uninstall`). Either way the `claudewitz` command lands
+in Go's bin folder, `~/go/bin` unless you've set `GOBIN`. If that folder isn't on your `PATH` yet
+(`make install` tells you), add it to your shell profile (`~/.zshrc`, `~/.bashrc`):
+
+```sh
+export PATH="$HOME/go/bin:$PATH"
+```
+
+Run `go install …@latest` again to update.
+
 ## Run
 
 ```sh
-go run .                      # in the project you want to work on
-go run . -model opus -effort high -mode acceptEdits
-go run . -continue            # pick up the latest session in this directory
-go run . -resume <session-id>
-go run . -- --add-dir ../lib  # anything after -- goes straight to claude
+claudewitz                      # in the project you want to work on
+claudewitz -model opus -effort high -mode acceptEdits
+claudewitz -continue            # pick up the latest session in this directory
+claudewitz -resume <session-id>
+claudewitz -- --add-dir ../lib  # anything after -- goes straight to claude
 ```
+
+From a clone without installing, `go run .` takes the same flags.
+
+## Configuration
+
+Settings live in `~/.config/claudewitz/config.json` on every platform (`$XDG_CONFIG_HOME/claudewitz/`
+if that's set, or `$CLAUDEWITZ_CONFIG` to point at a file of your own), with prompt history in
+`history.jsonl` beside it. Older versions kept these in `~/Library/Application Support/claudewitz/`
+on macOS; they're moved over automatically the first time you start a new version.
 
 ## Features
 
@@ -132,8 +157,7 @@ commits (including ones made outside claudewitz), and Claude Code exiting
   each with light and dark variants and matching syntax highlighting
 - The picker previews each theme live across the whole UI as you move through it; enter saves,
   esc puts everything back. ←→ forces the dark or light variant when detection gets it wrong
-- Saved to `~/.config/claudewitz/config.json` (macOS: `~/Library/Application Support/claudewitz/`,
-  or `$CLAUDEWITZ_CONFIG`); `-theme name` overrides it for one run
+- Saved to `~/.config/claudewitz/config.json`; `-theme name` overrides it for one run
 
 ## How it talks to Claude Code
 
