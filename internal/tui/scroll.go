@@ -16,9 +16,9 @@ func (m Model) chatWidth() int { return max(10, m.mainWidth()-1) }
 // chatTop is the screen row where the transcript starts.
 func (m Model) chatTop() int {
 	if m.showHeader() {
-		return 1
+		return 2
 	}
-	return 0
+	return 1
 }
 
 // scrollbar renders the bar column for the viewport: a thumb sized to the

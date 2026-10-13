@@ -106,21 +106,22 @@ func TestHighlightKeepsWidth(t *testing.T) {
 
 func TestDragSelectCopiesAndClickSelects(t *testing.T) {
 	m := longChat(t)
-	m.handleMouse(mouse(tea.MouseActionPress, 2, 1))
-	m.handleMouse(mouse(tea.MouseActionMotion, 20, 3))
+	top := m.chatTop()
+	m.handleMouse(mouse(tea.MouseActionPress, 2, top))
+	m.handleMouse(mouse(tea.MouseActionMotion, 20, top+2))
 	if m.textSel == nil || !m.textSel.active {
 		t.Fatal("dragging should start a selection")
 	}
 	want := m.selectedText()
-	cmd := m.handleMouse(mouse(tea.MouseActionRelease, 20, 3))
+	cmd := m.handleMouse(mouse(tea.MouseActionRelease, 20, top+2))
 	if cmd == nil || want == "" || len(m.toasts) == 0 || !strings.HasPrefix(m.toasts[len(m.toasts)-1].title, "Copied") {
 		t.Fatalf("release should copy %q and toast: %+v", want, m.toasts)
 	}
 
 	// A press and release without movement selects the entry instead.
 	m.textSel = nil
-	m.handleMouse(mouse(tea.MouseActionPress, 5, 2))
-	m.handleMouse(mouse(tea.MouseActionRelease, 5, 2))
+	m.handleMouse(mouse(tea.MouseActionPress, 5, top+1))
+	m.handleMouse(mouse(tea.MouseActionRelease, 5, top+1))
 	if !m.chatFocus || m.textSel != nil {
 		t.Fatalf("click should focus the transcript and select an entry: focus=%v", m.chatFocus)
 	}
