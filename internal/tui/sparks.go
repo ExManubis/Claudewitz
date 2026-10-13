@@ -356,15 +356,88 @@ func beanColor(th theme, m int8) ac {
 	return th.accent
 }
 
+const beanShades = 6
+
+type beanStyleSet [matCount][beanShades]lipgloss.Style
+
+// beanStyles builds a shade ramp per material, from the subtle colour up to
+// the material's own; tweak may adjust a material's colour first.
+func beanStyles(th theme, tweak func(m int8, c ac) ac) *beanStyleSet {
+	var st beanStyleSet
+	for m := int8(0); m < matCount; m++ {
+		c := beanColor(th, m)
+		if tweak != nil {
+			c = tweak(m, c)
+		}
+		for i, rc := range gradient(beanShades, th.subtle, c, c) {
+			st[m][i] = lipgloss.NewStyle().Foreground(rc)
+		}
+	}
+	return &st
+}
+
+// drawBean renders a frame as Braille: dithered dots, each cell coloured
+// by its dominant material and shaded by how lit it is.
+func drawBean(fr *beanFrame, w, cols, rows int, st *beanStyleSet) string {
+	var b strings.Builder
+	for row := 0; row < rows; row++ {
+		if row > 0 {
+			b.WriteByte('\n')
+		}
+		for col := 0; col < cols; col++ {
+			var bits rune
+			var weight [matCount]float64
+			lit, n := 0.0, 0
+			for dy := 0; dy < 4; dy++ {
+				for dx := 0; dx < 2; dx++ {
+					x, y := col*2+dx, row*4+dy
+					m := fr.mat[y*w+x]
+					if m < 0 {
+						continue
+					}
+					lit += float64(fr.inten[y*w+x])
+					n++
+					if m == matEye || m == matPink || m == matGold {
+						weight[m] += 3
+					} else {
+						weight[m]++
+					}
+					if dotOn(fr, w, x, y) {
+						bits |= brailleBits[dy][dx]
+					}
+				}
+			}
+			if bits == 0 {
+				b.WriteByte(' ')
+				continue
+			}
+			k := 0.35 + 0.65*lit/float64(n) // dithering already carries the shading
+			b.WriteString(st[dominant(weight)][shadeIndex(k)].Render(string(0x2800 + bits)))
+		}
+	}
+	return b.String()
+}
+
+func dominant(weight [matCount]float64) int8 {
+	best := int8(0)
+	for m := int8(1); m < matCount; m++ {
+		if weight[m] > weight[best] {
+			best = m
+		}
+	}
+	return best
+}
+
+func shadeIndex(k float64) int {
+	return max(0, min(beanShades-1, int(math.Round(k*(beanShades-1)))))
+}
+
 // view renders the field: the bean's dithered frame while resting, the
 // sparks and their trails otherwise. Waiting pulses the headphones in the
 // warning colour; the done flash brightens everything for a moment.
 func (f *sparkField) view() string {
 	th := currentTheme()
-	const shades = 6
-	var styles [matCount][shades]lipgloss.Style
-	for m := int8(0); m < matCount; m++ {
-		c := beanColor(th, m)
+	st := beanStyles(th, func(m int8, c ac) ac {
 		if m == matPhone && f.mode == sparkWaiting {
 			k := 0.5 + 0.5*math.Sin(f.t*5)
 			hx := resolve(th.second).BlendLab(resolve(th.warn), k).Clamped().Hex()
@@ -374,15 +447,10 @@ func (f *sparkField) view() string {
 			hx := resolve(c).BlendLab(resolve(th.text), f.flash/0.6*0.7).Clamped().Hex()
 			c = ac{Light: hx, Dark: hx}
 		}
-		ramp := gradient(shades, th.subtle, c, c)
-		for i, rc := range ramp {
-			styles[m][i] = lipgloss.NewStyle().Foreground(rc)
-		}
-	}
-	resting := f.mode == sparkIdle || f.mode == sparkWaiting
-	var fr *beanFrame
-	if resting {
-		fr = f.display()
+		return c
+	})
+	if f.mode == sparkIdle || f.mode == sparkWaiting {
+		return drawBean(f.display(), f.w, f.cols, f.rows, st)
 	}
 
 	var b strings.Builder
@@ -393,31 +461,14 @@ func (f *sparkField) view() string {
 		for col := 0; col < f.cols; col++ {
 			var bits rune
 			var weight [matCount]float64
-			lit, n := 0.0, 0
+			peak := 0.0
 			for dy := 0; dy < 4; dy++ {
 				for dx := 0; dx < 2; dx++ {
-					x, y := col*2+dx, row*4+dy
-					i := y*f.w + x
-					if resting {
-						m := fr.mat[i]
-						if m < 0 {
-							continue
-						}
-						lit += float64(fr.inten[i])
-						n++
-						if m == matEye || m == matPink || m == matGold {
-							weight[m] += 3
-						} else {
-							weight[m]++
-						}
-						if dotOn(fr, f.w, x, y) {
-							bits |= brailleBits[dy][dx]
-						}
-					} else if g := f.glow[i]; g > 0.18 {
+					i := (row*4+dy)*f.w + col*2 + dx
+					if g := f.glow[i]; g > 0.18 {
 						bits |= brailleBits[dy][dx]
 						weight[f.glowMat[i]] += g
-						lit = math.Max(lit, g)
-						n = 1
+						peak = math.Max(peak, g)
 					}
 				}
 			}
@@ -425,18 +476,7 @@ func (f *sparkField) view() string {
 				b.WriteByte(' ')
 				continue
 			}
-			best := int8(0)
-			for m := int8(1); m < matCount; m++ {
-				if weight[m] > weight[best] {
-					best = m
-				}
-			}
-			k := lit / float64(n)
-			if resting {
-				k = 0.35 + 0.65*k // dithering already carries the shading
-			}
-			shade := int(math.Round(k * (shades - 1)))
-			b.WriteString(styles[best][max(0, min(shades-1, shade))].Render(string(0x2800 + bits)))
+			b.WriteString(st[dominant(weight)][shadeIndex(peak)].Render(string(0x2800 + bits)))
 		}
 	}
 	return b.String()

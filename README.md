@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img alt="claudewitz: a headphone bean beside the CLAUDEWITZ wordmark" src="assets/logo-light.svg" width="640">
+  </picture>
+</p>
+
 # claudewitz
 
 A [Crush](https://github.com/charmbracelet/crush)-style terminal UI for **Claude Code**.
