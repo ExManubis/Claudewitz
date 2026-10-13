@@ -116,6 +116,7 @@ const inputPlaceholder = "Ask Claude anything…  / for commands · @ to mention
 // one-off theme (the -theme flag) set cfg.Theme without saving it.
 func New(ctx context.Context, opts claude.Options, cfg config.Config) Model {
 	setAppearance(cfg.Appearance)
+	applyIcons(cfg.Icons)
 	if !applyTheme(cfg.Theme) {
 		applyTheme(themes[0].name)
 	}
@@ -1246,6 +1247,8 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		return m.attachPaths([]string{strings.Trim(arg, `"'`)}), true
 	case "/notifications":
 		return m.setNotifications(arg), true
+	case "/icons":
+		return m.setIcons(arg), true
 	case "/sidebar":
 		m.sidebarOn = !m.sidebarOn
 		m.layout()
@@ -1524,11 +1527,11 @@ func (m Model) statusView() string {
 	mode := mutedStyle.Render("● default")
 	switch m.permMode {
 	case "acceptEdits":
-		mode = okStyle.Render("⏵⏵ accept edits")
+		mode = okStyle.Render(icons.modeEdits + " accept edits")
 	case "plan":
-		mode = warnStyle.Render("⏸ plan mode")
+		mode = warnStyle.Render(icons.modePlan + " plan mode")
 	case "bypassPermissions":
-		mode = errStyle.Render("⚠ bypass permissions")
+		mode = errStyle.Render(icons.modeBypass + " bypass permissions")
 	}
 	parts = append(parts, mode+mutedStyle.Render(" ⇧⇥"))
 	if !m.showSidebar() {
@@ -1569,7 +1572,7 @@ func usageGauge(label string, w claude.RateLimitWindow) string {
 	reset := ""
 	if w.ResetsAt > 0 {
 		if d := time.Until(time.Unix(w.ResetsAt, 0)).Round(time.Minute); d > 0 {
-			reset = mutedStyle.Render(" ↻" + shortDur(d))
+			reset = mutedStyle.Render(" " + icons.reset + shortDur(d))
 		}
 	}
 	return fmt.Sprintf("%s %s%s", label, st.Render(fmt.Sprintf("%d%%", pct)), reset)
@@ -1640,6 +1643,7 @@ const helpText = `commands
   /edit               write the prompt in $EDITOR (ctrl+x)
   /image <path>       attach an image (ctrl+f; ctrl+v pastes one; or drag a file in)
   /notifications [m]  desktop notifications: auto, osc, bell, off
+  /icons [set]        icon set: nerd (Nerd Font) or unicode
   /session            show session id and cwd
   /quit               exit
   other /commands are passed through to Claude Code

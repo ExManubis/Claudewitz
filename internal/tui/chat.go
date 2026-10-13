@@ -215,7 +215,7 @@ func (c *chat) renderEntry(e *entry, width int) string {
 		if len(e.images) > 0 {
 			var chips []string
 			for _, name := range e.images {
-				chips = append(chips, lipgloss.NewStyle().Foreground(currentTheme().user).Render("▣ ")+mutedStyle.Render(name))
+				chips = append(chips, lipgloss.NewStyle().Foreground(currentTheme().user).Render(icons.image+" ")+mutedStyle.Render(name))
 			}
 			if strings.TrimSpace(e.text) == "" {
 				body = strings.Join(chips, "  ")

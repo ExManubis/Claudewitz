@@ -86,11 +86,11 @@ func (k toastKind) style() (icon string, col lipgloss.AdaptiveColor) {
 	th := currentTheme()
 	switch k {
 	case toastSuccess:
-		return "✓", th.ok
+		return icons.toastSuccess, th.ok
 	case toastWarn:
-		return "▲", th.warn
+		return icons.toastWarn, th.warn
 	case toastError:
-		return "✗", th.err
+		return icons.toastError, th.err
 	}
 	return "✻", th.accent
 }
