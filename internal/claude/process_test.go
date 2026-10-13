@@ -1,6 +1,9 @@
 package claude
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Lines captured from claude 2.1.x in stream-json mode.
 func TestParseLine(t *testing.T) {
@@ -35,5 +38,24 @@ func TestParseLine(t *testing.T) {
 	}
 	if _, ok := parseLine([]byte(`{"type":"active_goal","value":null}`)); ok {
 		t.Error("unknown event types should be ignored")
+	}
+}
+
+func TestParseStatusPermissionMode(t *testing.T) {
+	ev, ok := parseLine([]byte(`{"type":"system","subtype":"status","status":null,"permissionMode":"acceptEdits"}`))
+	if !ok || ev.PermissionMode != "acceptEdits" || ev.Status != "" {
+		t.Fatalf("got %+v", ev)
+	}
+}
+
+func TestAnswerQuestions(t *testing.T) {
+	in := []byte(`{"questions":[{"question":"Colour?","header":"Colour","multiSelect":false,"options":[{"label":"Red"},{"label":"Blue"}]}]}`)
+	qs, err := ParseQuestions(in)
+	if err != nil || len(qs) != 1 || qs[0].Options[1].Label != "Blue" {
+		t.Fatalf("parse: %+v %v", qs, err)
+	}
+	out, err := AnswerQuestions(in, map[string]string{"Colour?": "Blue"})
+	if err != nil || !strings.Contains(string(out), `"answers":{"Colour?":"Blue"}`) || !strings.Contains(string(out), `"questions"`) {
+		t.Fatalf("answer: %s %v", out, err)
 	}
 }

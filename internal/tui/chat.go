@@ -40,6 +40,9 @@ type entry struct {
 	toolInput  json.RawMessage
 	toolStatus toolStatus
 	toolOutput string
+	answers    [][2]string // AskUserQuestion: header → answer, as sent
+	feedback   string      // ExitPlanMode: why the plan was sent back
+	planText   string      // ExitPlanMode: plan as read from its file
 
 	// render cache
 	rendered string
@@ -189,7 +192,14 @@ func (c *chat) renderTool(e *entry, width int) string {
 	if fp := filePathOf(e.toolInput); fp != "" {
 		summary = truncateLeft(relPath(fp, c.cwd), max(10, width-lipgloss.Width(name)-8))
 	}
-	head := "  " + icon + " " + nameStyle.Render(name) + " " + mutedStyle.Render(summary)
+	label := name
+	switch name {
+	case toolAskUser:
+		label, nameStyle = "Question", agentStyle
+	case toolExitPlan:
+		label = "Plan"
+	}
+	head := "  " + icon + " " + nameStyle.Render(label) + " " + mutedStyle.Render(summary)
 	body := c.toolBody(e, width-6)
 	if body == "" {
 		return head
@@ -207,6 +217,12 @@ func (c *chat) toolBody(e *entry, width int) string {
 	}
 	if isAgentTool(e.toolName) {
 		return c.agentBody(e, width)
+	}
+	switch e.toolName {
+	case toolAskUser:
+		return c.questionBody(e, width)
+	case toolExitPlan:
+		return c.planBody(e, width)
 	}
 	if e.toolStatus == toolFailed {
 		return errStyle.Render("⎿ " + clipText(e.toolOutput, width, 6))
@@ -326,6 +342,52 @@ func agentReport(s string) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
+func (c *chat) questionBody(e *entry, width int) string {
+	switch {
+	case len(e.answers) > 0:
+		var lines []string
+		for _, a := range e.answers {
+			lines = append(lines, mutedStyle.Render("⎿ ")+textStyle.Render(truncate(a[0], width/2))+mutedStyle.Render(" → ")+okStyle.Render(truncate(a[1], width/2)))
+		}
+		return strings.Join(lines, "\n")
+	case e.toolStatus == toolPending:
+		return mutedStyle.Render("⎿ waiting for your answer")
+	case e.toolStatus == toolFailed:
+		return mutedStyle.Render("⎿ declined")
+	}
+	// Replayed history: only Claude Code's summary of the answers survives.
+	return mutedStyle.Render("⎿ " + clipText(e.toolOutput, width-2, 4))
+}
+
+func (c *chat) planBody(e *entry, width int) string {
+	var in struct {
+		Plan string `json:"plan"`
+	}
+	_ = json.Unmarshal(e.toolInput, &in)
+	plan := firstNonEmpty(e.planText, in.Plan)
+	body := plan
+	if r := c.renderer(width - 4); r != nil {
+		if out, err := r.Render(plan); err == nil {
+			body = strings.Trim(out, "\n")
+		}
+	}
+	// Keep a pending plan whole; collapse settled ones unless expanded.
+	if lines := strings.Split(body, "\n"); e.toolStatus != toolPending && !c.expanded && len(lines) > 12 {
+		body = strings.Join(lines[:12], "\n") + "\n" + mutedStyle.Render(fmt.Sprintf("  … %d more lines (ctrl+o to expand)", len(lines)-12))
+	}
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(currentTheme().accent).Width(width - 2).Render(body)
+	var status string
+	switch {
+	case e.toolStatus == toolPending:
+		status = warnStyle.Render("⎿ waiting for your review")
+	case e.feedback != "" || e.toolStatus == toolFailed:
+		status = mutedStyle.Render("⎿ sent back: ") + textStyle.Render(truncate(firstNonEmpty(e.feedback, firstLine(e.toolOutput)), width-14))
+	default:
+		status = okStyle.Render("⎿ approved")
+	}
+	return box + "\n" + status
+}
+
 func clipText(s string, width, maxLines int) string {
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	more := 0
@@ -392,6 +454,19 @@ func summarizeInput(tool string, raw json.RawMessage, max int) string {
 		s = firstNonEmpty(str(m, "subject"), str(m, "status"))
 	case "Skill":
 		s = str(m, "skill")
+	case toolAskUser:
+		var qs []map[string]any
+		if raw, err := json.Marshal(m["questions"]); err == nil {
+			_ = json.Unmarshal(raw, &qs)
+		}
+		if len(qs) > 0 {
+			s = str(qs[0], "question")
+			if len(qs) > 1 {
+				s += fmt.Sprintf(" (+%d more)", len(qs)-1)
+			}
+		}
+	case toolExitPlan:
+		s = "plan ready for review"
 	default:
 		keys := make([]string, 0, len(m))
 		for k := range m {

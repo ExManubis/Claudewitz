@@ -67,6 +67,14 @@ go run . -- --add-dir ../lib  # anything after -- goes straight to claude
 - Edit/Write requests preview the diff; sub-agent requests name the agent asking
 - Permission modes: `shift+tab` cycles default → accept edits → plan
 
+**Questions and plan approval**
+- When Claude asks questions (`AskUserQuestion`), a dialog shows each question with its options:
+  single or multiple choice, number keys to pick, "Other…" for a free-text answer, tabs and a
+  review step for several questions. Answers go back to Claude and show in the transcript
+- When Claude finishes a plan in plan mode (`ExitPlanMode`), the plan renders as Markdown in the
+  chat and you choose: approve and auto-accept edits, approve and review each edit, or keep
+  planning. Feedback is sent as a normal message from you, so Claude treats it as your request
+
 **Model picker** (`ctrl+t`, `/model`, or the palette)
 - Every model the CLI offers, with descriptions and the resolved model id
 - Effort level per model (low → max) with a meter; applied to the running session, and kept
@@ -91,6 +99,8 @@ commits (including ones made outside claudewitz), and Claude Code exiting
   `--forward-subagent-text`
 - Sends an `initialize` control request on startup to get commands, models and account info
 - Switches model with `set_model` and effort with `apply_flag_settings` (`effortLevel`), mid-session
+- Answers `AskUserQuestion` by allowing it with `updatedInput.answers`; approves plans with a
+  `setMode` permission update for accept-edits, and follows the CLI's own mode changes
 - Renders `stream_event` deltas live and takes tool calls and results from complete messages
 - Follows sub-agents through `task_started` / `task_progress` / `task_updated` /
   `task_notification` events and messages tagged with `parent_tool_use_id`

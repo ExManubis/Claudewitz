@@ -81,6 +81,8 @@ type Model struct {
 	// permissions
 	pending     []*claude.PermissionRequest
 	alwaysAllow map[string]bool
+	question    *questionState // AskUserQuestion at the head of pending
+	plan        *planState     // ExitPlanMode at the head of pending
 }
 
 // New builds the model; the CLI is started from Init.
@@ -448,7 +450,13 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 	case ev.ContextWindow > 0:
 		m.ctxWindow = ev.ContextWindow
 
-	case ev.Status != "":
+	case ev.Status != "" || ev.PermissionMode != "":
+		if ev.PermissionMode != "" {
+			m.permMode = ev.PermissionMode
+		}
+		if ev.Status == "" {
+			return nil
+		}
 		m.status = ev.Status
 		if ev.Status == "requesting" {
 			return m.markBusy()
@@ -524,11 +532,14 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 
 	case ev.Permission != nil:
 		p := ev.Permission
-		if m.alwaysAllow[p.ToolName] && m.proc != nil {
+		if m.alwaysAllow[p.ToolName] && m.proc != nil && !isInteractiveTool(p.ToolName) {
 			_ = m.proc.Respond(p, claude.PermissionDecision{Behavior: "allow"})
 			return nil
 		}
 		m.pending = append(m.pending, p)
+		if len(m.pending) == 1 {
+			m.startInteraction()
+		}
 		m.input.Blur()
 		m.layout()
 
@@ -654,6 +665,12 @@ func (m *Model) replay(t transcriptMsg) {
 }
 
 func (m *Model) handlePermissionKey(k tea.KeyMsg) tea.Cmd {
+	switch {
+	case m.question != nil:
+		return m.handleQuestionKey(k)
+	case m.plan != nil:
+		return m.handlePlanKey(k)
+	}
 	p := m.pending[0]
 	var d *claude.PermissionDecision
 	switch k.String() {
@@ -693,6 +710,7 @@ func (m *Model) handlePermissionKey(k tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) afterPermission() {
+	m.startInteraction()
 	if len(m.pending) == 0 {
 		m.input.Focus()
 	}
@@ -978,6 +996,7 @@ func (m *Model) restart(o claude.Options) tea.Cmd {
 	m.chat.reset(m.track)
 	m.chat.cwd = opts.CWD
 	m.pending = nil
+	m.question, m.plan = nil, nil
 	m.busy = false
 	m.costUSD = 0
 	m.sessionID = o.Resume
@@ -1142,6 +1161,12 @@ func (m Model) bottomView() string {
 }
 
 func (m Model) permissionView() string {
+	switch {
+	case m.question != nil:
+		return m.questionView(m.mainWidth())
+	case m.plan != nil:
+		return m.planView(m.mainWidth())
+	}
 	p := m.pending[0]
 	w := m.mainWidth() - 6
 	title := warnStyle.Bold(true).Render("Allow " + p.ToolName + "?")
