@@ -122,6 +122,9 @@ type PermissionRequest struct {
 	ToolUseID   string          `json:"tool_use_id"`
 	BlockedPath string          `json:"blocked_path"`
 	AgentID     string          `json:"agent_id,omitempty"`
+	// RequiresUserInteraction marks tools that need an answer rather than a
+	// yes/no (AskUserQuestion, ExitPlanMode).
+	RequiresUserInteraction bool `json:"requires_user_interaction,omitempty"`
 }
 
 // TaskEvent tracks a sub-agent (system task_started / task_progress /
@@ -201,4 +204,50 @@ type PermissionDecision struct {
 	Behavior     string          `json:"behavior"` // "allow" or "deny"
 	UpdatedInput json.RawMessage `json:"updatedInput,omitempty"`
 	Message      string          `json:"message,omitempty"`
+	// UpdatedPermissions applies permission changes along with an allow,
+	// e.g. SetModeUpdate("acceptEdits").
+	UpdatedPermissions []PermissionUpdate `json:"updatedPermissions,omitempty"`
+}
+
+// PermissionUpdate is one entry of PermissionDecision.UpdatedPermissions.
+type PermissionUpdate struct {
+	Type        string `json:"type"` // "setMode"
+	Mode        string `json:"mode,omitempty"`
+	Destination string `json:"destination"` // "session"
+}
+
+// SetModeUpdate switches the session's permission mode.
+func SetModeUpdate(mode string) PermissionUpdate {
+	return PermissionUpdate{Type: "setMode", Mode: mode, Destination: "session"}
+}
+
+// Question is one entry of an AskUserQuestion tool call.
+type Question struct {
+	Question    string `json:"question"`
+	Header      string `json:"header"`
+	MultiSelect bool   `json:"multiSelect"`
+	Options     []struct {
+		Label       string `json:"label"`
+		Description string `json:"description"`
+	} `json:"options"`
+}
+
+// ParseQuestions reads the questions from AskUserQuestion input.
+func ParseQuestions(input json.RawMessage) ([]Question, error) {
+	var in struct {
+		Questions []Question `json:"questions"`
+	}
+	err := json.Unmarshal(input, &in)
+	return in.Questions, err
+}
+
+// AnswerQuestions returns AskUserQuestion input with answers attached:
+// question text → chosen label (several labels joined by ", ").
+func AnswerQuestions(input json.RawMessage, answers map[string]string) (json.RawMessage, error) {
+	var in map[string]any
+	if err := json.Unmarshal(input, &in); err != nil {
+		return nil, err
+	}
+	in["answers"] = answers
+	return json.Marshal(in)
 }

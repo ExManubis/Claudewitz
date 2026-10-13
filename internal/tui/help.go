@@ -38,6 +38,8 @@ func (m Model) helpPairs() [][2]string {
 		return [][2]string{{"↑↓", "move"}, {"enter", "run"}, {"esc", "close"}}
 	case m.picker != nil:
 		return [][2]string{{"↑↓", "move"}, {"enter", "resume"}, {"tab", "scope"}, {"esc", "close"}}
+	case m.question != nil || m.plan != nil:
+		return m.interactionHelp()
 	case len(m.pending) > 0:
 		return [][2]string{{"y", "allow"}, {"a", "always"}, {"n", "deny"}, {"ctrl+c", "deny & stop"}}
 	case m.comp.active:

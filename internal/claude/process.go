@@ -39,8 +39,11 @@ type Event struct {
 	// ContextWindow is the effective context size from autocompact_state.
 	ContextWindow int
 	Status        string // system/status payload, e.g. "requesting"
-	Err           error  // stdout closed or unparseable output
-	Exited        bool
+	// PermissionMode is set when the CLI changes mode itself (e.g. leaving
+	// plan mode after a plan is approved).
+	PermissionMode string
+	Err            error // stdout closed or unparseable output
+	Exited         bool
 }
 
 // Process is a running `claude` CLI.
@@ -145,10 +148,15 @@ func parseLine(line []byte) (Event, bool) {
 			}
 		case "status":
 			var s struct {
-				Status string `json:"status"`
+				Status         *string `json:"status"`
+				PermissionMode string  `json:"permissionMode"`
 			}
-			if json.Unmarshal(line, &s) == nil {
-				return Event{Status: s.Status}, true
+			if json.Unmarshal(line, &s) == nil && (s.Status != nil || s.PermissionMode != "") {
+				ev := Event{PermissionMode: s.PermissionMode}
+				if s.Status != nil {
+					ev.Status = *s.Status
+				}
+				return ev, true
 			}
 		}
 	case "autocompact_state":
