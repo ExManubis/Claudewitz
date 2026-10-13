@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -35,6 +36,11 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	if moved, err := config.Migrate(); err != nil {
+		fmt.Fprintf(os.Stderr, "claudewitz: couldn't move settings to %s: %v\n", config.Dir(), err)
+	} else if len(moved) > 0 {
+		fmt.Fprintf(os.Stderr, "claudewitz: moved %s to %s\n", strings.Join(moved, " and "), config.Dir())
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "claudewitz: ignoring unreadable config %s: %v\n", config.Path(), err)
