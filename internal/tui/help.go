@@ -38,21 +38,32 @@ func (m Model) helpPairs() [][2]string {
 		return [][2]string{{"↑↓", "move"}, {"enter", "run"}, {"esc", "close"}}
 	case m.picker != nil:
 		return [][2]string{{"↑↓", "move"}, {"enter", "resume"}, {"tab", "scope"}, {"esc", "close"}}
-	case m.chatFocus:
-		return [][2]string{{"j/k", "select"}, {"space", "expand"}, {"y", "copy"}, {"d/u", "page"}, {"g/G", "top/bottom"}, {"tab", "back to input"}}
 	case m.question != nil || m.plan != nil:
 		return m.interactionHelp()
 	case len(m.pending) > 0:
 		return [][2]string{{"y", "allow"}, {"a", "always"}, {"n", "deny"}, {"ctrl+c", "deny & stop"}}
 	case m.comp.active:
 		return [][2]string{{"↑↓", "select"}, {"tab", "accept"}, {"esc", "dismiss"}}
-	case m.busy:
-		return [][2]string{{"esc", "interrupt"}, {"enter", "queue message"}, {"ctrl+o", "expand"}, {"ctrl+p", "commands"}, {"ctrl+g", "help"}}
 	}
-	return [][2]string{
-		{"enter", "send"}, {"ctrl+j", "newline"}, {"/", "commands"}, {"@", "files"}, {"↑", "history"},
-		{"tab", "transcript"}, {"ctrl+p", "palette"}, {"ctrl+t", "model"}, {"ctrl+x", "editor"}, {"ctrl+r", "sessions"}, {"ctrl+g", "help"},
+	// The rest follows Crush's help bar, trimmed: focus, mode and commands,
+	// the chat keys when the transcript has focus, then help.
+	var out [][2]string
+	if m.busy {
+		out = append(out, [2]string{"esc", "interrupt"})
 	}
+	focus := [2]string{"tab", "focus chat"}
+	if m.chatFocus {
+		focus = [2]string{"tab", "focus editor"}
+	}
+	commands := [2]string{"ctrl+p", "commands"}
+	if !m.chatFocus && m.input.Value() == "" {
+		commands = [2]string{"/ or ctrl+p", "commands"}
+	}
+	out = append(out, focus, [2]string{"shift+tab", "mode"}, commands)
+	if m.chatFocus {
+		out = append(out, [2]string{"↑↓", "select"}, [2]string{"space", "expand/collapse"}, [2]string{"d/u", "page"}, [2]string{"y", "copy"})
+	}
+	return append(out, [2]string{"ctrl+g", "more"})
 }
 
 var helpSections = []struct {
