@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -246,6 +247,38 @@ func (p *Process) Send(text string) error {
 	return p.write(map[string]any{
 		"type":    "user",
 		"message": map[string]any{"role": "user", "content": text},
+	})
+}
+
+// Image is an image attached to a user message.
+type Image struct {
+	MediaType string // image/png, image/jpeg, image/gif or image/webp
+	Data      []byte
+}
+
+// SendWithImages submits a prompt with images; the images come first, as
+// the API recommends. Text may be empty when images are attached.
+func (p *Process) SendWithImages(text string, images []Image) error {
+	if len(images) == 0 {
+		return p.Send(text)
+	}
+	content := make([]any, 0, len(images)+1)
+	for _, img := range images {
+		content = append(content, map[string]any{
+			"type": "image",
+			"source": map[string]any{
+				"type":       "base64",
+				"media_type": img.MediaType,
+				"data":       base64.StdEncoding.EncodeToString(img.Data),
+			},
+		})
+	}
+	if strings.TrimSpace(text) != "" {
+		content = append(content, map[string]any{"type": "text", "text": text})
+	}
+	return p.write(map[string]any{
+		"type":    "user",
+		"message": map[string]any{"role": "user", "content": content},
 	})
 }
 

@@ -62,7 +62,7 @@ func TestQueuedMessagesJoinOnReplay(t *testing.T) {
 	t.Setenv("CLAUDEWITZ_CONFIG", filepath.Join(t.TempDir(), "config.json"))
 	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
 	m.width, m.height = 120, 40
-	m.queued = []string{"second", "third"}
+	m.queued = []queuedMsg{{text: "second"}, {text: "third"}}
 	if p := m.pillsView(120); !strings.Contains(p, "2 queued") || !strings.Contains(p, "second") {
 		t.Fatalf("queue pill: %q", p)
 	}

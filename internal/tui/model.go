@@ -4,6 +4,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -38,9 +39,11 @@ type Model struct {
 	themePick *themePicker
 	cfg       config.Config
 
-	hist    *history
-	queued  []string // sent mid-turn; shown as a pill until the CLI takes them
-	focused bool     // terminal focus, when the terminal reports it
+	hist   *history
+	queued []queuedMsg // sent mid-turn; shown as a pill until the CLI takes them
+
+	attachments []attachment // images for the next message
+	focused     bool         // terminal focus, when the terminal reports it
 
 	chatFocus   bool // keys drive the transcript instead of the input
 	scrollToSel bool // bring the selected entry into view on next refresh
@@ -259,6 +262,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editorDoneMsg:
 		return m, m.editorDone(msg)
 
+	case clipboardImageMsg:
+		switch {
+		case msg.err == nil:
+			return m, m.attach(msg.att)
+		case errors.Is(msg.err, errNoClipboardImage):
+			// No image: paste text as the textarea normally would.
+			var c tea.Cmd
+			m.input, c = m.input.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
+			m.comp.update(&m)
+			m.layout()
+			return m, c
+		default:
+			return m, m.notify(toastError, "Couldn't paste image", msg.err.Error())
+		}
+
 	case tea.FocusMsg:
 		m.focused = true
 
@@ -338,6 +356,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.pending) > 0 {
 			return m, m.handlePermissionKey(msg)
 		}
+		if msg.Paste {
+			// Files dragged into the terminal arrive as pasted paths.
+			if paths := droppedPaths(string(msg.Runes), m.cwd()); paths != nil {
+				if m.chatFocus {
+					m.blurChat()
+				}
+				return m, m.attachPaths(paths)
+			}
+		}
 		if m.chatFocus {
 			if cmd, handled := m.handleChatKey(msg); handled {
 				return m, cmd
@@ -404,6 +431,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+x":
 			return m, m.openEditor()
+		case "ctrl+v":
+			return m, readClipboardImage()
+		case "ctrl+f":
+			m.input.SetValue("/image ")
+			m.input.CursorEnd()
+			m.comp.update(&m)
+			m.layout()
+			return m, nil
+		case "backspace":
+			if m.input.Value() == "" && len(m.attachments) > 0 {
+				last := m.attachments[len(m.attachments)-1]
+				m.attachments = m.attachments[:len(m.attachments)-1]
+				m.layout()
+				return m, m.notify(toastInfo, "Removed "+last.name, "")
+			}
 		case "tab":
 			m.focusChat()
 			return m, nil
@@ -435,7 +477,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, c
 		case "enter":
 			text := strings.TrimSpace(m.input.Value())
-			if text == "" {
+			if text == "" && len(m.attachments) == 0 {
 				return m, nil
 			}
 			m.input.Reset()
@@ -677,6 +719,20 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 // messages get their text from stream deltas, so only replayed history
 // renders text blocks here.
 func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool) {
+	// Images in replayed user messages: the transcript keeps no file names.
+	var images []string
+	hasText := false
+	for _, b := range blocks {
+		switch b.Type {
+		case "image":
+			images = append(images, fmt.Sprintf("image %d", len(images)+1))
+		case "text":
+			hasText = true
+		}
+	}
+	if !live && role == "user" && len(images) > 0 && !hasText {
+		m.chat.add(&entry{kind: kindUser, images: images})
+	}
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
@@ -686,7 +742,8 @@ func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool
 			if role == "user" && strings.HasPrefix(b.Text, "[Request interrupted") {
 				m.chat.info("interrupted")
 			} else if role == "user" {
-				m.chat.add(&entry{kind: kindUser, text: b.Text})
+				m.chat.add(&entry{kind: kindUser, text: b.Text, images: images})
+				images = nil
 			} else if strings.TrimSpace(b.Text) != "" {
 				m.chat.add(&entry{kind: kindAssistant, text: b.Text})
 			}
@@ -953,19 +1010,24 @@ func (m *Model) submit(text string) tea.Cmd {
 		m.refresh()
 		return nil
 	}
-	if err := m.proc.Send(text); err != nil {
+	if err := m.proc.SendWithImages(text, m.images()); err != nil {
 		m.chat.error("send failed: %v", err)
 		m.refresh()
 		return nil
 	}
+	var names []string
+	for _, a := range m.attachments {
+		names = append(names, a.name)
+	}
+	m.attachments = nil
 	if m.busy {
 		// The CLI holds it until the turn ends; it joins the transcript when
 		// the CLI acknowledges it (see takeQueued).
-		m.queued = append(m.queued, text)
+		m.queued = append(m.queued, queuedMsg{text: text, images: names})
 		m.layout()
 		return nil
 	}
-	m.chat.add(&entry{kind: kindUser, text: text})
+	m.chat.add(&entry{kind: kindUser, text: text, images: names})
 	if !m.busy {
 		m.busy = true
 		m.turnFrom = time.Now()
@@ -975,13 +1037,19 @@ func (m *Model) submit(text string) tea.Cmd {
 	return m.startAnim()
 }
 
+// queuedMsg is a message the CLI is holding until the current turn ends.
+type queuedMsg struct {
+	text   string
+	images []string
+}
+
 // takeQueued moves queued messages into the transcript once the CLI
 // acknowledges them. Queued messages arrive together, joined by newlines.
 func (m *Model) takeQueued(replay string) {
 	kept := m.queued[:0]
 	for _, q := range m.queued {
-		if strings.Contains(replay, q) {
-			m.chat.add(&entry{kind: kindUser, text: q})
+		if strings.Contains(replay, q.text) { // image-only messages have no text to match
+			m.chat.add(&entry{kind: kindUser, text: q.text, images: q.images})
 		} else {
 			kept = append(kept, q)
 		}
@@ -1080,6 +1148,11 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		return m.saveTheme(), true
 	case "/edit":
 		return m.openEditor(), true
+	case "/image":
+		if arg == "" {
+			return m.notify(toastInfo, "Attach an image", "/image path/to/file.png, ctrl+v to paste, or drag a file in"), true
+		}
+		return m.attachPaths([]string{strings.Trim(arg, `"'`)}), true
 	case "/notifications":
 		return m.setNotifications(arg), true
 	case "/sidebar":
@@ -1106,6 +1179,7 @@ func (m *Model) restart(o claude.Options) tea.Cmd {
 	m.pending = nil
 	m.question, m.plan = nil, nil
 	m.queued = nil
+	m.attachments = nil
 	m.chatFocus = false
 	m.busy = false
 	m.costUSD = 0
@@ -1273,6 +1347,9 @@ func (m Model) bottomView() string {
 	}
 	if p := m.pillsView(m.mainWidth()); p != "" {
 		top = p + "\n" + top
+	}
+	if a := m.attachmentsView(m.mainWidth()); a != "" {
+		top += a + "\n"
 	}
 	return top + box.Width(m.mainWidth()-2).Render(m.input.View())
 }
@@ -1459,6 +1536,7 @@ const helpText = `commands
   /theme [name]       colour theme (no name opens the picker); saved to config
   /sidebar            toggle the sidebar
   /edit               write the prompt in $EDITOR (ctrl+x)
+  /image <path>       attach an image (ctrl+f; ctrl+v pastes one; or drag a file in)
   /notifications [m]  desktop notifications: auto, native, osc, bell, off
   /session            show session id and cwd
   /quit               exit

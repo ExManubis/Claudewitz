@@ -44,6 +44,7 @@ type entry struct {
 	answers    [][2]string // AskUserQuestion: header → answer, as sent
 	feedback   string      // ExitPlanMode: why the plan was sent back
 	planText   string      // ExitPlanMode: plan as read from its file
+	images     []string    // user messages: names of attached images
 
 	expanded bool // opened individually from the focused chat
 
@@ -182,7 +183,19 @@ func (c *chat) renderEntry(e *entry, width int) string {
 	wrap := lipgloss.NewStyle().Width(width - 2).PaddingLeft(2)
 	switch e.kind {
 	case kindUser:
-		return userBlock.Width(width - 2).Render(textStyle.Render(e.text))
+		body := textStyle.Render(e.text)
+		if len(e.images) > 0 {
+			var chips []string
+			for _, name := range e.images {
+				chips = append(chips, lipgloss.NewStyle().Foreground(currentTheme().user).Render("▣ ")+mutedStyle.Render(name))
+			}
+			if strings.TrimSpace(e.text) == "" {
+				body = strings.Join(chips, "  ")
+			} else {
+				body += "\n" + strings.Join(chips, "  ")
+			}
+		}
+		return userBlock.Width(width - 2).Render(body)
 	case kindAssistant:
 		body := e.text
 		if r := c.renderer(width - 2); r != nil {

@@ -56,6 +56,10 @@ go run . -- --add-dir ../lib  # anything after -- goes straight to claude
 - `↑`/`↓` on an empty input recalls earlier prompts for this project, including ones from past
   sessions; kept in `history.jsonl` next to the config
 - `ctrl+x` (or `/edit`) opens the prompt in `$VISUAL`/`$EDITOR` for long prompts
+- Images: `ctrl+v` pastes one from the clipboard (pngpaste/osascript on macOS, wl-paste/xclip
+  on Linux), dragging image files into the terminal attaches them, and `ctrl+f` or `/image path`
+  picks one with completion. They show as chips above the input (`⌫` on an empty prompt removes
+  the last); PNG, JPEG, GIF and WebP, with large images scaled to 1568px and re-encoded
 - Status pills above the input: queued messages, todo progress with the current task, and running
   agents when the sidebar is hidden
 
@@ -134,6 +138,5 @@ commits (including ones made outside claudewitz), and Claude Code exiting
 ## Roadmap ideas
 
 - Drill into a sub-agent's full transcript
-- Image paste
 - Multiple concurrent sessions in tabs
 - Persisted per-project "always allow" rules

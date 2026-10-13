@@ -67,6 +67,8 @@ var helpSections = []struct {
 		{"tab", "accept completion"},
 		{"↑/↓", "prompt history"},
 		{"ctrl+x", "edit in $EDITOR"},
+		{"ctrl+f", "attach image"},
+		{"ctrl+v", "paste image or text"},
 		{"ctrl+c", "clear input"},
 	}},
 	{"Session", [][2]string{

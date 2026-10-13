@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -67,5 +69,33 @@ func TestParseReplayWithStringContent(t *testing.T) {
 	}
 	if got := ev.Message.Message.Text(); got != "Now say 'second done'.\nNow say 'third done'." {
 		t.Fatalf("text: %q", got)
+	}
+}
+
+type bufCloser struct{ bytes.Buffer }
+
+func (bufCloser) Close() error { return nil }
+
+func TestSendWithImages(t *testing.T) {
+	var buf bufCloser
+	p := &Process{stdin: &buf}
+	if err := p.SendWithImages("what is this?", []Image{{MediaType: "image/png", Data: []byte{1, 2, 3}}}); err != nil {
+		t.Fatal(err)
+	}
+	var msg struct {
+		Message struct {
+			Content []map[string]any `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &msg); err != nil {
+		t.Fatal(err)
+	}
+	c := msg.Message.Content
+	if len(c) != 2 || c[0]["type"] != "image" || c[1]["text"] != "what is this?" {
+		t.Fatalf("content: %v", c)
+	}
+	src := c[0]["source"].(map[string]any)
+	if src["type"] != "base64" || src["media_type"] != "image/png" || src["data"] != "AQID" {
+		t.Fatalf("source: %v", src)
 	}
 }
