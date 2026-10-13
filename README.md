@@ -51,6 +51,9 @@ go run . -- --add-dir ../lib  # anything after -- goes straight to claude
 - `space`/`enter` expands or collapses just the selected item (`ctrl+o` still toggles them all)
 - `y` copies the selected item's source (Markdown, command and output, file contents) via OSC 52
 - Click an entry to select it, click again to expand it; start typing to return to the input
+- Drag across the transcript to select text; releasing copies it (OSC 52). Dragging past the top
+  or bottom edge scrolls; any key clears the highlight
+- A scrollbar shows on the right of the chat when it overflows; drag the thumb or click the track
 
 **Prompt**
 - `↑`/`↓` on an empty input recalls earlier prompts for this project, including ones from past

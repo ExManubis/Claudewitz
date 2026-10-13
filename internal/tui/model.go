@@ -46,7 +46,11 @@ type Model struct {
 	focused     bool         // terminal focus, when the terminal reports it
 
 	chatFocus   bool // keys drive the transcript instead of the input
-	scrollToSel bool // bring the selected entry into view on next refresh
+	textSel     *textSelection
+	mouseDown   bool   // left button held in the transcript
+	dragBar     bool   // dragging the scrollbar
+	chatContent string // last rendered transcript, for copying selections
+	scrollToSel bool   // bring the selected entry into view on next refresh
 
 	toasts       []toast
 	toastID      int
@@ -324,16 +328,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		if m.picker == nil && m.palette == nil && m.modelPick == nil && m.themePick == nil && !m.showHelp {
-			if m.clickChat(msg) {
-				return m, nil
-			}
-			var c tea.Cmd
-			m.vp, c = m.vp.Update(msg)
-			m.follow = m.vp.AtBottom()
-			cmds = append(cmds, c)
+			cmds = append(cmds, m.handleMouse(msg))
 		}
 
 	case tea.KeyMsg:
+		if !m.mouseDown {
+			m.textSel = nil // any key clears a mouse selection
+		}
 		if m.showHelp {
 			switch msg.String() {
 			case "esc", "ctrl+g", "q", "enter", "ctrl+c":
@@ -1227,10 +1228,10 @@ func (m *Model) layout() {
 	}
 	h := max(3, m.height-bottom)
 	if !m.ready {
-		m.vp = viewport.New(m.mainWidth(), h)
+		m.vp = viewport.New(m.chatWidth(), h)
 		m.vp.MouseWheelEnabled = true
 	} else {
-		m.vp.Width, m.vp.Height = m.mainWidth(), h
+		m.vp.Width, m.vp.Height = m.chatWidth(), h
 	}
 }
 
@@ -1238,10 +1239,11 @@ func (m *Model) refresh() {
 	if !m.ready {
 		return
 	}
-	content := m.chat.View(m.mainWidth())
+	content := m.chat.View(m.chatWidth())
 	if len(m.chat.entries) == 0 {
 		content = m.splash()
 	}
+	m.chatContent = content
 	m.vp.SetContent(content)
 	switch {
 	case m.follow:
@@ -1256,7 +1258,7 @@ func (m Model) View() string {
 	if !m.ready {
 		return ""
 	}
-	chatView := m.vp.View()
+	chatView := lipgloss.JoinHorizontal(lipgloss.Top, m.highlightSelection(m.vp.View()), strings.Join(m.scrollbar(), "\n"))
 	if pop := m.comp.view(m.mainWidth()); pop != "" {
 		chatView = overlayBottom(chatView, pop, m.vp.Height, m.mainWidth())
 	}

@@ -16,10 +16,10 @@ import (
 func chatModel(t *testing.T) *Model {
 	t.Helper()
 	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
-	m.Update(tea.WindowSizeMsg{Width: 90, Height: 20})
 	mm := &m
-	mm.ready = true
+	mm.width, mm.height = 90, 20
 	mm.layout()
+	mm.ready = true
 	c := mm.chat
 	c.add(&entry{kind: kindUser, text: "first question"})
 	c.add(&entry{kind: kindThinking, text: strings.Repeat("a long thought that wraps around the line. ", 20)})
