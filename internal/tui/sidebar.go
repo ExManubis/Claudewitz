@@ -449,9 +449,10 @@ func (m Model) sidebarView(height int) string {
 
 	body := lipgloss.JoinVertical(lipgloss.Left, sec...)
 	lines := strings.Split(body, "\n")
-	// The spark indicator and its caption are pinned to the bottom.
+	// The spark indicator and its caption are pinned to the bottom, with
+	// a blank row above the caption and one below it, before the help bar.
 	if rows := sparkRows(height); rows > 0 && m.sparks != nil {
-		avail := height - rows - 1
+		avail := height - rows - 3
 		if len(lines) > avail {
 			lines = lines[:avail]
 		}
@@ -459,7 +460,7 @@ func (m Model) sidebarView(height int) string {
 			lines = append(lines, "")
 		}
 		lines = append(lines, strings.Split(m.sparks.view(), "\n")...)
-		lines = append(lines, m.sparkCaption(w))
+		lines = append(lines, "", m.sparkCaption(w), "")
 	}
 	if len(lines) > height {
 		lines = lines[:height]
