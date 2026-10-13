@@ -1274,7 +1274,7 @@ func (m *Model) layout() {
 		m.sparks.resize(sidebarWidth-3, rows)
 	}
 	m.bottomH = lipgloss.Height(m.bottomView())
-	bottom := m.bottomH + 1 // + status bar
+	bottom := m.bottomH + 1 + 2 // + status bar, and a blank row above and below the chat
 	if m.showHeader() {
 		bottom++
 	}
@@ -1314,7 +1314,7 @@ func (m Model) View() string {
 	if pop := m.comp.view(m.mainWidth()); pop != "" {
 		chatView = overlayBottom(chatView, pop, m.vp.Height, m.mainWidth())
 	}
-	main := lipgloss.JoinVertical(lipgloss.Left, chatView, m.bottomView())
+	main := lipgloss.JoinVertical(lipgloss.Left, "", chatView, "", m.bottomView())
 	if m.showHeader() {
 		main = lipgloss.JoinVertical(lipgloss.Left, headerLine(m.mainWidth(), m.headerInfo()), main)
 	}
@@ -1558,7 +1558,7 @@ func formatTokens(u claude.Usage) string {
 func (m Model) splash() string {
 	w := m.mainWidth()
 	key := func(k, desc string) string { return statusKey.Render(k) + mutedStyle.Render(" "+desc) }
-	lines := []string{"", ""}
+	lines := []string{""} // under the blank row View puts above the chat
 	for _, l := range strings.Split(bigLogo("CLAUDEWITZ", w-2), "\n") {
 		lines = append(lines, "  "+l)
 	}
