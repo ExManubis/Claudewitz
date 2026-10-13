@@ -15,6 +15,14 @@ type Config struct {
 	// Appearance forces the light or dark variant of the theme: "auto"
 	// (the default, detected from the terminal), "dark" or "light".
 	Appearance string `json:"appearance,omitempty"`
+	// Notifications controls desktop notifications sent while the terminal
+	// is unfocused: "auto" (default), "native", "osc", "bell" or "off".
+	Notifications string `json:"notifications,omitempty"`
+}
+
+// HistoryPath is where claudewitz keeps prompt history, next to the config.
+func HistoryPath() string {
+	return filepath.Join(filepath.Dir(Path()), "history.jsonl")
 }
 
 // Path is $CLAUDEWITZ_CONFIG, else <user config dir>/claudewitz/config.json

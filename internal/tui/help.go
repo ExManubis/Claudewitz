@@ -45,11 +45,11 @@ func (m Model) helpPairs() [][2]string {
 	case m.comp.active:
 		return [][2]string{{"↑↓", "select"}, {"tab", "accept"}, {"esc", "dismiss"}}
 	case m.busy:
-		return [][2]string{{"esc", "interrupt"}, {"ctrl+o", "expand"}, {"ctrl+p", "commands"}, {"ctrl+g", "help"}}
+		return [][2]string{{"esc", "interrupt"}, {"enter", "queue message"}, {"ctrl+o", "expand"}, {"ctrl+p", "commands"}, {"ctrl+g", "help"}}
 	}
 	return [][2]string{
-		{"enter", "send"}, {"ctrl+j", "newline"}, {"/", "commands"}, {"@", "files"},
-		{"ctrl+p", "palette"}, {"ctrl+t", "model"}, {"ctrl+r", "sessions"}, {"ctrl+g", "help"},
+		{"enter", "send"}, {"ctrl+j", "newline"}, {"/", "commands"}, {"@", "files"}, {"↑", "history"},
+		{"ctrl+p", "palette"}, {"ctrl+t", "model"}, {"ctrl+x", "editor"}, {"ctrl+r", "sessions"}, {"ctrl+g", "help"},
 	}
 }
 
@@ -63,6 +63,8 @@ var helpSections = []struct {
 		{"/", "slash commands"},
 		{"@", "mention a file"},
 		{"tab", "accept completion"},
+		{"↑/↓", "prompt history"},
+		{"ctrl+x", "edit in $EDITOR"},
 		{"ctrl+c", "clear input"},
 	}},
 	{"Session", [][2]string{

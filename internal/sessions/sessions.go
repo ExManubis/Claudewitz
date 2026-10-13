@@ -273,3 +273,53 @@ func Load(path string) ([]Message, error) {
 	}
 	return out, sc.Err()
 }
+
+// Prompts returns up to limit prompts the user typed in the sessions in
+// dir, oldest first, reading the newest sessions first.
+func Prompts(dir string, limit int) []string {
+	files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	type file struct {
+		path string
+		mod  time.Time
+	}
+	var fs []file
+	for _, f := range files {
+		if st, err := os.Stat(f); err == nil {
+			fs = append(fs, file{f, st.ModTime()})
+		}
+	}
+	sort.Slice(fs, func(i, j int) bool { return fs[i].mod.After(fs[j].mod) })
+
+	var chunks [][]string // per session, newest session first
+	total := 0
+	for _, f := range fs {
+		msgs, err := Load(f.path)
+		if err != nil {
+			continue
+		}
+		var ps []string
+		for _, m := range msgs {
+			if m.Role != "user" {
+				continue
+			}
+			for _, b := range m.Content {
+				t := strings.TrimSpace(b.Text)
+				if b.Type == "text" && t != "" && !strings.HasPrefix(t, "<") && !strings.HasPrefix(t, "[Request interrupted") {
+					ps = append(ps, t)
+				}
+			}
+		}
+		chunks = append(chunks, ps)
+		if total += len(ps); total >= limit {
+			break
+		}
+	}
+	var out []string
+	for i := len(chunks) - 1; i >= 0; i-- {
+		out = append(out, chunks[i]...)
+	}
+	if len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out
+}

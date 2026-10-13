@@ -59,3 +59,13 @@ func TestAnswerQuestions(t *testing.T) {
 		t.Fatalf("answer: %s %v", out, err)
 	}
 }
+
+func TestParseReplayWithStringContent(t *testing.T) {
+	ev, ok := parseLine([]byte(`{"type":"user","message":{"role":"user","content":"Now say 'second done'.\nNow say 'third done'."},"parent_tool_use_id":null,"isReplay":true}`))
+	if !ok || ev.Message == nil || !ev.Message.IsReplay {
+		t.Fatalf("replay not parsed: %+v", ev)
+	}
+	if got := ev.Message.Message.Text(); got != "Now say 'second done'.\nNow say 'third done'." {
+		t.Fatalf("text: %q", got)
+	}
+}

@@ -38,6 +38,10 @@ type Model struct {
 	themePick *themePicker
 	cfg       config.Config
 
+	hist    *history
+	queued  []string // sent mid-turn; shown as a pill until the CLI takes them
+	focused bool     // terminal focus, when the terminal reports it
+
 	toasts       []toast
 	toastID      int
 	toastTicking bool
@@ -131,13 +135,15 @@ func New(ctx context.Context, opts claude.Options, cfg config.Config) Model {
 		model:       opts.Model,
 		limits:      map[string]claude.RateLimitWindow{},
 		limitWarned: map[string]int{},
+		hist:        newHistory(opts.CWD),
+		focused:     true,
 		alwaysAllow: map[string]bool{},
 		cfg:         cfg,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, startCmd(m.ctx, m.opts), indexFiles(m.opts.CWD), m.refreshGit(), gitPoll()}
+	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, startCmd(m.ctx, m.opts), indexFiles(m.opts.CWD), m.refreshGit(), gitPoll(), loadHistory(m.opts.CWD)}
 	if m.opts.Resume != "" || m.opts.Continue {
 		cmds = append(cmds, loadTranscript(m.opts.CWD, m.opts.Resume))
 	}
@@ -241,6 +247,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case gitStatusMsg:
 		return m, m.applyGit(msg)
+
+	case historyLoadedMsg:
+		if msg.project == m.hist.project {
+			m.hist.items = dedupeKeepLast(append(msg.items, m.hist.items...))
+		}
+
+	case editorDoneMsg:
+		return m, m.editorDone(msg)
+
+	case tea.FocusMsg:
+		m.focused = true
+
+	case tea.BlurMsg:
+		m.focused = false
 
 	case gitPollMsg:
 		return m, tea.Batch(m.refreshGit(), gitPoll())
@@ -371,6 +391,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+p":
 			m.openPalette()
 			return m, nil
+		case "ctrl+x":
+			return m, m.openEditor()
+		case "up", "down":
+			recall := m.hist.prev
+			if msg.String() == "down" {
+				recall = m.hist.next
+			}
+			if text, ok := recall(m.input.Value()); ok {
+				m.input.SetValue(text)
+				m.input.CursorEnd()
+				m.layout()
+				return m, nil
+			}
 		case "ctrl+t":
 			m.openModelPicker()
 			return m, nil
@@ -423,7 +456,14 @@ func (m *Model) quit() tea.Cmd {
 	return tea.Quit
 }
 
-func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
+func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
+	var alert tea.Cmd // desktop notification, sent alongside whatever else
+	defer func() {
+		if alert != nil {
+			cmd = tea.Batch(cmd, alert)
+		}
+	}()
+
 	switch {
 	case ev.Initialize != nil:
 		m.initResp = ev.Initialize
@@ -472,6 +512,10 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 			m.chat.markAgentsDirty()
 			return nil
 		}
+		if ev.Message.IsReplay {
+			m.takeQueued(ev.Message.Message.Text())
+			return nil
+		}
 		m.applyBlocks(ev.Message.Message.Role, ev.Message.Message.Content, true)
 		if u := ev.Message.Message.Usage; u != nil && ev.Message.Message.Role == "assistant" {
 			m.lastUsage = *u
@@ -505,6 +549,7 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 			m.stopped = false
 			return nil
 		}
+		alert = m.desktopNotify("Claude finished", firstNonEmpty(m.lastAssistantLine(), "Ready for your next message"))
 		if r.IsError && r.Subtype != "success" {
 			m.chat.error("turn ended: %s %s", r.Subtype, r.Result)
 		}
@@ -542,6 +587,14 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 		}
 		m.input.Blur()
 		m.layout()
+		switch p.ToolName {
+		case toolAskUser:
+			alert = m.desktopNotify("Claude has a question", summarizeInput(p.ToolName, p.Input, 120))
+		case toolExitPlan:
+			alert = m.desktopNotify("Plan ready for review", "Approve it or keep planning")
+		default:
+			alert = m.desktopNotify("Claude needs your approval", strings.TrimSpace(p.ToolName+" "+summarizeInput(p.ToolName, p.Input, 100)))
+		}
 
 	case ev.Exited:
 		m.busy = false
@@ -872,6 +925,7 @@ func (m *Model) agentStatus(toolUseID, taskID string) string {
 }
 
 func (m *Model) submit(text string) tea.Cmd {
+	m.hist.add(text)
 	if strings.HasPrefix(text, "/") {
 		if cmd, handled := m.slash(text); handled {
 			m.refresh()
@@ -883,10 +937,19 @@ func (m *Model) submit(text string) tea.Cmd {
 		m.refresh()
 		return nil
 	}
-	m.chat.add(&entry{kind: kindUser, text: text})
 	if err := m.proc.Send(text); err != nil {
 		m.chat.error("send failed: %v", err)
+		m.refresh()
+		return nil
 	}
+	if m.busy {
+		// The CLI holds it until the turn ends; it joins the transcript when
+		// the CLI acknowledges it (see takeQueued).
+		m.queued = append(m.queued, text)
+		m.layout()
+		return nil
+	}
+	m.chat.add(&entry{kind: kindUser, text: text})
 	if !m.busy {
 		m.busy = true
 		m.turnFrom = time.Now()
@@ -894,6 +957,31 @@ func (m *Model) submit(text string) tea.Cmd {
 	m.follow = true
 	m.refresh()
 	return m.startAnim()
+}
+
+// takeQueued moves queued messages into the transcript once the CLI
+// acknowledges them. Queued messages arrive together, joined by newlines.
+func (m *Model) takeQueued(replay string) {
+	kept := m.queued[:0]
+	for _, q := range m.queued {
+		if strings.Contains(replay, q) {
+			m.chat.add(&entry{kind: kindUser, text: q})
+		} else {
+			kept = append(kept, q)
+		}
+	}
+	m.queued = kept
+	m.follow = true
+	m.layout()
+}
+
+func (m *Model) lastAssistantLine() string {
+	for i := len(m.chat.entries) - 1; i >= 0; i-- {
+		if e := m.chat.entries[i]; e.kind == kindAssistant {
+			return truncate(firstLine(e.text), 120)
+		}
+	}
+	return ""
 }
 
 // markBusy notes a turn the CLI started on its own, e.g. after a
@@ -974,6 +1062,10 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		}
 		m.restyle()
 		return m.saveTheme(), true
+	case "/edit":
+		return m.openEditor(), true
+	case "/notifications":
+		return m.setNotifications(arg), true
 	case "/sidebar":
 		m.sidebarOn = !m.sidebarOn
 		m.layout()
@@ -997,6 +1089,7 @@ func (m *Model) restart(o claude.Options) tea.Cmd {
 	m.chat.cwd = opts.CWD
 	m.pending = nil
 	m.question, m.plan = nil, nil
+	m.queued = nil
 	m.busy = false
 	m.costUSD = 0
 	m.sessionID = o.Resume
@@ -1156,6 +1249,9 @@ func (m Model) bottomView() string {
 			extra += fmt.Sprintf(" · %d agent%s running", n, plural)
 		}
 		top = " " + shimmer(m.animFrame, label) + mutedStyle.Render(extra) + "\n"
+	}
+	if p := m.pillsView(m.mainWidth()); p != "" {
+		top = p + "\n" + top
 	}
 	return top + box.Width(m.mainWidth()-2).Render(m.input.View())
 }
@@ -1341,6 +1437,8 @@ const helpText = `commands
   /mode <mode>        permission mode: default, acceptEdits, plan
   /theme [name]       colour theme (no name opens the picker); saved to config
   /sidebar            toggle the sidebar
+  /edit               write the prompt in $EDITOR (ctrl+x)
+  /notifications [m]  desktop notifications: auto, native, osc, bell, off
   /session            show session id and cwd
   /quit               exit
   other /commands are passed through to Claude Code
