@@ -77,6 +77,7 @@ var helpSections = []struct {
 		{"@", "mention a file"},
 		{"tab", "accept completion"},
 		{"↑/↓", "prompt history"},
+		{"→", "take suggested prompt"},
 		{"ctrl+x", "edit in $EDITOR"},
 		{"ctrl+f", "attach image"},
 		{"ctrl+v", "paste image or text"},
