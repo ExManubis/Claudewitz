@@ -46,6 +46,7 @@ var localCommands = []suggestion{
 	{label: "/edit", desc: "write the prompt in $EDITOR"},
 	{label: "/image", desc: "attach an image (ctrl+f)"},
 	{label: "/notifications", desc: "desktop notification mode"},
+	{label: "/icons", desc: "Nerd Font or plain Unicode icons"},
 	{label: "/session", desc: "show session id and cwd"},
 	{label: "/quit", desc: "exit claudewitz"},
 }
@@ -194,6 +195,10 @@ func (m *Model) argSuggestions(cmd string) []suggestion {
 	case "/notifications":
 		for _, n := range notifyModes {
 			out = append(out, suggestion{label: n, insert: n, desc: notifyModeDesc[n]})
+		}
+	case "/icons":
+		for _, n := range iconModes {
+			out = append(out, suggestion{label: n, insert: n, desc: iconModeDesc[n]})
 		}
 	case "/effort":
 		for _, l := range defaultEffortLevels {
