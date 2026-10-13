@@ -734,7 +734,7 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 			// Joins the transcript with its first text: models that keep
 			// their thinking hidden send none, and the activity line
 			// already says Claude is thinking.
-			th := &entry{kind: kindThinking, text: e.ContentBlock.Thinking}
+			th := &entry{kind: kindThinking, text: e.ContentBlock.Thinking, thinkStart: time.Now()}
 			if th.text != "" {
 				m.chat.add(th)
 			}
@@ -755,6 +755,17 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 				m.chat.add(live)
 			}
 			live.setText(live.text + e.Delta.Thinking)
+		}
+	case "content_block_stop":
+		live := m.chat.streaming[e.Index]
+		if live == nil || live.kind != kindThinking || live.thinkStart.IsZero() {
+			return
+		}
+		live.thought, live.dirty = time.Since(live.thinkStart), true
+		// Hidden thinking never joined the transcript; it shows now as
+		// just how long it took.
+		if live.text == "" && live.thought >= time.Second {
+			m.chat.add(live)
 		}
 	}
 }

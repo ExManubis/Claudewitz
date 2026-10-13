@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -50,6 +51,11 @@ type entry struct {
 	planText   string      // ExitPlanMode: plan as read from its file
 	images     []string    // user messages: names of attached images
 
+	// thinking: when the block started streaming, and how long it took
+	// once it stopped (zero while running, and for replayed history)
+	thinkStart time.Time
+	thought    time.Duration
+
 	expanded bool // opened individually from the focused chat
 
 	// render cache
@@ -71,6 +77,8 @@ type chat struct {
 	streaming map[int]*entry // content block index -> live entry
 	md        *glamour.TermRenderer
 	mdWidth   int
+	quiet     *glamour.TermRenderer // thinking
+	quietW    int
 	expanded  bool
 	track     *tracker
 	cwd       string
@@ -116,7 +124,7 @@ func (c *chat) markAllDirty() {
 	for _, e := range c.entries {
 		e.dirty = true
 	}
-	c.md = nil
+	c.md, c.quiet = nil, nil
 }
 
 // markAgentsDirty forces re-rendering of running sub-agent entries.
@@ -137,6 +145,15 @@ func (c *chat) renderer(width int) *glamour.TermRenderer {
 		}
 	}
 	return c.md
+}
+
+func (c *chat) quietRenderer(width int) *glamour.TermRenderer {
+	if c.quiet == nil || c.quietW != width {
+		if r, err := glamour.NewTermRenderer(glamour.WithStyles(quietMarkdownStyle()), glamour.WithWordWrap(width)); err == nil {
+			c.quiet, c.quietW = r, width
+		}
+	}
+	return c.quiet
 }
 
 func (c *chat) View(width int) string {
@@ -209,15 +226,7 @@ func (c *chat) renderEntry(e *entry, width int) string {
 		}
 		return body
 	case kindThinking:
-		t := strings.TrimSpace(e.text)
-		if t == "" {
-			return wrap.Render(thinkingStyle.Render("∴ Thinking…"))
-		}
-		lines := strings.Split(lipgloss.NewStyle().Width(min(width-6, maxProseWidth-4)).Render(t), "\n")
-		if !c.open(e) && len(lines) > 3 {
-			lines = append(lines[:3], fmt.Sprintf("… %d more lines (ctrl+o)", len(lines)-3))
-		}
-		return wrap.Render(thinkingStyle.Render("∴ " + strings.Join(lines, "\n  ")))
+		return c.renderThinking(e, width)
 	case kindTool:
 		return c.renderTool(e, width)
 	case kindError:
@@ -225,6 +234,49 @@ func (c *chat) renderEntry(e *entry, width int) string {
 	default:
 		return wrap.Render(mutedStyle.Render(e.text))
 	}
+}
+
+// maxThinkingLines is how much of the thinking box shows while closed:
+// the newest lines, so a streaming block reads like a live tail.
+const maxThinkingLines = 10
+
+// renderThinking draws thinking as quiet Markdown in a tinted box, with
+// how long it took underneath once it's done. Models that keep their
+// thinking hidden get only that footer.
+func (c *chat) renderThinking(e *entry, width int) string {
+	var footer string
+	if e.thought >= time.Second {
+		footer = "  " + thinkingStyle.Render("∴ Thought for "+shortSecs(e.thought))
+	}
+	t := strings.TrimSpace(e.text)
+	if t == "" {
+		if footer != "" {
+			return footer
+		}
+		return "  " + thinkingStyle.Render("∴ Thinking…")
+	}
+	inner := min(width-4, maxProseWidth-2) - 2 // left margin, then 1 col of padding each side
+	body := lipgloss.NewStyle().Width(inner).Render(t)
+	if r := c.quietRenderer(inner); r != nil {
+		if out, err := r.Render(t); err == nil {
+			body = strings.Trim(out, "\n")
+		}
+	}
+	lines := strings.Split(body, "\n")
+	box := lipgloss.NewStyle().Background(currentTheme().thinkBg).Foreground(currentTheme().muted)
+	if !c.open(e) && len(lines) > maxThinkingLines+1 {
+		hint := box.Italic(true).Render(fmt.Sprintf("… %d earlier lines (ctrl+o)", len(lines)-maxThinkingLines))
+		lines = append([]string{hint}, lines[len(lines)-maxThinkingLines:]...)
+	}
+	for i, l := range lines {
+		fill := max(0, inner-ansi.StringWidth(l))
+		lines[i] = "  " + box.Render(" ") + l + box.Render(strings.Repeat(" ", fill+1))
+	}
+	out := strings.Join(lines, "\n")
+	if footer != "" {
+		out += "\n" + footer
+	}
+	return out
 }
 
 func (c *chat) renderTool(e *entry, width int) string {

@@ -25,6 +25,8 @@ type theme struct {
 	addBg ac
 	delBg ac
 	selBg ac
+	// thinkBg tints the thinking box; derived from muted over bg.
+	thinkBg ac
 	// bg is the palette's intended background, used for tints and fades.
 	// Empty means a neutral dark/light.
 	bg ac
@@ -266,6 +268,9 @@ func applyTheme(name string) bool {
 	if t.selBg.Dark == "" {
 		t.selBg = tint(t.accent, bg, 0.38, 0.30)
 	}
+	if t.thinkBg.Dark == "" {
+		t.thinkBg = tint(t.muted, bg, 0.14, 0.12)
+	}
 	if darkBG {
 		t.chroma = firstNonEmpty(t.chromaDark, "dracula")
 	} else {
@@ -315,15 +320,9 @@ func markdownStyle() ansi.StyleConfig {
 	if darkBG {
 		s = styles.DarkStyleConfig
 	}
-	// Each variant's hex for the current background; the base config's
-	// pointers are shared, so fields are replaced, never written through.
-	hex := func(c ac) *string {
-		v := c.Light
-		if darkBG {
-			v = c.Dark
-		}
-		return &v
-	}
+	// The base config's pointers are shared, so fields are replaced,
+	// never written through.
+	hex := variantHex
 	s.Document.Color = hex(t.text)
 	s.Heading.Color = hex(t.accent)
 	s.H1.Color = hex(t.background())
@@ -341,6 +340,35 @@ func markdownStyle() ansi.StyleConfig {
 	s.CodeBlock.Chroma = nil
 	s.CodeBlock.Theme = t.chroma
 	return s
+}
+
+// quietMarkdownStyle is markdownStyle muted for thinking: one colour on
+// the thinking tint, no margin, and code blocks left unhighlighted.
+func quietMarkdownStyle() ansi.StyleConfig {
+	t := activeTheme
+	s := markdownStyle()
+	muted := variantHex(t.muted)
+	s.Document.Color = muted
+	s.Document.BackgroundColor = variantHex(t.thinkBg)
+	s.Document.Margin = nil
+	s.Heading.Color = muted
+	s.H1.Color = muted
+	s.H1.BackgroundColor = nil
+	for _, p := range []*ansi.StylePrimitive{&s.Link, &s.LinkText, &s.Image, &s.Code.StylePrimitive} {
+		p.Color = muted
+	}
+	s.Code.BackgroundColor = nil
+	s.CodeBlock.Theme = ""
+	return s
+}
+
+// variantHex is c for the current dark or light background.
+func variantHex(c ac) *string {
+	v := c.Light
+	if darkBG {
+		v = c.Dark
+	}
+	return &v
 }
 
 func themeNames() []string {
