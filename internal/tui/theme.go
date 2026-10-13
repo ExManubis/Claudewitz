@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"github.com/charmbracelet/glamour/ansi"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
 	colorful "github.com/lucasb-eyer/go-colorful"
 )
@@ -26,10 +28,9 @@ type theme struct {
 	// bg is the palette's intended background, used for tints and fades.
 	// Empty means a neutral dark/light.
 	bg ac
-	// Syntax-highlighting (chroma) and Markdown (glamour) styles per
-	// variant; empty falls back to dracula/github and dark/light.
-	chromaDark, chromaLight   string
-	glamourDark, glamourLight string
+	// Syntax-highlighting (chroma) style per variant; empty falls back
+	// to dracula/github. Markdown code blocks use it too.
+	chromaDark, chromaLight string
 
 	chroma string // resolved for the current variant
 }
@@ -70,112 +71,100 @@ var themes = []theme{
 	{
 		// https://stephango.com/flexoki — dark uses the 400 accents on
 		// black, light the 600 accents on paper.
-		name:         "flexoki",
-		desc:         "Inky paper tones by Steph Ango",
-		accent:       ac{Light: "#BC5215", Dark: "#DA702C"}, // orange
-		second:       ac{Light: "#24837B", Dark: "#3AA99F"}, // cyan
-		muted:        ac{Light: "#6F6E69", Dark: "#878580"}, // tx-2
-		subtle:       ac{Light: "#DAD8CE", Dark: "#343331"}, // ui-2
-		text:         ac{Light: "#100F0F", Dark: "#CECDC3"}, // tx
-		user:         ac{Light: "#205EA6", Dark: "#4385BE"}, // blue
-		ok:           ac{Light: "#66800B", Dark: "#879A39"}, // green
-		err:          ac{Light: "#AF3029", Dark: "#D14D41"}, // red
-		warn:         ac{Light: "#AD8301", Dark: "#D0A215"}, // yellow
-		bg:           ac{Light: "#FFFCF0", Dark: "#100F0F"},
-		chromaDark:   "flexoki-dark",
-		chromaLight:  "flexoki-light",
-		glamourDark:  "dark",
-		glamourLight: "light",
+		name:        "flexoki",
+		desc:        "Inky paper tones by Steph Ango",
+		accent:      ac{Light: "#BC5215", Dark: "#DA702C"}, // orange
+		second:      ac{Light: "#24837B", Dark: "#3AA99F"}, // cyan
+		muted:       ac{Light: "#6F6E69", Dark: "#878580"}, // tx-2
+		subtle:      ac{Light: "#DAD8CE", Dark: "#343331"}, // ui-2
+		text:        ac{Light: "#100F0F", Dark: "#CECDC3"}, // tx
+		user:        ac{Light: "#205EA6", Dark: "#4385BE"}, // blue
+		ok:          ac{Light: "#66800B", Dark: "#879A39"}, // green
+		err:         ac{Light: "#AF3029", Dark: "#D14D41"}, // red
+		warn:        ac{Light: "#AD8301", Dark: "#D0A215"}, // yellow
+		bg:          ac{Light: "#FFFCF0", Dark: "#100F0F"},
+		chromaDark:  "flexoki-dark",
+		chromaLight: "flexoki-light",
 	},
 	{
-		name:         "catppuccin",
-		desc:         "Mocha when dark, Latte when light",
-		accent:       ac{Light: "#8839EF", Dark: "#CBA6F7"}, // mauve
-		second:       ac{Light: "#1E66F5", Dark: "#89B4FA"}, // blue
-		muted:        ac{Light: "#6C6F85", Dark: "#A6ADC8"}, // subtext0
-		subtle:       ac{Light: "#CCD0DA", Dark: "#45475A"}, // surface
-		text:         ac{Light: "#4C4F69", Dark: "#CDD6F4"},
-		user:         ac{Light: "#179299", Dark: "#94E2D5"}, // teal
-		ok:           ac{Light: "#40A02B", Dark: "#A6E3A1"},
-		err:          ac{Light: "#D20F39", Dark: "#F38BA8"},
-		warn:         ac{Light: "#DF8E1D", Dark: "#F9E2AF"},
-		bg:           ac{Light: "#EFF1F5", Dark: "#1E1E2E"},
-		chromaDark:   "catppuccin-mocha",
-		chromaLight:  "catppuccin-latte",
-		glamourDark:  "dark",
-		glamourLight: "light",
+		name:        "catppuccin",
+		desc:        "Mocha when dark, Latte when light",
+		accent:      ac{Light: "#8839EF", Dark: "#CBA6F7"}, // mauve
+		second:      ac{Light: "#1E66F5", Dark: "#89B4FA"}, // blue
+		muted:       ac{Light: "#6C6F85", Dark: "#A6ADC8"}, // subtext0
+		subtle:      ac{Light: "#CCD0DA", Dark: "#45475A"}, // surface
+		text:        ac{Light: "#4C4F69", Dark: "#CDD6F4"},
+		user:        ac{Light: "#179299", Dark: "#94E2D5"}, // teal
+		ok:          ac{Light: "#40A02B", Dark: "#A6E3A1"},
+		err:         ac{Light: "#D20F39", Dark: "#F38BA8"},
+		warn:        ac{Light: "#DF8E1D", Dark: "#F9E2AF"},
+		bg:          ac{Light: "#EFF1F5", Dark: "#1E1E2E"},
+		chromaDark:  "catppuccin-mocha",
+		chromaLight: "catppuccin-latte",
 	},
 	{
-		name:         "tokyonight",
-		desc:         "Night when dark, Day when light",
-		accent:       ac{Light: "#2E7DE9", Dark: "#7AA2F7"}, // blue
-		second:       ac{Light: "#9854F1", Dark: "#BB9AF7"}, // magenta
-		muted:        ac{Light: "#848CB5", Dark: "#565F89"}, // comment
-		subtle:       ac{Light: "#C4C8DA", Dark: "#292E42"},
-		text:         ac{Light: "#3760BF", Dark: "#C0CAF5"},
-		user:         ac{Light: "#007197", Dark: "#7DCFFF"}, // cyan
-		ok:           ac{Light: "#587539", Dark: "#9ECE6A"},
-		err:          ac{Light: "#F52A65", Dark: "#F7768E"},
-		warn:         ac{Light: "#8C6C3E", Dark: "#E0AF68"},
-		bg:           ac{Light: "#E1E2E7", Dark: "#1A1B26"},
-		chromaDark:   "tokyonight-night",
-		chromaLight:  "tokyonight-day",
-		glamourDark:  "tokyo-night",
-		glamourLight: "light",
+		name:        "tokyonight",
+		desc:        "Night when dark, Day when light",
+		accent:      ac{Light: "#2E7DE9", Dark: "#7AA2F7"}, // blue
+		second:      ac{Light: "#9854F1", Dark: "#BB9AF7"}, // magenta
+		muted:       ac{Light: "#848CB5", Dark: "#565F89"}, // comment
+		subtle:      ac{Light: "#C4C8DA", Dark: "#292E42"},
+		text:        ac{Light: "#3760BF", Dark: "#C0CAF5"},
+		user:        ac{Light: "#007197", Dark: "#7DCFFF"}, // cyan
+		ok:          ac{Light: "#587539", Dark: "#9ECE6A"},
+		err:         ac{Light: "#F52A65", Dark: "#F7768E"},
+		warn:        ac{Light: "#8C6C3E", Dark: "#E0AF68"},
+		bg:          ac{Light: "#E1E2E7", Dark: "#1A1B26"},
+		chromaDark:  "tokyonight-night",
+		chromaLight: "tokyonight-day",
 	},
 	{
-		name:         "gruvbox",
-		desc:         "Retro groove, warm and earthy",
-		accent:       ac{Light: "#AF3A03", Dark: "#FE8019"}, // orange
-		second:       ac{Light: "#B57614", Dark: "#FABD2F"}, // yellow
-		muted:        ac{Light: "#928374", Dark: "#928374"},
-		subtle:       ac{Light: "#D5C4A1", Dark: "#504945"},
-		text:         ac{Light: "#3C3836", Dark: "#EBDBB2"},
-		user:         ac{Light: "#076678", Dark: "#83A598"}, // blue
-		ok:           ac{Light: "#79740E", Dark: "#B8BB26"},
-		err:          ac{Light: "#9D0006", Dark: "#FB4934"},
-		warn:         ac{Light: "#B57614", Dark: "#FABD2F"},
-		bg:           ac{Light: "#FBF1C7", Dark: "#282828"},
-		chromaDark:   "gruvbox",
-		chromaLight:  "gruvbox-light",
-		glamourDark:  "dark",
-		glamourLight: "light",
+		name:        "gruvbox",
+		desc:        "Retro groove, warm and earthy",
+		accent:      ac{Light: "#AF3A03", Dark: "#FE8019"}, // orange
+		second:      ac{Light: "#B57614", Dark: "#FABD2F"}, // yellow
+		muted:       ac{Light: "#928374", Dark: "#928374"},
+		subtle:      ac{Light: "#D5C4A1", Dark: "#504945"},
+		text:        ac{Light: "#3C3836", Dark: "#EBDBB2"},
+		user:        ac{Light: "#076678", Dark: "#83A598"}, // blue
+		ok:          ac{Light: "#79740E", Dark: "#B8BB26"},
+		err:         ac{Light: "#9D0006", Dark: "#FB4934"},
+		warn:        ac{Light: "#B57614", Dark: "#FABD2F"},
+		bg:          ac{Light: "#FBF1C7", Dark: "#282828"},
+		chromaDark:  "gruvbox",
+		chromaLight: "gruvbox-light",
 	},
 	{
-		name:         "dracula",
-		desc:         "Dracula when dark, Alucard when light",
-		accent:       ac{Light: "#644AC9", Dark: "#BD93F9"}, // purple
-		second:       ac{Light: "#A3144D", Dark: "#FF79C6"}, // pink
-		muted:        ac{Light: "#635D97", Dark: "#6272A4"}, // comment
-		subtle:       ac{Light: "#CFCFDE", Dark: "#44475A"},
-		text:         ac{Light: "#1F1F1F", Dark: "#F8F8F2"},
-		user:         ac{Light: "#036A96", Dark: "#8BE9FD"}, // cyan
-		ok:           ac{Light: "#14710A", Dark: "#50FA7B"},
-		err:          ac{Light: "#CB3A2A", Dark: "#FF5555"},
-		warn:         ac{Light: "#846E15", Dark: "#F1FA8C"},
-		bg:           ac{Light: "#FFFBEB", Dark: "#282A36"},
-		chromaDark:   "dracula",
-		chromaLight:  "github",
-		glamourDark:  "dracula",
-		glamourLight: "light",
+		name:        "dracula",
+		desc:        "Dracula when dark, Alucard when light",
+		accent:      ac{Light: "#644AC9", Dark: "#BD93F9"}, // purple
+		second:      ac{Light: "#A3144D", Dark: "#FF79C6"}, // pink
+		muted:       ac{Light: "#635D97", Dark: "#6272A4"}, // comment
+		subtle:      ac{Light: "#CFCFDE", Dark: "#44475A"},
+		text:        ac{Light: "#1F1F1F", Dark: "#F8F8F2"},
+		user:        ac{Light: "#036A96", Dark: "#8BE9FD"}, // cyan
+		ok:          ac{Light: "#14710A", Dark: "#50FA7B"},
+		err:         ac{Light: "#CB3A2A", Dark: "#FF5555"},
+		warn:        ac{Light: "#846E15", Dark: "#F1FA8C"},
+		bg:          ac{Light: "#FFFBEB", Dark: "#282A36"},
+		chromaDark:  "dracula",
+		chromaLight: "github",
 	},
 	{
-		name:         "nord",
-		desc:         "Arctic frost blues",
-		accent:       ac{Light: "#5E81AC", Dark: "#88C0D0"}, // frost
-		second:       ac{Light: "#9A6E94", Dark: "#B48EAD"}, // aurora purple
-		muted:        ac{Light: "#4C566A", Dark: "#7B88A1"},
-		subtle:       ac{Light: "#D8DEE9", Dark: "#3B4252"},
-		text:         ac{Light: "#2E3440", Dark: "#ECEFF4"},
-		user:         ac{Light: "#5E81AC", Dark: "#81A1C1"},
-		ok:           ac{Light: "#5A7F4C", Dark: "#A3BE8C"},
-		err:          ac{Light: "#A5434C", Dark: "#BF616A"},
-		warn:         ac{Light: "#9C7A2B", Dark: "#EBCB8B"},
-		bg:           ac{Light: "#ECEFF4", Dark: "#2E3440"},
-		chromaDark:   "nord",
-		chromaLight:  "github",
-		glamourDark:  "dark",
-		glamourLight: "light",
+		name:        "nord",
+		desc:        "Arctic frost blues",
+		accent:      ac{Light: "#5E81AC", Dark: "#88C0D0"}, // frost
+		second:      ac{Light: "#9A6E94", Dark: "#B48EAD"}, // aurora purple
+		muted:       ac{Light: "#4C566A", Dark: "#7B88A1"},
+		subtle:      ac{Light: "#D8DEE9", Dark: "#3B4252"},
+		text:        ac{Light: "#2E3440", Dark: "#ECEFF4"},
+		user:        ac{Light: "#5E81AC", Dark: "#81A1C1"},
+		ok:          ac{Light: "#5A7F4C", Dark: "#A3BE8C"},
+		err:         ac{Light: "#A5434C", Dark: "#BF616A"},
+		warn:        ac{Light: "#9C7A2B", Dark: "#EBCB8B"},
+		bg:          ac{Light: "#ECEFF4", Dark: "#2E3440"},
+		chromaDark:  "nord",
+		chromaLight: "github",
 	},
 	{
 		name:        "mono",
@@ -267,10 +256,7 @@ func applyTheme(name string) bool {
 	}
 	activeTheme = found
 	t := &activeTheme
-	bg := t.bg
-	if bg.Dark == "" {
-		bg = ac{Light: "#FBFAF8", Dark: "#1A1817"}
-	}
+	bg := t.background()
 	if t.addBg.Dark == "" {
 		t.addBg = tint(t.ok, bg, 0.30, 0.22)
 	}
@@ -313,13 +299,48 @@ func applyTheme(name string) bool {
 	return true
 }
 
-// glamourStyle is the Markdown style for the active theme and variant.
-func glamourStyle() string {
-	t := activeTheme
-	if darkBG {
-		return firstNonEmpty(t.glamourDark, "dark")
+// background is the theme's bg, or a neutral dark/light when unset.
+func (t theme) background() ac {
+	if t.bg.Dark == "" {
+		return ac{Light: "#FBFAF8", Dark: "#1A1817"}
 	}
-	return firstNonEmpty(t.glamourLight, "light")
+	return t.bg
+}
+
+// markdownStyle is glamour's dark or light style recoloured with the
+// active theme, so replies share the palette of the rest of the UI.
+func markdownStyle() ansi.StyleConfig {
+	t := activeTheme
+	s := styles.LightStyleConfig
+	if darkBG {
+		s = styles.DarkStyleConfig
+	}
+	// Each variant's hex for the current background; the base config's
+	// pointers are shared, so fields are replaced, never written through.
+	hex := func(c ac) *string {
+		v := c.Light
+		if darkBG {
+			v = c.Dark
+		}
+		return &v
+	}
+	s.Document.Color = hex(t.text)
+	s.Heading.Color = hex(t.accent)
+	s.H1.Color = hex(t.background())
+	s.H1.BackgroundColor = hex(t.accent)
+	s.H6.Color = hex(t.muted)
+	s.BlockQuote.Color = hex(t.muted)
+	s.HorizontalRule.Color = hex(t.muted)
+	s.Link.Color = hex(t.user)
+	s.LinkText.Color = hex(t.second)
+	s.Image.Color = hex(t.second)
+	s.ImageText.Color = hex(t.muted)
+	s.Code.Color = hex(t.accent)
+	s.Code.BackgroundColor = hex(t.subtle)
+	s.CodeBlock.Color = hex(t.muted)
+	s.CodeBlock.Chroma = nil
+	s.CodeBlock.Theme = t.chroma
+	return s
 }
 
 func themeNames() []string {
