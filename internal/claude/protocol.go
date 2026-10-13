@@ -159,6 +159,9 @@ type ModelInfo struct {
 	ResolvedModel string `json:"resolvedModel"`
 	DisplayName   string `json:"displayName"`
 	Description   string `json:"description"`
+	// Effort levels the model accepts (low, medium, high, xhigh, max).
+	SupportsEffort        bool     `json:"supportsEffort"`
+	SupportedEffortLevels []string `json:"supportedEffortLevels"`
 }
 
 // InitializeResponse answers the host's initialize control request.

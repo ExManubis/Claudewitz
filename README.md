@@ -29,7 +29,7 @@ skills, hooks, `CLAUDE.md` and session history.
 
 ```sh
 go run .                      # in the project you want to work on
-go run . -model opus -mode acceptEdits
+go run . -model opus -effort high -mode acceptEdits
 go run . -continue            # pick up the latest session in this directory
 go run . -resume <session-id>
 go run . -- --add-dir ../lib  # anything after -- goes straight to claude
@@ -49,7 +49,9 @@ go run . -- --add-dir ../lib  # anything after -- goes straight to claude
 - Todo list (from `TodoWrite` / `TaskCreate` / `TaskUpdate`)
 - Live sub-agent activity: type, task, tool count, tokens, elapsed time and their latest
   tool calls, also mirrored under the `Agent` call in the chat
-- Modified files with added/removed line counts
+- Git: branch, ahead/behind upstream, staged/changed/new counts and the last commit
+- Changes: the working tree's changed files with status letters and +/- counts, ✻ marking
+  files Claude edited this session (outside a repository: the files Claude edited)
 
 **Sessions** (`ctrl+r` or `/resume`)
 - Browse sessions for this project or all projects (`tab`), filter as you type
@@ -65,18 +67,36 @@ go run . -- --add-dir ../lib  # anything after -- goes straight to claude
 - Edit/Write requests preview the diff; sub-agent requests name the agent asking
 - Permission modes: `shift+tab` cycles default → accept edits → plan
 
-**Themes**: `claude` (default), `charm`, `mono`, via `-theme` or `/theme`, each with light and
-dark variants.
+**Model picker** (`ctrl+t`, `/model`, or the palette)
+- Every model the CLI offers, with descriptions and the resolved model id
+- Effort level per model (low → max) with a meter; applied to the running session, and kept
+  for `/new` and resumes. Also `/effort <level>` and `-effort` on the command line
+
+**Toasts**: notifications slide in at the top right and fade out, for model, effort, mode and
+theme changes, resumed and new sessions, background agents finishing, long turns finishing,
+rate limits, usage crossing 80% and 90% of the 5-hour or weekly window, branch switches and new
+commits (including ones made outside claudewitz), and Claude Code exiting
+
+**Themes** (`/theme` or the palette opens the picker)
+- claude (default), charm, flexoki, catppuccin, tokyonight, gruvbox, dracula, nord, mono,
+  each with light and dark variants and matching syntax highlighting
+- The picker previews each theme live across the whole UI as you move through it; enter saves,
+  esc puts everything back. ←→ forces the dark or light variant when detection gets it wrong
+- Saved to `~/.config/claudewitz/config.json` (macOS: `~/Library/Application Support/claudewitz/`,
+  or `$CLAUDEWITZ_CONFIG`); `-theme name` overrides it for one run
 
 ## How it talks to Claude Code
 
 - Starts `claude -p` in stream-json mode with `--permission-prompt-tool stdio` and
   `--forward-subagent-text`
 - Sends an `initialize` control request on startup to get commands, models and account info
+- Switches model with `set_model` and effort with `apply_flag_settings` (`effortLevel`), mid-session
 - Renders `stream_event` deltas live and takes tool calls and results from complete messages
 - Follows sub-agents through `task_started` / `task_progress` / `task_updated` /
   `task_notification` events and messages tagged with `parent_tool_use_id`
 - Reads history from `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`
+- Reads git state with `git status --porcelain=v2` and `git diff --numstat` after file-changing
+  tools, after each turn and every 4s, with `GIT_OPTIONAL_LOCKS=0` so it never holds the index lock
 - Removes `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` from the child's environment so that running
   claudewitz inside Claude Code doesn't pin every child to the parent session
 

@@ -18,6 +18,7 @@ import (
 type Options struct {
 	Binary         string // defaults to "claude"
 	Model          string
+	Effort         string // low, medium, high, xhigh, max; empty for the model default
 	PermissionMode string
 	Resume         string // session ID to resume
 	Continue       bool
@@ -68,6 +69,9 @@ func Start(ctx context.Context, opts Options) (*Process, error) {
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.Effort != "" {
+		args = append(args, "--effort", opts.Effort)
 	}
 	if opts.PermissionMode != "" {
 		args = append(args, "--permission-mode", opts.PermissionMode)
@@ -281,6 +285,15 @@ func (p *Process) SetPermissionMode(mode string) error {
 // SetModel switches model mid-session.
 func (p *Process) SetModel(model string) error {
 	return p.control(map[string]any{"subtype": "set_model", "model": model})
+}
+
+// SetEffort changes the effort level mid-session. The CLI has no dedicated
+// request for it; effortLevel is applied as a flag setting.
+func (p *Process) SetEffort(level string) error {
+	return p.control(map[string]any{
+		"subtype":  "apply_flag_settings",
+		"settings": map[string]any{"effortLevel": level},
+	})
 }
 
 // Close ends stdin, which lets the CLI exit cleanly.

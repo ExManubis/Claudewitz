@@ -330,11 +330,12 @@ func (m Model) sidebarView(height int) string {
 	var sec []string
 
 	// Header
-	title := assistLabel.Render("✻ claudewitz")
+	th := currentTheme()
+	title := assistLabel.Render("✻ ") + gradientText("CLAUDEWITZ", true) + " "
+	sec = append(sec, title+stripes(max(0, w-lipgloss.Width(title)), th.second, th.subtle))
 	if m.initResp != nil && m.initResp.Account.SubscriptionType != "" {
-		title += mutedStyle.Render(" · " + m.initResp.Account.SubscriptionType)
+		sec = append(sec, mutedStyle.Render(m.initResp.Account.SubscriptionType))
 	}
-	sec = append(sec, title)
 	if m.sessionTitle != "" {
 		sec = append(sec, textStyle.Render(truncate(m.sessionTitle, w)))
 	}
@@ -344,7 +345,7 @@ func (m Model) sidebarView(height int) string {
 	}
 	meta := []string{}
 	if m.model != "" {
-		meta = append(meta, m.model)
+		meta = append(meta, strings.TrimSpace(m.model+" "+m.opts.Effort))
 	}
 	if m.sessionID != "" {
 		meta = append(meta, m.sessionID[:min(8, len(m.sessionID))])
@@ -412,8 +413,11 @@ func (m Model) sidebarView(height int) string {
 		}
 	}
 
-	// Files
-	if len(t.files) > 0 {
+	// Git state and working-tree changes; outside a repository, fall back
+	// to the files Claude edited.
+	if m.git.IsRepo {
+		sec = append(sec, m.gitSection(w)...)
+	} else if len(t.files) > 0 {
 		sec = append(sec, sectionTitle.Render("Modified files")+mutedStyle.Render(fmt.Sprintf(" %d", len(t.files))))
 		for _, f := range t.files {
 			stats := ""
@@ -439,11 +443,9 @@ func (m Model) sidebarView(height int) string {
 		}
 	}
 
-	if len(t.todos) == 0 && len(t.agents) == 0 && len(t.files) == 0 {
+	if len(t.todos) == 0 && len(t.agents) == 0 && len(t.files) == 0 && !m.git.IsRepo {
 		sec = append(sec, "", mutedStyle.Render("Todos, sub-agents and edited"), mutedStyle.Render("files will show up here."))
 	}
-
-	sec = append(sec, "", mutedStyle.Render("ctrl+b hide · ctrl+r sessions"))
 
 	body := lipgloss.JoinVertical(lipgloss.Left, sec...)
 	lines := strings.Split(body, "\n")
