@@ -77,8 +77,13 @@ theme changes, resumed and new sessions, background agents finishing, long turns
 rate limits, usage crossing 80% and 90% of the 5-hour or weekly window, branch switches and new
 commits (including ones made outside claudewitz), and Claude Code exiting
 
-**Themes**: `claude` (default), `charm`, `mono`, via `-theme` or `/theme`, each with light and
-dark variants.
+**Themes** (`/theme` or the palette opens the picker)
+- claude (default), charm, flexoki, catppuccin, tokyonight, gruvbox, dracula, nord, mono,
+  each with light and dark variants and matching syntax highlighting
+- The picker previews each theme live across the whole UI as you move through it; enter saves,
+  esc puts everything back. ←→ forces the dark or light variant when detection gets it wrong
+- Saved to `~/.config/claudewitz/config.json` (macOS: `~/Library/Application Support/claudewitz/`,
+  or `$CLAUDEWITZ_CONFIG`); `-theme name` overrides it for one run
 
 ## How it talks to Claude Code
 

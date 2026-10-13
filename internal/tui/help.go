@@ -30,6 +30,8 @@ func (m Model) helpPairs() [][2]string {
 	switch {
 	case m.showHelp:
 		return [][2]string{{"esc", "close"}}
+	case m.themePick != nil:
+		return [][2]string{{"↑↓", "theme"}, {"←→", "appearance"}, {"enter", "save"}, {"esc", "cancel"}}
 	case m.modelPick != nil:
 		return [][2]string{{"↑↓", "model"}, {"←→", "effort"}, {"enter", "apply"}, {"esc", "cancel"}}
 	case m.palette != nil:

@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
+	"github.com/exmanubis/claudewitz/internal/config"
 	"github.com/exmanubis/claudewitz/internal/gitstatus"
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
@@ -34,6 +35,8 @@ type Model struct {
 	picker    *picker
 	palette   *palette
 	modelPick *modelPicker
+	themePick *themePicker
+	cfg       config.Config
 
 	toasts       []toast
 	toastID      int
@@ -81,9 +84,12 @@ type Model struct {
 }
 
 // New builds the model; the CLI is started from Init.
-func New(ctx context.Context, opts claude.Options, themeName string) Model {
-	if themeName != "" {
-		applyTheme(themeName)
+// The config's theme and appearance are applied here; callers that want a
+// one-off theme (the -theme flag) set cfg.Theme without saving it.
+func New(ctx context.Context, opts claude.Options, cfg config.Config) Model {
+	setAppearance(cfg.Appearance)
+	if !applyTheme(cfg.Theme) {
+		applyTheme(themes[0].name)
 	}
 	if opts.CWD == "" {
 		opts.CWD, _ = os.Getwd()
@@ -124,6 +130,7 @@ func New(ctx context.Context, opts claude.Options, themeName string) Model {
 		limits:      map[string]claude.RateLimitWindow{},
 		limitWarned: map[string]int{},
 		alwaysAllow: map[string]bool{},
+		cfg:         cfg,
 	}
 }
 
@@ -273,7 +280,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, animTick(m.animID)
 
 	case tea.MouseMsg:
-		if m.picker == nil && m.palette == nil && m.modelPick == nil && !m.showHelp {
+		if m.picker == nil && m.palette == nil && m.modelPick == nil && m.themePick == nil && !m.showHelp {
 			var c tea.Cmd
 			m.vp, c = m.vp.Update(msg)
 			m.follow = m.vp.AtBottom()
@@ -287,6 +294,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHelp = false
 			}
 			return m, nil
+		}
+		if m.themePick != nil {
+			return m, m.handleThemePickerKey(msg)
 		}
 		if m.modelPick != nil {
 			return m, m.handleModelPickerKey(msg)
@@ -938,17 +948,14 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		return m.setPermissionMode(arg), true
 	case "/theme":
 		if arg == "" {
-			m.chat.info("theme: %s (themes: %s)", currentTheme().name, strings.Join(themeNames(), ", "))
+			m.openThemePicker()
 			return nil, true
 		}
 		if !applyTheme(arg) {
 			return m.notify(toastError, "Unknown theme "+arg, strings.Join(themeNames(), ", ")), true
 		}
-		m.spin.Style = lipgloss.NewStyle().Foreground(currentTheme().accent)
-		m.input.FocusedStyle.Placeholder = mutedStyle
-		m.input.BlurredStyle.Placeholder = mutedStyle
-		m.chat.markAllDirty()
-		return m.notify(toastSuccess, "Theme: "+arg, ""), true
+		m.restyle()
+		return m.saveTheme(), true
 	case "/sidebar":
 		m.sidebarOn = !m.sidebarOn
 		m.layout()
@@ -1062,6 +1069,10 @@ func (m Model) View() string {
 	switch {
 	case m.showHelp:
 		screen = center(screen, helpDialog(m.width-4), m.width, h)
+	case m.themePick != nil:
+		// Pinned to the right so the live preview leaves the chat visible.
+		box := m.themePick.view(m.width)
+		screen = overlay(screen, box, max(0, m.width-lipgloss.Width(box)-1), max(0, (h-lipgloss.Height(box))/2))
 	case m.modelPick != nil:
 		screen = center(screen, m.modelPick.view(m.width), m.width, h)
 	case m.palette != nil:
@@ -1303,7 +1314,7 @@ const helpText = `commands
   /model [name]       switch model (no name opens the picker, ctrl+t)
   /effort <level>     effort: low, medium, high, xhigh, max
   /mode <mode>        permission mode: default, acceptEdits, plan
-  /theme <name>       colour theme: claude, charm, mono
+  /theme [name]       colour theme (no name opens the picker); saved to config
   /sidebar            toggle the sidebar
   /session            show session id and cwd
   /quit               exit

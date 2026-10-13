@@ -187,8 +187,8 @@ func (m *Model) argSuggestions(cmd string) []suggestion {
 			out = append(out, suggestion{label: l, insert: l, desc: effortDesc[l]})
 		}
 	case "/theme":
-		for _, n := range themeNames() {
-			out = append(out, suggestion{label: n, insert: n})
+		for _, t := range themes {
+			out = append(out, suggestion{label: t.name, insert: t.name, desc: t.desc})
 		}
 	}
 	return out

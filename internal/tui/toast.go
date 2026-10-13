@@ -97,6 +97,9 @@ func (k toastKind) style() (icon string, col lipgloss.AdaptiveColor) {
 
 // backdrop approximates the terminal background, which fades blend into.
 func backdrop() colorful.Color {
+	if bg := activeTheme.bg; bg.Dark != "" {
+		return resolve(bg)
+	}
 	if darkBG {
 		c, _ := colorful.Hex("#1a1817")
 		return c

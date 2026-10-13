@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
+	"github.com/exmanubis/claudewitz/internal/config"
 	"github.com/exmanubis/claudewitz/internal/tui"
 )
 
@@ -22,7 +23,7 @@ func main() {
 	flag.StringVar(&opts.Resume, "resume", "", "resume a session by id")
 	flag.BoolVar(&opts.Continue, "continue", false, "continue the most recent session in this directory")
 	flag.StringVar(&opts.CWD, "cwd", "", "working directory (defaults to current)")
-	theme := flag.String("theme", "claude", "colour theme: claude, charm, mono")
+	theme := flag.String("theme", "", "colour theme for this run (overrides the saved one)")
 	flag.Parse()
 	opts.ExtraArgs = flag.Args()
 
@@ -34,7 +35,15 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	p := tea.NewProgram(tui.New(ctx, opts, *theme), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "claudewitz: ignoring unreadable config %s: %v\n", config.Path(), err)
+	}
+	if *theme != "" {
+		cfg.Theme = *theme
+	}
+
+	p := tea.NewProgram(tui.New(ctx, opts, cfg), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

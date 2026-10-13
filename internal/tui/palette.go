@@ -127,6 +127,10 @@ func (m *Model) actions() []action {
 		add("Mode", pm, modeDesc[pm], cur, func(m *Model) tea.Cmd { return m.setPermissionMode(pm) })
 	}
 
+	add("Theme", "Choose theme…", "browse themes with a live preview", "/theme", func(m *Model) tea.Cmd {
+		m.openThemePicker()
+		return nil
+	})
 	for _, t := range themeNames() {
 		t := t
 		cur := ""

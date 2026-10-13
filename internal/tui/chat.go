@@ -109,11 +109,7 @@ func (c *chat) markAgentsDirty() {
 
 func (c *chat) renderer(width int) *glamour.TermRenderer {
 	if c.md == nil || c.mdWidth != width {
-		style := "dark"
-		if !darkBG {
-			style = "light"
-		}
-		if r, err := glamour.NewTermRenderer(glamour.WithStandardStyle(style), glamour.WithWordWrap(width)); err == nil {
+		if r, err := glamour.NewTermRenderer(glamour.WithStandardStyle(glamourStyle()), glamour.WithWordWrap(width)); err == nil {
 			c.md, c.mdWidth = r, width
 		}
 	}
