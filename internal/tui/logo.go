@@ -4,58 +4,18 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"sync"
 
 	colorful "github.com/lucasb-eyer/go-colorful"
 )
 
-// The claudewitz logo: the headphone bean next to the CLAUDEWITZ wordmark.
-// In the terminal it's Braille and block letters; logoSVG draws the same
-// lockup as dots for the README.
+// The claudewitz logo, for the README: the headphone bean next to the
+// CLAUDEWITZ wordmark, drawn as a dot matrix. The app itself keeps the
+// plain wordmark, since the bean already lives in the sidebar.
 
 // logoPose is the bean as it appears in the logo: turned a little so it
 // reads as 3D, eyes wide open, no notes.
 func logoPose() beanPose {
 	return beanPose{yaw: 0.38, pitch: -0.15, eyeOpen: 1.1}
-}
-
-var logoCache struct {
-	sync.Mutex
-	cols, rows int
-	frame      beanFrame
-}
-
-// logoFrame renders (once per size) the logo bean.
-func logoFrame(cols, rows int) *beanFrame {
-	logoCache.Lock()
-	defer logoCache.Unlock()
-	if logoCache.cols != cols || logoCache.rows != rows {
-		logoCache.cols, logoCache.rows = cols, rows
-		logoCache.frame = renderBean(cols*2, rows*4, logoPose())
-	}
-	return &logoCache.frame
-}
-
-const logoBeanCols, logoBeanRows = 18, 8
-
-// logoLockup is the bean beside the wordmark, for the welcome screen. It
-// falls back to the wordmark alone when there's no room for both.
-func logoLockup(width int) string {
-	gap := 2
-	if width < logoBeanCols+gap+42 {
-		return bigLogo("CLAUDEWITZ", width)
-	}
-	word := strings.Split(bigLogo("CLAUDEWITZ", width-logoBeanCols-gap), "\n")
-	bean := strings.Split(drawBean(logoFrame(logoBeanCols, logoBeanRows), logoBeanCols*2, logoBeanCols, logoBeanRows, beanStyles(currentTheme(), nil)), "\n")
-	top := (logoBeanRows - len(word)) / 2
-	out := make([]string, logoBeanRows)
-	for i := range out {
-		out[i] = bean[i]
-		if j := i - top; j >= 0 && j < len(word) {
-			out[i] += strings.Repeat(" ", gap) + word[j]
-		}
-	}
-	return strings.Join(out, "\n")
 }
 
 // logoSVG draws the lockup as a dot matrix: the bean dithered from a larger
