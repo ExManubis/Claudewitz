@@ -49,7 +49,9 @@ go run . -- --add-dir ../lib  # anything after -- goes straight to claude
 - Todo list (from `TodoWrite` / `TaskCreate` / `TaskUpdate`)
 - Live sub-agent activity: type, task, tool count, tokens, elapsed time and their latest
   tool calls, also mirrored under the `Agent` call in the chat
-- Modified files with added/removed line counts
+- Git: branch, ahead/behind upstream, staged/changed/new counts and the last commit
+- Changes: the working tree's changed files with status letters and +/- counts, ✻ marking
+  files Claude edited this session (outside a repository: the files Claude edited)
 
 **Sessions** (`ctrl+r` or `/resume`)
 - Browse sessions for this project or all projects (`tab`), filter as you type
@@ -72,7 +74,8 @@ go run . -- --add-dir ../lib  # anything after -- goes straight to claude
 
 **Toasts**: notifications slide in at the top right and fade out, for model, effort, mode and
 theme changes, resumed and new sessions, background agents finishing, long turns finishing,
-rate limits, usage crossing 80% and 90% of the 5-hour or weekly window, and Claude Code exiting
+rate limits, usage crossing 80% and 90% of the 5-hour or weekly window, branch switches and new
+commits (including ones made outside claudewitz), and Claude Code exiting
 
 **Themes**: `claude` (default), `charm`, `mono`, via `-theme` or `/theme`, each with light and
 dark variants.
@@ -87,6 +90,8 @@ dark variants.
 - Follows sub-agents through `task_started` / `task_progress` / `task_updated` /
   `task_notification` events and messages tagged with `parent_tool_use_id`
 - Reads history from `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`
+- Reads git state with `git status --porcelain=v2` and `git diff --numstat` after file-changing
+  tools, after each turn and every 4s, with `GIT_OPTIONAL_LOCKS=0` so it never holds the index lock
 - Removes `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` from the child's environment so that running
   claudewitz inside Claude Code doesn't pin every child to the parent session
 

@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
+	"github.com/exmanubis/claudewitz/internal/gitstatus"
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
 
@@ -38,25 +39,29 @@ type Model struct {
 	toastID      int
 	toastTicking bool
 	limitWarned  map[string]int // usage window -> highest % already warned about
-	showHelp     bool
-	files        []string
-	vp           viewport.Model
-	input        textarea.Model
-	spin         spinner.Model
-	width        int
-	height       int
-	ready        bool
-	follow       bool // keep viewport pinned to bottom
-	busy         bool
-	stopped      bool // user interrupted the current turn
-	sidebarOn    bool
-	status       string
-	activity     string // what the live turn is doing, for the shimmer label
-	turnFrom     time.Time
-	ticks        int
-	animFrame    int
-	animID       int // generation of the running shimmer tick loop
-	animating    bool
+
+	git       gitstatus.Status
+	gitLoaded bool
+	gitBusy   bool
+	showHelp  bool
+	files     []string
+	vp        viewport.Model
+	input     textarea.Model
+	spin      spinner.Model
+	width     int
+	height    int
+	ready     bool
+	follow    bool // keep viewport pinned to bottom
+	busy      bool
+	stopped   bool // user interrupted the current turn
+	sidebarOn bool
+	status    string
+	activity  string // what the live turn is doing, for the shimmer label
+	turnFrom  time.Time
+	ticks     int
+	animFrame int
+	animID    int // generation of the running shimmer tick loop
+	animating bool
 
 	// session state
 	init         *claude.InitEvent
@@ -123,7 +128,7 @@ func New(ctx context.Context, opts claude.Options, themeName string) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, startCmd(m.ctx, m.opts), indexFiles(m.opts.CWD)}
+	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, startCmd(m.ctx, m.opts), indexFiles(m.opts.CWD), m.refreshGit(), gitPoll()}
 	if m.opts.Resume != "" || m.opts.Continue {
 		cmds = append(cmds, loadTranscript(m.opts.CWD, m.opts.Resume))
 	}
@@ -206,6 +211,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // stale process
 		}
 		cmds = append(cmds, m.handleEvent(msg.ev))
+		if touchesTree(msg.ev) {
+			cmds = append(cmds, m.refreshGit())
+		}
 		if m.proc != nil && !msg.ev.Exited {
 			cmds = append(cmds, waitEvent(m.proc))
 		}
@@ -221,6 +229,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case filesIndexedMsg:
 		m.files = msg
+
+	case gitStatusMsg:
+		return m, m.applyGit(msg)
+
+	case gitPollMsg:
+		return m, tea.Batch(m.refreshGit(), gitPoll())
 
 	case sessionsLoadedMsg:
 		if m.picker != nil && m.picker.all == msg.all {
@@ -748,7 +762,8 @@ func (m *Model) resume(s sessions.Info) tea.Cmd {
 		m.replay(transcriptMsg{info: s, msgs: msgs})
 	}
 	m.refresh()
-	return tea.Batch(cmd, indexFiles(m.opts.CWD), m.notify(toastSuccess, "Session resumed", s.Label()))
+	m.gitLoaded = false
+	return tea.Batch(cmd, indexFiles(m.opts.CWD), m.refreshGit(), m.notify(toastSuccess, "Session resumed", s.Label()))
 }
 
 func (m *Model) cyclePermissionMode() tea.Cmd {
@@ -1065,6 +1080,9 @@ func (m Model) headerInfo() string {
 	if m.model != "" {
 		parts = append(parts, strings.TrimSpace(m.model+" "+m.opts.Effort))
 	}
+	if b := m.branchLabel(true); b != "" {
+		parts = append(parts, b)
+	}
 	parts = append(parts, prettyPath(m.cwd()))
 	return mutedStyle.Render(truncateLeft(strings.Join(parts, " • "), max(10, m.mainWidth()/2)))
 }
@@ -1185,6 +1203,9 @@ func (m Model) statusView() string {
 		if m.model != "" {
 			parts = append(parts, strings.TrimSpace(m.model+" "+mutedStyle.Render(m.opts.Effort)))
 		}
+		if b := m.branchLabel(true); b != "" {
+			parts = append(parts, agentStyle.Render(b))
+		}
 		if ctx := contextTokens(m.lastUsage); ctx > 0 {
 			parts = append(parts, "ctx "+humanTokens(ctx))
 		}
@@ -1195,7 +1216,7 @@ func (m Model) statusView() string {
 			parts = append(parts, usageGauge("7d", w))
 		}
 	}
-	if m.costUSD > 0 && m.showSidebar() {
+	if m.costUSD >= 0.01 && m.showSidebar() {
 		parts = append(parts, mutedStyle.Render(fmt.Sprintf("≈$%.2f api-equiv", m.costUSD)))
 	}
 	left := strings.Join(parts, sep)

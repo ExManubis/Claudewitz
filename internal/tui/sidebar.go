@@ -413,8 +413,11 @@ func (m Model) sidebarView(height int) string {
 		}
 	}
 
-	// Files
-	if len(t.files) > 0 {
+	// Git state and working-tree changes; outside a repository, fall back
+	// to the files Claude edited.
+	if m.git.IsRepo {
+		sec = append(sec, m.gitSection(w)...)
+	} else if len(t.files) > 0 {
 		sec = append(sec, sectionTitle.Render("Modified files")+mutedStyle.Render(fmt.Sprintf(" %d", len(t.files))))
 		for _, f := range t.files {
 			stats := ""
@@ -440,7 +443,7 @@ func (m Model) sidebarView(height int) string {
 		}
 	}
 
-	if len(t.todos) == 0 && len(t.agents) == 0 && len(t.files) == 0 {
+	if len(t.todos) == 0 && len(t.agents) == 0 && len(t.files) == 0 && !m.git.IsRepo {
 		sec = append(sec, "", mutedStyle.Render("Todos, sub-agents and edited"), mutedStyle.Render("files will show up here."))
 	}
 
