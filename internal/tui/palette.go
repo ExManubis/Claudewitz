@@ -45,7 +45,7 @@ func (m *Model) openPalette() {
 
 func (m *Model) closePalette() {
 	m.palette = nil
-	if len(m.pending) == 0 && m.picker == nil {
+	if len(m.pending) == 0 && m.picker == nil && !m.chatFocus {
 		m.input.Focus()
 	}
 }

@@ -42,6 +42,9 @@ type Model struct {
 	queued  []string // sent mid-turn; shown as a pill until the CLI takes them
 	focused bool     // terminal focus, when the terminal reports it
 
+	chatFocus   bool // keys drive the transcript instead of the input
+	scrollToSel bool // bring the selected entry into view on next refresh
+
 	toasts       []toast
 	toastID      int
 	toastTicking bool
@@ -303,6 +306,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		if m.picker == nil && m.palette == nil && m.modelPick == nil && m.themePick == nil && !m.showHelp {
+			if m.clickChat(msg) {
+				return m, nil
+			}
 			var c tea.Cmd
 			m.vp, c = m.vp.Update(msg)
 			m.follow = m.vp.AtBottom()
@@ -331,6 +337,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if len(m.pending) > 0 {
 			return m, m.handlePermissionKey(msg)
+		}
+		if m.chatFocus {
+			if cmd, handled := m.handleChatKey(msg); handled {
+				return m, cmd
+			}
 		}
 		if m.comp.active && !(msg.String() == "enter" && m.comp.complete()) {
 			switch msg.String() {
@@ -393,6 +404,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+x":
 			return m, m.openEditor()
+		case "tab":
+			m.focusChat()
+			return m, nil
 		case "up", "down":
 			recall := m.hist.prev
 			if msg.String() == "down" {
@@ -585,6 +599,8 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 		if len(m.pending) == 1 {
 			m.startInteraction()
 		}
+		// A prompt needs an answer; leave the transcript (keeping the selection).
+		m.chatFocus, m.chat.focused = false, false
 		m.input.Blur()
 		m.layout()
 		switch p.ToolName {
@@ -764,7 +780,7 @@ func (m *Model) handlePermissionKey(k tea.KeyMsg) tea.Cmd {
 
 func (m *Model) afterPermission() {
 	m.startInteraction()
-	if len(m.pending) == 0 {
+	if len(m.pending) == 0 && !m.chatFocus {
 		m.input.Focus()
 	}
 	m.layout()
@@ -779,7 +795,7 @@ func (m *Model) openPicker() tea.Cmd {
 
 func (m *Model) closePicker() {
 	m.picker = nil
-	if len(m.pending) == 0 {
+	if len(m.pending) == 0 && !m.chatFocus {
 		m.input.Focus()
 	}
 }
@@ -1090,6 +1106,7 @@ func (m *Model) restart(o claude.Options) tea.Cmd {
 	m.pending = nil
 	m.question, m.plan = nil, nil
 	m.queued = nil
+	m.chatFocus = false
 	m.busy = false
 	m.costUSD = 0
 	m.sessionID = o.Resume
@@ -1152,9 +1169,13 @@ func (m *Model) refresh() {
 		content = m.splash()
 	}
 	m.vp.SetContent(content)
-	if m.follow {
+	switch {
+	case m.follow:
 		m.vp.GotoBottom()
+	case m.scrollToSel:
+		m.ensureSelVisible()
 	}
+	m.scrollToSel = false
 }
 
 func (m Model) View() string {

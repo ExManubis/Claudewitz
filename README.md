@@ -45,6 +45,13 @@ go run . -- --add-dir ../lib  # anything after -- goes straight to claude
 - Messages sent while Claude is working are queued: a pill above the input shows them until Claude
   picks them up, then they join the transcript at the point Claude actually reads them
 
+**Transcript navigation** (`tab` to focus the chat, `tab`/`esc` to go back)
+- `j`/`k` or arrows select messages and tool calls; `g`/`G` jump to the top or bottom; `d`/`u`
+  and `f`/`b` page the view and carry the selection
+- `space`/`enter` expands or collapses just the selected item (`ctrl+o` still toggles them all)
+- `y` copies the selected item's source (Markdown, command and output, file contents) via OSC 52
+- Click an entry to select it, click again to expand it; start typing to return to the input
+
 **Prompt**
 - `↑`/`↓` on an empty input recalls earlier prompts for this project, including ones from past
   sessions; kept in `history.jsonl` next to the config
