@@ -80,10 +80,13 @@ locally, terminal escape codes (OSC 9/99/777, tmux passthrough) over SSH, or the
 - Git: branch, ahead/behind upstream, staged/changed/new counts and the last commit
 - Changes: the working tree's changed files with status letters and +/- counts, ✻ marking
   files Claude edited this session (outside a repository: the files Claude edited)
-- Working indicator pinned to the bottom (about a quarter of the sidebar, hidden when it's under
-  20 rows): Braille sparks rest as a ✻, swirl while Claude works (faster while writing, running
-  commands or with agents out), gather back into the ✻ with a flash when the turn ends, and pulse
-  amber while a prompt waits for you. The caption under it shows the activity and elapsed time
+- The mascot, pinned to the bottom (about a quarter of the sidebar, hidden when it's under 20
+  rows): a 3D bean in headphones, ray-marched and dithered into Braille dots, bopping to a beat
+  with music notes drifting up. While Claude works it dissolves into a swirl of sparks (faster
+  while writing, running commands or with agents out); when the turn ends they gather back into
+  the bean with a flash. When a prompt waits for you it stops, faces you wide-eyed and its
+  headphones pulse amber. It holds still while the terminal isn't focused. The caption under it
+  shows the activity and elapsed time
 
 **Sessions** (`ctrl+r` or `/resume`)
 - Browse sessions for this project or all projects (`tab`), filter as you type

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 
@@ -20,9 +21,6 @@ func TestSparkRows(t *testing.T) {
 
 func TestSparkFieldView(t *testing.T) {
 	f := newSparkField(30, 8)
-	if len(f.sparks) == 0 {
-		t.Fatal("no sparks")
-	}
 	lines := strings.Split(f.view(), "\n")
 	if len(lines) != 8 {
 		t.Fatalf("got %d lines, want 8", len(lines))
@@ -39,7 +37,7 @@ func TestSparkFieldView(t *testing.T) {
 		}
 	}
 	if lit == 0 {
-		t.Error("idle star renders no dots")
+		t.Error("idle bean renders no dots")
 	}
 	f.resize(20, 5)
 	if n := len(strings.Split(f.view(), "\n")); n != 5 {
@@ -49,45 +47,68 @@ func TestSparkFieldView(t *testing.T) {
 
 func TestSparkModes(t *testing.T) {
 	f := newSparkField(30, 8)
-	if f.animating() {
-		t.Error("a fresh field should be still")
+	dt := 1.0 / sparkFPS
+	if f.mode != sparkIdle || !f.animating() {
+		t.Error("a fresh field should be bopping")
 	}
-	// Gathering with nothing to gather from stays idle.
-	f.setMode(sparkGathering)
-	if f.mode != sparkIdle {
-		t.Errorf("mode = %v, want idle", f.mode)
+	f.paused = true
+	if f.animating() {
+		t.Error("a paused idle field should be still")
+	}
+	f.paused = false
+	for i := 0; i < beanLoop; i++ {
+		f.step(0, dt)
+	}
+	if f.pending() {
+		t.Error("idle loop frames still unrendered after a loop's worth of ticks")
 	}
 
 	f.setMode(sparkWorking)
+	if f.mode != sparkWorking || len(f.sparks) == 0 {
+		t.Fatalf("mode %v with %d sparks, want working with sparks", f.mode, len(f.sparks))
+	}
 	for i := 0; i < sparkFPS*2; i++ {
-		f.step(1)
+		f.step(1, dt)
 	}
 	moved := 0
 	for _, s := range f.sparks {
-		if s.x != s.hx || s.y != s.hy {
+		if math.Abs(s.x-s.hx)+math.Abs(s.y-s.hy) > 1 {
 			moved++
 		}
 	}
 	if moved < len(f.sparks)/2 {
-		t.Errorf("only %d of %d sparks left home while working", moved, len(f.sparks))
+		t.Errorf("only %d of %d sparks left the bean while working", moved, len(f.sparks))
 	}
 
-	// Going idle from working gathers, then settles with a flash.
-	f.setMode(sparkIdle)
+	// The model's "not busy" request gathers, then settles with a flash.
+	f.setMode(sparkGathering)
 	if f.mode != sparkGathering {
 		t.Fatalf("mode = %v, want gathering", f.mode)
 	}
 	for i := 0; i < sparkFPS*10 && f.mode == sparkGathering; i++ {
-		f.step(0)
+		f.step(0, dt)
 	}
 	if f.mode != sparkIdle || f.flash <= 0 {
 		t.Fatalf("mode = %v flash = %v, want idle with a flash", f.mode, f.flash)
 	}
-	for i := 0; i < sparkFPS*3; i++ {
-		f.step(0)
+
+	// Waiting mid-turn gathers into the waiting pose instead.
+	f.setMode(sparkWorking)
+	f.setMode(sparkWaiting)
+	for i := 0; i < sparkFPS*10 && f.mode == sparkGathering; i++ {
+		f.step(0, dt)
 	}
-	if f.animating() {
-		t.Error("field still animating after settling")
+	if f.mode != sparkWaiting {
+		t.Fatalf("mode = %v, want waiting", f.mode)
+	}
+	if !strings.ContainsFunc(ansi.Strip(f.view()), func(r rune) bool { return r > 0x2800 && r <= 0x28ff }) {
+		t.Error("waiting bean renders no dots")
+	}
+}
+
+func BenchmarkRenderBean(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		renderBean(70, 40, beanIdlePose(i%beanLoop))
 	}
 }
 

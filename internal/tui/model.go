@@ -48,6 +48,7 @@ type Model struct {
 	sparks       *sparkField // working indicator at the foot of the sidebar
 	sparkTicking bool
 	sparkID      int
+	sparkLast    time.Time
 	lastTurn     time.Duration // how long the last turn took, for "Done in …"
 	lastTurnAt   time.Time
 
