@@ -1,6 +1,11 @@
 package tui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+)
 
 func TestAgentReport(t *testing.T) {
 	in := "[Subagent hand-back] The text below is the final report. The report follows:\n  line one\n\n  line two\nagentId: abc"
@@ -33,5 +38,21 @@ func TestFuzzyScore(t *testing.T) {
 	b, _ := fuzzyScore("mod", "/marketing:draft-content")
 	if a <= b {
 		t.Fatalf("prefix match should rank higher: %d vs %d", a, b)
+	}
+}
+
+func TestProseWidthCap(t *testing.T) {
+	c := newChat(&tracker{})
+	long := strings.Repeat("word ", 100)
+	for _, kind := range []entryKind{kindAssistant, kindThinking} {
+		out := c.renderEntry(&entry{kind: kind, text: long}, 300)
+		for _, l := range strings.Split(out, "\n") {
+			if w := ansi.StringWidth(strings.TrimRight(ansi.Strip(l), " ")); w > maxProseWidth {
+				t.Fatalf("kind %d: line %d wide, want <= %d: %q", kind, w, maxProseWidth, ansi.Strip(l))
+			}
+		}
+		if strings.Count(out, "\n") < 3 {
+			t.Fatalf("kind %d: expected wrapping at the cap, got %q", kind, ansi.Strip(out))
+		}
 	}
 }
