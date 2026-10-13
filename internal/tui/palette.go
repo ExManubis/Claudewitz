@@ -140,6 +140,17 @@ func (m *Model) actions() []action {
 		add("Theme", t, "", cur, func(m *Model) tea.Cmd { cmd, _ := m.slash("/theme " + t); return cmd })
 	}
 
+	add("Prompt", "Edit prompt in $EDITOR", "write long prompts in your editor", "ctrl+x", func(m *Model) tea.Cmd {
+		return m.openEditor()
+	})
+	for _, mode := range notifyModes {
+		mode := mode
+		cur := ""
+		if mode == firstNonEmpty(m.cfg.Notifications, "auto") {
+			cur = "current"
+		}
+		add("Notifications", mode, notifyModeDesc[mode], cur, func(m *Model) tea.Cmd { return m.setNotifications(mode) })
+	}
 	add("View", "Toggle sidebar", "", "ctrl+b", func(m *Model) tea.Cmd {
 		m.sidebarOn = !m.sidebarOn
 		m.layout()

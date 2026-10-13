@@ -43,6 +43,8 @@ var localCommands = []suggestion{
 	{label: "/mode", desc: "permission mode"},
 	{label: "/theme", desc: "switch colour theme"},
 	{label: "/sidebar", desc: "toggle the sidebar"},
+	{label: "/edit", desc: "write the prompt in $EDITOR"},
+	{label: "/notifications", desc: "desktop notification mode"},
 	{label: "/session", desc: "show session id and cwd"},
 	{label: "/quit", desc: "exit claudewitz"},
 }
@@ -181,6 +183,10 @@ func (m *Model) argSuggestions(cmd string) []suggestion {
 		desc := map[string]string{"default": "ask before edits and commands", "acceptEdits": "auto-approve file edits", "plan": "read-only planning"}
 		for _, pm := range permissionModes {
 			out = append(out, suggestion{label: pm, insert: pm, desc: desc[pm]})
+		}
+	case "/notifications":
+		for _, n := range notifyModes {
+			out = append(out, suggestion{label: n, insert: n, desc: notifyModeDesc[n]})
 		}
 	case "/effort":
 		for _, l := range defaultEffortLevels {

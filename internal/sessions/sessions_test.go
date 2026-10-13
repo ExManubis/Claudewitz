@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestProjectDir(t *testing.T) {
@@ -42,5 +43,29 @@ func TestReadAndLoad(t *testing.T) {
 	}
 	if got, ok := Find(dir, ""); !ok || got != p {
 		t.Fatalf("find latest: %s", got)
+	}
+}
+
+func TestPrompts(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string, age time.Duration) {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, []byte(body), 0o644)
+		ts := time.Now().Add(-age)
+		os.Chtimes(p, ts, ts)
+	}
+	write("old.jsonl", `{"type":"user","message":{"role":"user","content":"first ever"}}
+{"type":"user","isMeta":true,"message":{"role":"user","content":"meta"}}
+`, time.Hour)
+	write("new.jsonl", `{"type":"user","message":{"role":"user","content":"<command-name>/init</command-name>"}}
+{"type":"user","message":{"role":"user","content":"latest one"}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"x"}]}}
+`, time.Minute)
+	got := Prompts(dir, 10)
+	if len(got) != 2 || got[0] != "first ever" || got[1] != "latest one" {
+		t.Fatalf("prompts: %q", got)
+	}
+	if got := Prompts(dir, 1); len(got) != 1 || got[0] != "latest one" {
+		t.Fatalf("limit should keep the newest: %q", got)
 	}
 }

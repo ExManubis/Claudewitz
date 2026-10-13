@@ -43,7 +43,7 @@ func main() {
 		cfg.Theme = *theme
 	}
 
-	p := tea.NewProgram(tui.New(ctx, opts, cfg), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(tui.New(ctx, opts, cfg), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

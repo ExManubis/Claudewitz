@@ -42,6 +42,20 @@ go run . -- --add-dir ../lib  # anything after -- goes straight to claude
 - Tool calls inline with status and collapsible output (`ctrl+o`)
 - Edits and writes shown as syntax-highlighted diffs with line numbers
 - Interrupt with `esc`
+- Messages sent while Claude is working are queued: a pill above the input shows them until Claude
+  picks them up, then they join the transcript at the point Claude actually reads them
+
+**Prompt**
+- `↑`/`↓` on an empty input recalls earlier prompts for this project, including ones from past
+  sessions; kept in `history.jsonl` next to the config
+- `ctrl+x` (or `/edit`) opens the prompt in `$VISUAL`/`$EDITOR` for long prompts
+- Status pills above the input: queued messages, todo progress with the current task, and running
+  agents when the sidebar is hidden
+
+**Desktop notifications**: when a permission prompt, question or plan is waiting, or a turn
+finishes, while the terminal isn't focused. Native (`notify-send`, macOS Notification Center)
+locally, terminal escape codes (OSC 9/99/777, tmux passthrough) over SSH, or the bell.
+`/notifications auto|native|osc|bell|off`, saved in the config. Needs a terminal that reports focus
 
 **Sidebar** (`ctrl+b`, auto-hidden below 100 columns)
 - Session title, directory, model and account type
@@ -113,6 +127,6 @@ commits (including ones made outside claudewitz), and Claude Code exiting
 ## Roadmap ideas
 
 - Drill into a sub-agent's full transcript
-- Image paste, and an external editor for long prompts
+- Image paste
 - Multiple concurrent sessions in tabs
 - Persisted per-project "always allow" rules

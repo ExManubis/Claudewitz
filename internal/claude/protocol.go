@@ -6,7 +6,10 @@
 // stdin/stdout, before running tools.
 package claude
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Envelope is the common shape of every line the CLI writes to stdout.
 type Envelope struct {
@@ -57,12 +60,50 @@ type Message struct {
 	Usage   *Usage         `json:"usage,omitempty"`
 }
 
+// UnmarshalJSON accepts content as either blocks or a plain string (user
+// messages echoed back by --replay-user-messages use the string form).
+func (m *Message) UnmarshalJSON(b []byte) error {
+	type alias Message
+	var raw struct {
+		alias
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	*m = Message(raw.alias)
+	if len(raw.Content) == 0 || string(raw.Content) == "null" {
+		return nil
+	}
+	var s string
+	if json.Unmarshal(raw.Content, &s) == nil {
+		m.Content = []ContentBlock{{Type: "text", Text: s}}
+		return nil
+	}
+	return json.Unmarshal(raw.Content, &m.Content)
+}
+
+// Text joins the message's text blocks.
+func (m Message) Text() string {
+	var parts []string
+	for _, b := range m.Content {
+		if b.Type == "text" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 // MessageEvent is a complete assistant or user (tool result) message.
 type MessageEvent struct {
 	Type            string  `json:"type"`
 	Message         Message `json:"message"`
 	ParentToolUseID *string `json:"parent_tool_use_id"`
 	AgentID         string  `json:"agent_id,omitempty"`
+	// IsReplay marks the CLI acknowledging a user message it has started
+	// on (--replay-user-messages). Messages sent mid-turn are queued and
+	// acknowledged together, joined by newlines, once the turn ends.
+	IsReplay bool `json:"isReplay,omitempty"`
 }
 
 // StreamEvent wraps a raw Anthropic API streaming event

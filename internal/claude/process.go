@@ -69,6 +69,7 @@ func Start(ctx context.Context, opts Options) (*Process, error) {
 		"--include-partial-messages",
 		"--permission-prompt-tool", "stdio",
 		"--forward-subagent-text",
+		"--replay-user-messages",
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
