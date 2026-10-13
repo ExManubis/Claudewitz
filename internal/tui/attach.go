@@ -298,7 +298,7 @@ func (m Model) attachmentsView(width int) string {
 	th := currentTheme()
 	var chips []string
 	for _, a := range m.attachments {
-		chips = append(chips, pill("▣", th.user, truncate(a.label(), 40)))
+		chips = append(chips, pill(icons.image, th.user, truncate(a.label(), 40)))
 	}
 	row := " " + strings.Join(chips, " ")
 	if lipgloss.Width(row) < width-12 {

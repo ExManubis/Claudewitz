@@ -43,7 +43,7 @@ func loadSessions(cwd string, all bool) tea.Cmd {
 func newPicker(current, cwd string) *picker {
 	ti := textinput.New()
 	ti.Placeholder = "type to filter"
-	ti.Prompt = "⌕ "
+	ti.Prompt = icons.search + " "
 	ti.Focus()
 	return &picker{loading: true, filter: ti, current: current, cwd: cwd}
 }
@@ -147,7 +147,7 @@ func (p *picker) view(width, height int) string {
 			top += strings.Repeat(" ", max(1, inner-lipgloss.Width(top)-lipgloss.Width(when))) + when
 			meta := []string{fmt.Sprintf("%d msgs", s.Messages)}
 			if s.Branch != "" {
-				meta = append(meta, "\uec6f "+s.Branch)
+				meta = append(meta, icons.branch+" "+s.Branch)
 			}
 			if p.all && s.CWD != "" {
 				meta = append(meta, prettyPath(s.CWD))

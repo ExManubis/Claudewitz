@@ -385,7 +385,7 @@ func (m Model) sidebarView(height int) string {
 				extra := fmt.Sprintf("%d%%", int(lim.Utilization*100+0.5))
 				if lim.ResetsAt > 0 {
 					if d := time.Until(time.Unix(lim.ResetsAt, 0)); d > 0 {
-						extra += " ↻" + shortDur(d.Round(time.Minute))
+						extra += " " + icons.reset + shortDur(d.Round(time.Minute))
 					}
 				}
 				sec = append(sec, meter(k.label, lim.Utilization, extra, w))

@@ -119,6 +119,11 @@ finishes, while the terminal isn't focused. Sent through the terminal with escap
 (OSC 9/99/777, tmux passthrough), so they work over SSH too, or as just the bell.
 `/notifications auto|osc|bell|off`, saved in the config. Needs a terminal that reports focus
 
+**Icons**: [Nerd Font](https://www.nerdfonts.com) icons by default for git branches, image
+attachments, permission modes, status pills and toasts. Without a Nerd Font they show as boxes;
+`/icons unicode` switches to plain Unicode symbols (`/icons nerd` switches back), saved in the
+config.
+
 **Sidebar** (`ctrl+b`, auto-hidden below 100 columns)
 - Session title, directory, model and account type
 - Context size and subscription usage meters (5-hour and weekly, with time to reset)

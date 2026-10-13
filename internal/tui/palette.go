@@ -164,6 +164,14 @@ func (m *Model) actions() []action {
 		}
 		add("Notifications", mode, notifyModeDesc[mode], cur, func(m *Model) tea.Cmd { return m.setNotifications(mode) })
 	}
+	for _, mode := range iconModes {
+		mode := mode
+		cur := ""
+		if mode == firstNonEmpty(m.cfg.Icons, "nerd") {
+			cur = "current"
+		}
+		add("Icons", mode, iconModeDesc[mode], cur, func(m *Model) tea.Cmd { return m.setIcons(mode) })
+	}
 	add("View", "Toggle sidebar", "", "ctrl+b", func(m *Model) tea.Cmd {
 		m.sidebarOn = !m.sidebarOn
 		m.layout()

@@ -18,6 +18,8 @@ type Config struct {
 	// Notifications controls desktop notifications sent while the terminal
 	// is unfocused: "auto" (default), "osc", "bell" or "off".
 	Notifications string `json:"notifications,omitempty"`
+	// Icons is "nerd" (default, needs a Nerd Font) or "unicode".
+	Icons string `json:"icons,omitempty"`
 }
 
 // HistoryPath is where claudewitz keeps prompt history, next to the config.

@@ -25,12 +25,12 @@ func (m Model) pillsView(width int) string {
 		label := fmt.Sprintf("%d queued", n)
 		first := firstLine(m.queued[0].text)
 		if first == "" && len(m.queued[0].images) > 0 {
-			first = "▣ " + m.queued[0].images[0]
+			first = icons.image + " " + m.queued[0].images[0]
 		}
 		if first != "" {
 			label += " · " + truncate(first, 30)
 		}
-		pills = append(pills, pill("▲", th.second, label))
+		pills = append(pills, pill(icons.queued, th.second, label))
 	}
 
 	if todos := m.track.todos; len(todos) > 0 {
@@ -50,7 +50,7 @@ func (m Model) pillsView(width int) string {
 			if active != "" {
 				label += " · " + truncate(active, 40)
 			}
-			pills = append(pills, pill("☐", th.ok, label))
+			pills = append(pills, pill(icons.todos, th.ok, label))
 		}
 	}
 
@@ -60,7 +60,7 @@ func (m Model) pillsView(width int) string {
 			if n > 1 {
 				label += "s"
 			}
-			pills = append(pills, pill("◐", th.second, label))
+			pills = append(pills, pill(icons.agents, th.second, label))
 		}
 	}
 

@@ -93,7 +93,7 @@ func shortSHA(s string) string {
 }
 
 // branchLabel is "main", "main*" when dirty, or a detached sha, after the
-// Nerd Font branch glyph (U+EC6F).
+// branch icon.
 func (m Model) branchLabel(dirtyMark bool) string {
 	if !m.git.IsRepo {
 		return ""
@@ -105,7 +105,7 @@ func (m Model) branchLabel(dirtyMark bool) string {
 	if dirtyMark && m.git.Dirty() {
 		b += "*"
 	}
-	return "\uec6f " + b
+	return icons.branch + " " + b
 }
 
 func gitCodeStyle(c byte) lipgloss.Style {
@@ -133,10 +133,10 @@ func (m Model) gitSection(w int) []string {
 	}
 	var ab []string
 	if st.Ahead > 0 {
-		ab = append(ab, okStyle.Render(fmt.Sprintf("↑%d", st.Ahead)))
+		ab = append(ab, okStyle.Render(fmt.Sprintf("%s%d", icons.ahead, st.Ahead)))
 	}
 	if st.Behind > 0 {
-		ab = append(ab, warnStyle.Render(fmt.Sprintf("↓%d", st.Behind)))
+		ab = append(ab, warnStyle.Render(fmt.Sprintf("%s%d", icons.behind, st.Behind)))
 	}
 	if len(ab) > 0 {
 		head += " " + strings.Join(ab, " ")
@@ -148,19 +148,19 @@ func (m Model) gitSection(w int) []string {
 	staged, modified, untracked, conflicts := st.Counts()
 	var counts []string
 	if conflicts > 0 {
-		counts = append(counts, errStyle.Bold(true).Render(fmt.Sprintf("✗ %d conflict", conflicts)))
+		counts = append(counts, errStyle.Bold(true).Render(fmt.Sprintf("%s %d conflict", icons.conflict, conflicts)))
 	}
 	if staged > 0 {
-		counts = append(counts, okStyle.Render(fmt.Sprintf("● %d staged", staged)))
+		counts = append(counts, okStyle.Render(fmt.Sprintf("%s %d staged", icons.staged, staged)))
 	}
 	if modified > 0 {
-		counts = append(counts, warnStyle.Render(fmt.Sprintf("✚ %d changed", modified)))
+		counts = append(counts, warnStyle.Render(fmt.Sprintf("%s %d changed", icons.changed, modified)))
 	}
 	if untracked > 0 {
 		counts = append(counts, mutedStyle.Render(fmt.Sprintf("? %d new", untracked)))
 	}
 	if len(counts) == 0 {
-		counts = append(counts, okStyle.Render("✓ clean"))
+		counts = append(counts, okStyle.Render(icons.clean+" clean"))
 	}
 	sec = append(sec, strings.Join(counts, mutedStyle.Render("  ")))
 	if st.LastCommit != "" {
