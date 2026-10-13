@@ -57,9 +57,12 @@ homebrew_casks:
       then run `claude` once to log in.
     # The binaries aren't notarised, so clear the quarantine flag macOS puts
     # on downloads; otherwise Gatekeeper refuses to run them.
-    hooks:
-      post:
-        install: |
-          if OS.mac? && system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/claudewitz"]
-          end
+    # Homebrew deprecated Ruby `postflight` blocks in favour of declarative
+    # `postflight_steps`. GoReleaser only emits those from v2.19
+    # (hooks.post.install_steps), so until then inject the stanza by hand.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{" }}staged_path{{ "}}" }}/claudewitz"]
+        end
+      end
