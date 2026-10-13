@@ -1541,7 +1541,7 @@ func (m Model) splash() string {
 	w := m.mainWidth()
 	key := func(k, desc string) string { return statusKey.Render(k) + mutedStyle.Render(" "+desc) }
 	lines := []string{"", ""}
-	for _, l := range strings.Split(bigLogo("CLAUDEWITZ", w-2), "\n") {
+	for _, l := range strings.Split(logoLockup(w-2), "\n") {
 		lines = append(lines, "  "+l)
 	}
 	lines = append(lines,
