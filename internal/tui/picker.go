@@ -108,7 +108,7 @@ func (p *picker) move(d, visible int) {
 }
 
 // pickerRows is how many sessions fit, each taking two lines.
-func pickerRows(height int) int { return max(1, (height-10)/2) }
+func pickerRows(height int) int { return max(1, (height-14)/2) }
 
 func (p *picker) view(width, height int) string {
 	w := min(width-4, 110)
@@ -117,7 +117,7 @@ func (p *picker) view(width, height int) string {
 	if p.all {
 		scope = "all projects"
 	}
-	title := assistLabel.Render("Resume a session") + mutedStyle.Render("  "+scope)
+	title := gradientText("Resume a session", true) + mutedStyle.Render("  "+scope)
 	count := ""
 	if !p.loading {
 		count = mutedStyle.Render(fmt.Sprintf("%d sessions", len(p.shown)))
@@ -163,9 +163,12 @@ func (p *picker) view(width, height int) string {
 			}
 		}
 	}
-	lines = append(lines, "", mutedStyle.Render("↑↓ move · enter resume · tab "+map[bool]string{true: "this project", false: "all projects"}[p.all]+" · esc close"))
-	box := pickerBox.Width(w).Render(strings.Join(lines, "\n"))
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+	scopeHint := "all projects"
+	if p.all {
+		scopeHint = "this project"
+	}
+	lines = append(lines, "", helpLine([][2]string{{"↑↓", "move"}, {"enter", "resume"}, {"tab", scopeHint}, {"esc", "close"}}, inner))
+	return pickerBox.Width(w).Render(strings.Join(lines, "\n"))
 }
 
 func (p *picker) isCurrent(s sessions.Info) bool {

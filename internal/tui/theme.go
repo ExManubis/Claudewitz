@@ -76,7 +76,7 @@ var (
 	userLabel, assistLabel, mutedStyle, thinkingStyle, toolName, agentStyle lipgloss.Style
 	okStyle, errStyle, warnStyle, statusBar, statusKey, textStyle           lipgloss.Style
 	inputBox, inputBoxFocused, permBox, userBlock, popupBox, selStyle       lipgloss.Style
-	sectionTitle, sidebarStyle, pickerBox                                   lipgloss.Style
+	sectionTitle, sidebarStyle, pickerBox, dialogBox                        lipgloss.Style
 )
 
 func init() {
@@ -130,7 +130,8 @@ func applyTheme(name string) bool {
 	inputBoxFocused = inputBox.BorderForeground(t.accent)
 	permBox = s().Border(lipgloss.RoundedBorder()).BorderForeground(t.warn).Padding(0, 1)
 	popupBox = s().Border(lipgloss.RoundedBorder()).BorderForeground(t.second).Padding(0, 1)
-	pickerBox = s().Border(lipgloss.RoundedBorder()).BorderForeground(t.accent).Padding(0, 2)
+	dialogBox = s().Border(lipgloss.RoundedBorder()).BorderForeground(t.accent).Padding(1, 2)
+	pickerBox = dialogBox
 	userBlock = s().Border(lipgloss.ThickBorder(), false, false, false, true).BorderForeground(t.user).PaddingLeft(1)
 	sidebarStyle = s().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(t.subtle).Padding(0, 1)
 	return true

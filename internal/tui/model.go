@@ -31,6 +31,8 @@ type Model struct {
 	track     *tracker
 	comp      *completer
 	picker    *picker
+	palette   *palette
+	showHelp  bool
 	files     []string
 	vp        viewport.Model
 	input     textarea.Model
@@ -43,8 +45,12 @@ type Model struct {
 	stopped   bool // user interrupted the current turn
 	sidebarOn bool
 	status    string
+	activity  string // what the live turn is doing, for the shimmer label
 	turnFrom  time.Time
 	ticks     int
+	animFrame int
+	animID    int // generation of the running shimmer tick loop
+	animating bool
 
 	// session state
 	init         *claude.InitEvent
@@ -224,8 +230,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 		}
 
+	case animTickMsg:
+		if msg.id != m.animID {
+			return m, nil
+		}
+		if !m.busy {
+			m.animating = false
+			return m, nil
+		}
+		m.animFrame++
+		return m, animTick(m.animID)
+
 	case tea.MouseMsg:
-		if m.picker == nil {
+		if m.picker == nil && m.palette == nil && !m.showHelp {
 			var c tea.Cmd
 			m.vp, c = m.vp.Update(msg)
 			m.follow = m.vp.AtBottom()
@@ -233,6 +250,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		if m.showHelp {
+			switch msg.String() {
+			case "esc", "ctrl+g", "q", "enter", "ctrl+c":
+				m.showHelp = false
+			}
+			return m, nil
+		}
+		if m.palette != nil {
+			return m, m.handlePaletteKey(msg)
+		}
 		if m.picker != nil {
 			return m, m.handlePickerKey(msg)
 		}
@@ -293,6 +320,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+r":
 			return m, m.openPicker()
+		case "ctrl+p":
+			m.openPalette()
+			return m, nil
+		case "ctrl+g":
+			m.showHelp = true
+			return m, nil
 		case "ctrl+l":
 			m.follow = true
 			m.refresh()
@@ -368,9 +401,13 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 
 	case ev.Status != "":
 		m.status = ev.Status
+		if ev.Status == "requesting" {
+			return m.markBusy()
+		}
 
 	case ev.Stream != nil:
 		m.handleStream(ev.Stream)
+		return m.markBusy()
 
 	case ev.Message != nil:
 		if ev.Message.ParentToolUseID != nil {
@@ -390,6 +427,7 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 	case ev.Result != nil:
 		r := ev.Result
 		m.busy = false
+		m.activity = ""
 		m.status = ""
 		m.chat.streaming = map[int]*entry{}
 		m.costUSD += r.TotalCostUSD
@@ -467,9 +505,13 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 		}
 		switch e.ContentBlock.Type {
 		case "text":
+			m.activity = "Writing"
 			m.chat.streaming[e.Index] = m.chat.add(&entry{kind: kindAssistant, text: e.ContentBlock.Text})
 		case "thinking":
+			m.activity = "Thinking"
 			m.chat.streaming[e.Index] = m.chat.add(&entry{kind: kindThinking, text: e.ContentBlock.Thinking})
+		case "tool_use":
+			m.activity = "Running " + e.ContentBlock.Name
 		}
 	case "content_block_delta":
 		live := m.chat.streaming[e.Index]
@@ -706,7 +748,27 @@ func (m *Model) submit(text string) tea.Cmd {
 	}
 	m.follow = true
 	m.refresh()
-	return nil
+	return m.startAnim()
+}
+
+// markBusy notes a turn the CLI started on its own, e.g. after a
+// background agent finished.
+func (m *Model) markBusy() tea.Cmd {
+	if !m.busy {
+		m.busy = true
+		m.turnFrom = time.Now()
+	}
+	return m.startAnim()
+}
+
+// startAnim begins the shimmer tick loop if it isn't already running.
+func (m *Model) startAnim() tea.Cmd {
+	if m.animating {
+		return nil
+	}
+	m.animating = true
+	m.animID++
+	return animTick(m.animID)
 }
 
 // slash handles commands owned by the front end. Unknown ones are passed
@@ -820,6 +882,9 @@ func (m *Model) layout() {
 	}
 	m.input.SetWidth(m.mainWidth() - 4)
 	bottom := lipgloss.Height(m.bottomView()) + 1 // + status bar
+	if m.showHeader() {
+		bottom++
+	}
 	h := max(3, m.height-bottom)
 	if !m.ready {
 		m.vp = viewport.New(m.mainWidth(), h)
@@ -847,18 +912,42 @@ func (m Model) View() string {
 	if !m.ready {
 		return ""
 	}
-	if m.picker != nil {
-		return lipgloss.JoinVertical(lipgloss.Left, m.picker.view(m.width, m.height-1), m.statusView())
-	}
 	chatView := m.vp.View()
 	if pop := m.comp.view(m.mainWidth()); pop != "" {
 		chatView = overlayBottom(chatView, pop, m.vp.Height, m.mainWidth())
 	}
 	main := lipgloss.JoinVertical(lipgloss.Left, chatView, m.bottomView())
+	if m.showHeader() {
+		main = lipgloss.JoinVertical(lipgloss.Left, headerLine(m.mainWidth(), m.headerInfo()), main)
+	}
 	if m.showSidebar() {
 		main = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(m.mainWidth()).Render(main), m.sidebarView(m.height-1))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, main, m.statusView())
+	screen := lipgloss.JoinVertical(lipgloss.Left, main, m.statusView())
+
+	// Floating dialogs.
+	h := m.height - 1
+	switch {
+	case m.showHelp:
+		screen = center(screen, helpDialog(m.width-4), m.width, h)
+	case m.palette != nil:
+		screen = center(screen, m.palette.view(m.width), m.width, h)
+	case m.picker != nil:
+		screen = center(screen, m.picker.view(m.width, h), m.width, h)
+	}
+	return screen
+}
+
+// showHeader is true when the compact brand strip replaces the sidebar.
+func (m Model) showHeader() bool { return !m.showSidebar() && len(m.chat.entries) > 0 }
+
+func (m Model) headerInfo() string {
+	var parts []string
+	if m.model != "" {
+		parts = append(parts, m.model)
+	}
+	parts = append(parts, prettyPath(m.cwd()))
+	return mutedStyle.Render(truncateLeft(strings.Join(parts, " • "), max(10, m.mainWidth()/2)))
 }
 
 // overlayBottom draws pop over the last lines of base.
@@ -887,9 +976,9 @@ func (m Model) bottomView() string {
 	}
 	var top string
 	if m.busy {
-		label := m.status
-		if label == "" || label == "requesting" {
-			label = "Working"
+		label := firstNonEmpty(m.activity, "Working")
+		if m.status != "" && m.status != "requesting" {
+			label = strings.ToUpper(m.status[:1]) + m.status[1:]
 		}
 		extra := fmt.Sprintf(" %ds", int(time.Since(m.turnFrom).Seconds()))
 		if n := m.track.runningAgents(); n > 0 {
@@ -899,7 +988,7 @@ func (m Model) bottomView() string {
 			}
 			extra += fmt.Sprintf(" · %d agent%s running", n, plural)
 		}
-		top = " " + m.spin.View() + " " + statusKey.Render(label+"…") + mutedStyle.Render(extra+" · esc to interrupt") + "\n"
+		top = " " + shimmer(m.animFrame, label) + mutedStyle.Render(extra) + "\n"
 	}
 	return top + box.Width(m.mainWidth()-2).Render(m.input.View())
 }
@@ -987,16 +1076,13 @@ func (m Model) statusView() string {
 			parts = append(parts, usageGauge("7d", w))
 		}
 	}
-	left := strings.Join(parts, sep)
-	hints := mutedStyle.Render("ctrl+r sessions · ctrl+b sidebar · ctrl+o expand · /help")
 	if m.costUSD > 0 && m.showSidebar() {
-		hints = mutedStyle.Render(fmt.Sprintf("≈$%.2f api-equiv · ", m.costUSD)) + hints
+		parts = append(parts, mutedStyle.Render(fmt.Sprintf("≈$%.2f api-equiv", m.costUSD)))
 	}
+	left := strings.Join(parts, sep)
+	hints := helpLine(m.helpPairs(), m.width-4-lipgloss.Width(left))
 	gap := m.width - 2 - lipgloss.Width(left) - lipgloss.Width(hints)
-	if gap < 2 {
-		return statusBar.Width(m.width).Render(left)
-	}
-	return statusBar.Width(m.width).Render(left + strings.Repeat(" ", gap) + hints)
+	return statusBar.Width(m.width).Render(left + strings.Repeat(" ", max(1, gap)) + hints)
 }
 
 func usageGauge(label string, w claude.RateLimitWindow) string {
@@ -1046,30 +1132,27 @@ func formatTokens(u claude.Usage) string {
 }
 
 func (m Model) splash() string {
-	th := currentTheme()
-	word := []rune("c l a u d e w i t z")
-	var logo strings.Builder
-	for i, r := range word {
-		c := th.accent
-		if i >= len(word)/2 {
-			c = th.second
-		}
-		logo.WriteString(lipgloss.NewStyle().Foreground(c).Bold(true).Render(string(r)))
-	}
+	w := m.mainWidth()
 	key := func(k, desc string) string { return statusKey.Render(k) + mutedStyle.Render(" "+desc) }
-	lines := []string{
-		"",
-		"  " + assistLabel.Render("✻  ") + logo.String(),
+	lines := []string{"", ""}
+	for _, l := range strings.Split(bigLogo("CLAUDEWITZ", w-2), "\n") {
+		lines = append(lines, "  "+l)
+	}
+	lines = append(lines,
 		"",
 		mutedStyle.Render("  A terminal front end for Claude Code, running on your Claude subscription."),
 		"",
-		"  " + key("/", "commands") + "        " + key("@", "mention a file"),
-		"  " + key("ctrl+r", "sessions") + "   " + key("⇧⇥", "permission mode"),
+		"  "+key("/", "commands")+"     "+key("@", "mention a file")+"     "+key("ctrl+p", "palette"),
+		"  "+key("ctrl+r", "sessions")+"   "+key("⇧⇥", "permission mode")+"   "+key("ctrl+g", "shortcuts"),
 		"",
-		"  " + textStyle.Render(prettyPath(m.opts.CWD)),
-	}
+		"  "+textStyle.Render(prettyPath(m.opts.CWD)),
+	)
 	if m.initResp != nil {
-		lines = append(lines, mutedStyle.Render(fmt.Sprintf("  claude %s · %d commands · %s", m.initResp.Version, len(m.initResp.Commands), m.model)))
+		info := fmt.Sprintf("  claude %s • %d commands • %s", m.initResp.Version, len(m.initResp.Commands), m.model)
+		if sub := m.initResp.Account.SubscriptionType; sub != "" {
+			info += " • " + sub
+		}
+		lines = append(lines, mutedStyle.Render(info))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -1084,6 +1167,7 @@ const helpText = `commands
   /session            show session id and cwd
   /quit               exit
   other /commands are passed through to Claude Code
+  ctrl+p opens the command palette, ctrl+g shows all shortcuts
 
 keys
   enter      send               ctrl+j / alt+enter  newline
