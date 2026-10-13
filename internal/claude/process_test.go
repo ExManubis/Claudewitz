@@ -99,3 +99,20 @@ func TestSendWithImages(t *testing.T) {
 		t.Fatalf("source: %v", src)
 	}
 }
+
+func TestResultContextWindow(t *testing.T) {
+	ev, ok := parseLine([]byte(`{"type":"result","subtype":"success","modelUsage":{"claude-haiku-4-5":{"contextWindow":200000},"claude-opus-5-5[1m]":{"contextWindow":1000000,"canonicalModel":"claude-opus-5-5"}}}`))
+	if !ok || ev.Result == nil {
+		t.Fatalf("got %+v", ev)
+	}
+	for model, want := range map[string]int{
+		"claude-opus-5-5[1m]": 1000000, // exact key
+		"claude-opus-5-5":     1000000, // initialize reports the model without the suffix
+		"claude-haiku-4-5":    200000,  // a sub-agent's model doesn't win over the main one
+		"claude-sonnet-5-5":   0,       // no usage for this model this turn
+	} {
+		if got := ev.Result.ContextWindow(model); got != want {
+			t.Errorf("ContextWindow(%q) = %d, want %d", model, got, want)
+		}
+	}
+}

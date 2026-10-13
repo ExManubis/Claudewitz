@@ -134,6 +134,28 @@ type ResultEvent struct {
 	StopReason   string  `json:"stop_reason"`
 	SessionID    string  `json:"session_id"`
 	Usage        Usage   `json:"usage"`
+	// ModelUsage is keyed by model id, including any sub-agents' models.
+	ModelUsage map[string]ModelUsage `json:"modelUsage"`
+}
+
+// ModelUsage is one model's share of a turn.
+type ModelUsage struct {
+	ContextWindow int `json:"contextWindow"`
+}
+
+// ContextWindow is the context size of model as reported for this turn, or
+// 0 if it wasn't used. Keys can carry a suffix the model name lacks, as in
+// "claude-opus-5-5[1m]" for "claude-opus-5-5".
+func (r *ResultEvent) ContextWindow(model string) int {
+	if u, ok := r.ModelUsage[model]; ok {
+		return u.ContextWindow
+	}
+	for id, u := range r.ModelUsage {
+		if base, _, ok := strings.Cut(id, "["); ok && base == model {
+			return u.ContextWindow
+		}
+	}
+	return 0
 }
 
 // RateLimitWindow is utilisation (0..1) of one subscription window.

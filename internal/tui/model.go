@@ -625,6 +625,9 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 		m.status = ""
 		m.chat.streaming = map[int]*entry{}
 		m.costUSD += r.TotalCostUSD
+		if w := r.ContextWindow(m.model); w > 0 {
+			m.ctxWindow = w
+		}
 		if r.SessionID != "" {
 			m.sessionID = r.SessionID
 		}
@@ -1230,9 +1233,14 @@ func (m *Model) cwd() string {
 	return m.opts.CWD
 }
 
+// contextWindow is the size the CLI reported with the last turn's result;
+// before the first one it's guessed from the model name.
 func (m *Model) contextWindow() int {
 	if m.ctxWindow > 0 {
 		return m.ctxWindow
+	}
+	if strings.HasSuffix(m.model, "[1m]") {
+		return 1000000
 	}
 	return 200000
 }
