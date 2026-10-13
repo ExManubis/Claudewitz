@@ -80,6 +80,10 @@ locally, terminal escape codes (OSC 9/99/777, tmux passthrough) over SSH, or the
 - Git: branch, ahead/behind upstream, staged/changed/new counts and the last commit
 - Changes: the working tree's changed files with status letters and +/- counts, ✻ marking
   files Claude edited this session (outside a repository: the files Claude edited)
+- Working indicator pinned to the bottom (about a quarter of the sidebar, hidden when it's under
+  20 rows): Braille sparks rest as a ✻, swirl while Claude works (faster while writing, running
+  commands or with agents out), gather back into the ✻ with a flash when the turn ends, and pulse
+  amber while a prompt waits for you. The caption under it shows the activity and elapsed time
 
 **Sessions** (`ctrl+r` or `/resume`)
 - Browse sessions for this project or all projects (`tab`), filter as you type

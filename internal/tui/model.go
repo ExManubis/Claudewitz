@@ -45,6 +45,12 @@ type Model struct {
 	attachments []attachment // images for the next message
 	focused     bool         // terminal focus, when the terminal reports it
 
+	sparks       *sparkField // working indicator at the foot of the sidebar
+	sparkTicking bool
+	sparkID      int
+	lastTurn     time.Duration // how long the last turn took, for "Done in …"
+	lastTurnAt   time.Time
+
 	chatFocus   bool // keys drive the transcript instead of the input
 	textSel     *textSelection
 	mouseDown   bool   // left button held in the transcript
@@ -146,6 +152,7 @@ func New(ctx context.Context, opts claude.Options, cfg config.Config) Model {
 		limits:      map[string]claude.RateLimitWindow{},
 		limitWarned: map[string]int{},
 		hist:        newHistory(opts.CWD),
+		sparks:      newSparkField(sidebarWidth-3, sparkMinRows),
 		focused:     true,
 		alwaysAllow: map[string]bool{},
 		cfg:         cfg,
@@ -212,7 +219,15 @@ func loadTranscript(cwd, id string) tea.Cmd {
 	}
 }
 
+// Update handles a message, then keeps the sidebar's spark indicator in
+// step with whatever changed.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	nm := next.(Model)
+	return nm, tea.Batch(cmd, nm.syncSparks())
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
@@ -304,6 +319,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.markAgentsDirty()
 			m.refresh()
 		}
+
+	case sparkTickMsg:
+		return m, m.onSparkTick(msg)
 
 	case toastTickMsg:
 		if msg.id != m.toastID {
@@ -611,6 +629,7 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 			m.chat.error("turn ended: %s %s", r.Subtype, r.Result)
 		}
 		dur := (time.Duration(r.DurationMS) * time.Millisecond).Round(100 * time.Millisecond)
+		m.lastTurn, m.lastTurnAt = dur, time.Now()
 		m.chat.info("%s · %d turns · %s", dur, r.NumTurns, formatTokens(r.Usage))
 		if r.IsError && r.Subtype != "success" {
 			return m.notify(toastError, "Turn ended with an error", r.Subtype)
@@ -1222,6 +1241,9 @@ func (m *Model) layout() {
 		return
 	}
 	m.input.SetWidth(m.mainWidth() - 4)
+	if rows := sparkRows(m.height - 1); rows > 0 && m.sparks != nil {
+		m.sparks.resize(sidebarWidth-3, rows)
+	}
 	bottom := lipgloss.Height(m.bottomView()) + 1 // + status bar
 	if m.showHeader() {
 		bottom++
