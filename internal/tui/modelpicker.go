@@ -45,7 +45,7 @@ func (m *Model) openModelPicker() {
 
 func (m *Model) closeModelPicker() {
 	m.modelPick = nil
-	if len(m.pending) == 0 {
+	if len(m.pending) == 0 && !m.chatFocus {
 		m.input.Focus()
 	}
 }

@@ -38,6 +38,8 @@ func (m Model) helpPairs() [][2]string {
 		return [][2]string{{"↑↓", "move"}, {"enter", "run"}, {"esc", "close"}}
 	case m.picker != nil:
 		return [][2]string{{"↑↓", "move"}, {"enter", "resume"}, {"tab", "scope"}, {"esc", "close"}}
+	case m.chatFocus:
+		return [][2]string{{"j/k", "select"}, {"space", "expand"}, {"y", "copy"}, {"d/u", "page"}, {"g/G", "top/bottom"}, {"tab", "back to input"}}
 	case m.question != nil || m.plan != nil:
 		return m.interactionHelp()
 	case len(m.pending) > 0:
@@ -49,7 +51,7 @@ func (m Model) helpPairs() [][2]string {
 	}
 	return [][2]string{
 		{"enter", "send"}, {"ctrl+j", "newline"}, {"/", "commands"}, {"@", "files"}, {"↑", "history"},
-		{"ctrl+p", "palette"}, {"ctrl+t", "model"}, {"ctrl+x", "editor"}, {"ctrl+r", "sessions"}, {"ctrl+g", "help"},
+		{"tab", "transcript"}, {"ctrl+p", "palette"}, {"ctrl+t", "model"}, {"ctrl+x", "editor"}, {"ctrl+r", "sessions"}, {"ctrl+g", "help"},
 	}
 }
 
@@ -81,6 +83,15 @@ var helpSections = []struct {
 		{"pgup/pgdn", "scroll"},
 		{"ctrl+l", "redraw"},
 		{"ctrl+g", "this help"},
+	}},
+	{"Transcript (tab)", [][2]string{
+		{"j/k ↑↓", "select message"},
+		{"space/enter", "expand / collapse"},
+		{"y", "copy message"},
+		{"d/u f/b", "half / full page"},
+		{"g/G", "top / bottom"},
+		{"click", "select, again to expand"},
+		{"tab/esc", "back to input"},
 	}},
 	{"Permissions", [][2]string{
 		{"y", "allow once"},

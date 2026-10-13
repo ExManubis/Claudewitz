@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type entryKind int
@@ -44,6 +45,8 @@ type entry struct {
 	feedback   string      // ExitPlanMode: why the plan was sent back
 	planText   string      // ExitPlanMode: plan as read from its file
 
+	expanded bool // opened individually from the focused chat
+
 	// render cache
 	rendered string
 	width    int
@@ -51,6 +54,10 @@ type entry struct {
 }
 
 func (e *entry) setText(s string) { e.text = s; e.dirty = true }
+
+// open reports whether an entry shows in full: everything is open with
+// ctrl+o, or one entry at a time with space in the focused chat.
+func (c *chat) open(e *entry) bool { return c.expanded || e.expanded }
 
 // chat holds the transcript and renders it.
 type chat struct {
@@ -62,10 +69,17 @@ type chat struct {
 	expanded  bool
 	track     *tracker
 	cwd       string
+
+	// Selection in the focused chat, and where each entry landed in the
+	// last render (line offset and height), for scrolling and clicks.
+	sel     int
+	focused bool
+	offsets []int
+	heights []int
 }
 
 func newChat(t *tracker) *chat {
-	return &chat{byToolID: map[string]*entry{}, streaming: map[int]*entry{}, track: t}
+	return &chat{byToolID: map[string]*entry{}, streaming: map[int]*entry{}, track: t, sel: -1}
 }
 
 func (c *chat) add(e *entry) *entry {
@@ -90,6 +104,7 @@ func (c *chat) reset(t *tracker) {
 	c.byToolID = map[string]*entry{}
 	c.streaming = map[int]*entry{}
 	c.track = t
+	c.sel = -1
 }
 
 func (c *chat) markAllDirty() {
@@ -122,22 +137,45 @@ func (c *chat) renderer(width int) *glamour.TermRenderer {
 func (c *chat) View(width int) string {
 	var b strings.Builder
 	var prev *entry
-	for _, e := range c.entries {
+	line := 0
+	c.offsets = c.offsets[:0]
+	c.heights = c.heights[:0]
+	for i, e := range c.entries {
 		if e.dirty || e.width != width {
 			e.rendered = c.renderEntry(e, width)
 			e.width, e.dirty = width, false
 		}
 		if prev != nil {
 			b.WriteString("\n")
+			line++
 			// Breathing room around user messages and between turns.
 			if e.kind == kindUser || prev.kind == kindUser || (e.kind == kindAssistant) != (prev.kind == kindAssistant) {
 				b.WriteString("\n")
+				line++
 			}
 		}
-		b.WriteString(e.rendered)
+		out := e.rendered
+		if c.focused && i == c.sel {
+			out = markSelected(out)
+		}
+		h := strings.Count(out, "\n") + 1
+		c.offsets = append(c.offsets, line)
+		c.heights = append(c.heights, h)
+		b.WriteString(out)
+		line += h - 1
 		prev = e
 	}
 	return b.String()
+}
+
+// markSelected draws an accent bar down the left edge of a rendered entry.
+func markSelected(s string) string {
+	bar := lipgloss.NewStyle().Foreground(currentTheme().accent).Bold(true).Render("▌")
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = bar + ansi.TruncateLeft(l, 1, "")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (c *chat) renderEntry(e *entry, width int) string {
@@ -159,7 +197,7 @@ func (c *chat) renderEntry(e *entry, width int) string {
 			return wrap.Render(thinkingStyle.Render("∴ Thinking…"))
 		}
 		lines := strings.Split(lipgloss.NewStyle().Width(width-6).Render(t), "\n")
-		if !c.expanded && len(lines) > 3 {
+		if !c.open(e) && len(lines) > 3 {
 			lines = append(lines[:3], fmt.Sprintf("… %d more lines (ctrl+o)", len(lines)-3))
 		}
 		return wrap.Render(thinkingStyle.Render("∴ " + strings.Join(lines, "\n  ")))
@@ -212,7 +250,7 @@ func (c *chat) toolBody(e *entry, width int) string {
 	var in map[string]any
 	_ = json.Unmarshal(e.toolInput, &in)
 	maxLines := 10
-	if c.expanded {
+	if c.open(e) {
 		maxLines = 80
 	}
 	if isAgentTool(e.toolName) {
@@ -261,7 +299,7 @@ func (c *chat) toolBody(e *entry, width int) string {
 		return mutedStyle.Render("⎿ (no output)")
 	}
 	lim := 4
-	if c.expanded {
+	if c.open(e) {
 		lim = 60
 	}
 	return mutedStyle.Render("⎿ " + clipText(e.toolOutput, width-2, lim))
@@ -301,14 +339,14 @@ func (c *chat) agentBody(e *entry, width int) string {
 			lines = append(lines, mutedStyle.Render("⎿ running in the background"))
 		} else if a.summary != "" {
 			lim := 3
-			if c.expanded {
+			if c.open(e) {
 				lim = 40
 			}
 			lines = append(lines, mutedStyle.Render("⎿ "+clipText(a.summary, width-2, lim)))
 		}
 	} else if e.toolStatus != toolPending && e.toolOutput != "" {
 		lim := 3
-		if c.expanded {
+		if c.open(e) {
 			lim = 40
 		}
 		out := agentReport(e.toolOutput)
@@ -372,7 +410,7 @@ func (c *chat) planBody(e *entry, width int) string {
 		}
 	}
 	// Keep a pending plan whole; collapse settled ones unless expanded.
-	if lines := strings.Split(body, "\n"); e.toolStatus != toolPending && !c.expanded && len(lines) > 12 {
+	if lines := strings.Split(body, "\n"); e.toolStatus != toolPending && !c.open(e) && len(lines) > 12 {
 		body = strings.Join(lines[:12], "\n") + "\n" + mutedStyle.Render(fmt.Sprintf("  … %d more lines (ctrl+o to expand)", len(lines)-12))
 	}
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(currentTheme().accent).Width(width - 2).Render(body)
