@@ -1,0 +1,65 @@
+# Release builds: push a tag like v0.1.0 and the release workflow runs
+# GoReleaser, which builds the binaries, publishes a GitHub release and
+# updates the Homebrew tap. Dry run locally: goreleaser release --snapshot --clean
+version: 2
+
+project_name: claudewitz
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge pull request"
+      - "^Merge branch"
+
+homebrew_casks:
+  - name: claudewitz
+    repository:
+      owner: ExManubis
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/ExManubis/Claudewitz
+    description: Crush-style terminal UI for Claude Code, on your Claude subscription
+    license: MIT
+    commit_author:
+      name: claudewitz-release
+      email: noreply@github.com
+    caveats: |
+      claudewitz drives the Claude Code CLI. If you don't have it yet:
+        npm install -g @anthropic-ai/claude-code
+      then run `claude` once to log in.
+    # The binaries aren't notarised, so clear the quarantine flag macOS puts
+    # on downloads; otherwise Gatekeeper refuses to run them.
+    hooks:
+      post:
+        install: |
+          if OS.mac? && system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/claudewitz"]
+          end
