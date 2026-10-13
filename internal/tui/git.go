@@ -92,7 +92,8 @@ func shortSHA(s string) string {
 	return s
 }
 
-// branchLabel is "main", "main*" when dirty, or a detached sha.
+// branchLabel is "main", "main*" when dirty, or a detached sha, after the
+// Nerd Font branch glyph (U+E0A0).
 func (m Model) branchLabel(dirtyMark bool) string {
 	if !m.git.IsRepo {
 		return ""
@@ -104,7 +105,7 @@ func (m Model) branchLabel(dirtyMark bool) string {
 	if dirtyMark && m.git.Dirty() {
 		b += "*"
 	}
-	return "⎇ " + b
+	return "\ue0a0 " + b
 }
 
 func gitCodeStyle(c byte) lipgloss.Style {
