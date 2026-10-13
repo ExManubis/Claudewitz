@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -15,11 +16,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
+	"github.com/exmanubis/claudewitz/internal/sessions"
 )
 
 var permissionModes = []string{"default", "acceptEdits", "plan"}
-
-type eventMsg claude.Event
 
 // Model is the root Bubble Tea model.
 type Model struct {
@@ -27,27 +27,36 @@ type Model struct {
 	ctx  context.Context
 	proc *claude.Process
 
-	chat     *chat
-	vp       viewport.Model
-	input    textarea.Model
-	spin     spinner.Model
-	width    int
-	height   int
-	ready    bool
-	follow   bool // keep viewport pinned to bottom
-	busy     bool
-	stopped  bool // user interrupted the current turn
-	status   string
-	turnFrom time.Time
+	chat      *chat
+	track     *tracker
+	comp      *completer
+	picker    *picker
+	files     []string
+	vp        viewport.Model
+	input     textarea.Model
+	spin      spinner.Model
+	width     int
+	height    int
+	ready     bool
+	follow    bool // keep viewport pinned to bottom
+	busy      bool
+	stopped   bool // user interrupted the current turn
+	sidebarOn bool
+	status    string
+	turnFrom  time.Time
+	ticks     int
 
 	// session state
-	init      *claude.InitEvent
-	sessionID string
-	model     string
-	permMode  string
-	costUSD   float64
-	lastUsage claude.Usage
-	limits    map[string]claude.RateLimitWindow
+	init         *claude.InitEvent
+	initResp     *claude.InitializeResponse
+	sessionID    string
+	sessionTitle string
+	model        string
+	permMode     string
+	costUSD      float64
+	lastUsage    claude.Usage
+	ctxWindow    int
+	limits       map[string]claude.RateLimitWindow
 
 	// permissions
 	pending     []*claude.PermissionRequest
@@ -55,30 +64,44 @@ type Model struct {
 }
 
 // New builds the model; the CLI is started from Init.
-func New(ctx context.Context, opts claude.Options) Model {
+func New(ctx context.Context, opts claude.Options, themeName string) Model {
+	if themeName != "" {
+		applyTheme(themeName)
+	}
+	if opts.CWD == "" {
+		opts.CWD, _ = os.Getwd()
+	}
 	ta := textarea.New()
-	ta.Placeholder = "Ask Claude anything…  (enter to send, ctrl+j for newline, /help)"
+	ta.Placeholder = "Ask Claude anything…  / for commands · @ to mention files"
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
 	ta.CharLimit = 0
 	ta.SetHeight(3)
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.FocusedStyle.Placeholder = mutedStyle
+	ta.BlurredStyle.Placeholder = mutedStyle
 	ta.KeyMap.InsertNewline.SetKeys("ctrl+j", "alt+enter")
 	ta.Focus()
 
-	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(lipgloss.NewStyle().Foreground(colAccent)))
+	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(lipgloss.NewStyle().Foreground(currentTheme().accent)))
 
 	pm := opts.PermissionMode
 	if pm == "" {
 		pm = "default"
 	}
+	tr := newTracker()
+	c := newChat(tr)
+	c.cwd = opts.CWD
 	return Model{
 		opts:        opts,
 		ctx:         ctx,
-		chat:        newChat(),
+		chat:        c,
+		track:       tr,
+		comp:        &completer{},
 		input:       ta,
 		spin:        sp,
 		follow:      true,
+		sidebarOn:   true,
 		permMode:    pm,
 		model:       opts.Model,
 		limits:      map[string]claude.RateLimitWindow{},
@@ -87,7 +110,11 @@ func New(ctx context.Context, opts claude.Options) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, m.spin.Tick, startCmd(m.ctx, m.opts))
+	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, startCmd(m.ctx, m.opts), indexFiles(m.opts.CWD)}
+	if m.opts.Resume != "" || m.opts.Continue {
+		cmds = append(cmds, loadTranscript(m.opts.CWD, m.opts.Resume))
+	}
+	return tea.Batch(cmds...)
 }
 
 type startedMsg struct {
@@ -98,8 +125,18 @@ type startedMsg struct {
 func startCmd(ctx context.Context, opts claude.Options) tea.Cmd {
 	return func() tea.Msg {
 		p, err := claude.Start(ctx, opts)
+		if err == nil {
+			err = p.Initialize()
+		}
 		return startedMsg{p, err}
 	}
+}
+
+// procEvent tags events with their process so late events from a replaced
+// process are ignored.
+type procEvent struct {
+	proc *claude.Process
+	ev   claude.Event
 }
 
 func waitEvent(p *claude.Process) tea.Cmd {
@@ -108,7 +145,27 @@ func waitEvent(p *claude.Process) tea.Cmd {
 		if !ok {
 			return nil
 		}
-		return eventMsg(ev)
+		return procEvent{p, ev}
+	}
+}
+
+type transcriptMsg struct {
+	info sessions.Info
+	msgs []sessions.Message
+	err  error
+}
+
+// loadTranscript reads a session from disk for replay. An empty id means the
+// most recent session in cwd.
+func loadTranscript(cwd, id string) tea.Cmd {
+	return func() tea.Msg {
+		path, ok := sessions.Find(sessions.ProjectDir(cwd), id)
+		if !ok {
+			return transcriptMsg{err: fmt.Errorf("no saved session found")}
+		}
+		info, _ := sessions.Read(path)
+		msgs, err := sessions.Load(path)
+		return transcriptMsg{info: info, msgs: msgs, err: err}
 	}
 }
 
@@ -118,7 +175,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.input.SetWidth(msg.Width - 4)
 		m.layout()
 		m.ready = true
 		m.refresh()
@@ -130,38 +186,88 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.proc = msg.proc
-		m.status = "starting"
 		cmds = append(cmds, waitEvent(m.proc))
 
-	case eventMsg:
-		cmds = append(cmds, m.handleEvent(claude.Event(msg)))
-		if m.proc != nil && !msg.Exited {
+	case procEvent:
+		if msg.proc != m.proc {
+			return m, nil // stale process
+		}
+		cmds = append(cmds, m.handleEvent(msg.ev))
+		if m.proc != nil && !msg.ev.Exited {
 			cmds = append(cmds, waitEvent(m.proc))
 		}
 		m.refresh()
+
+	case transcriptMsg:
+		if msg.err != nil {
+			m.chat.error("could not load transcript: %v", msg.err)
+		} else {
+			m.replay(msg)
+		}
+		m.refresh()
+
+	case filesIndexedMsg:
+		m.files = msg
+
+	case sessionsLoadedMsg:
+		if m.picker != nil && m.picker.all == msg.all {
+			m.picker.setSessions(msg.list)
+		}
 
 	case spinner.TickMsg:
 		var c tea.Cmd
 		m.spin, c = m.spin.Update(msg)
 		cmds = append(cmds, c)
+		m.ticks++
+		if m.ticks%6 == 0 && m.track.runningAgents() > 0 {
+			m.chat.markAgentsDirty()
+			m.refresh()
+		}
 
 	case tea.MouseMsg:
-		var c tea.Cmd
-		m.vp, c = m.vp.Update(msg)
-		m.follow = m.vp.AtBottom()
-		cmds = append(cmds, c)
+		if m.picker == nil {
+			var c tea.Cmd
+			m.vp, c = m.vp.Update(msg)
+			m.follow = m.vp.AtBottom()
+			cmds = append(cmds, c)
+		}
 
 	case tea.KeyMsg:
+		if m.picker != nil {
+			return m, m.handlePickerKey(msg)
+		}
 		if len(m.pending) > 0 {
 			return m, m.handlePermissionKey(msg)
+		}
+		if m.comp.active && !(msg.String() == "enter" && m.comp.complete()) {
+			switch msg.String() {
+			case "up", "ctrl+p":
+				m.comp.move(-1)
+				return m, nil
+			case "down", "ctrl+n":
+				m.comp.move(1)
+				return m, nil
+			case "tab", "enter":
+				m.comp.accept(&m)
+				m.layout()
+				return m, nil
+			case "esc":
+				m.comp.dismiss()
+				m.comp.update(&m)
+				m.layout()
+				return m, nil
+			}
 		}
 		switch msg.String() {
 		case "ctrl+c":
 			if m.busy && m.proc != nil {
-				_ = m.proc.Interrupt()
-				m.stopped = true
-				m.chat.info("interrupted")
-				m.refresh()
+				m.interrupt()
+				return m, nil
+			}
+			if m.input.Value() != "" {
+				m.input.Reset()
+				m.comp.update(&m)
+				m.layout()
 				return m, nil
 			}
 			return m, m.quit()
@@ -169,21 +275,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.quit()
 		case "esc":
 			if m.busy && m.proc != nil {
-				_ = m.proc.Interrupt()
-				m.stopped = true
-				m.chat.info("interrupted")
-				m.refresh()
+				m.interrupt()
 			}
 			return m, nil
 		case "shift+tab":
 			m.cyclePermissionMode()
 			return m, nil
 		case "ctrl+o":
-			m.chat.showOutput = !m.chat.showOutput
+			m.chat.expanded = !m.chat.expanded
 			m.chat.markAllDirty()
 			m.refresh()
 			return m, nil
-		case "pgup", "pgdown", "ctrl+u":
+		case "ctrl+b":
+			m.sidebarOn = !m.sidebarOn
+			m.layout()
+			m.refresh()
+			return m, nil
+		case "ctrl+r":
+			return m, m.openPicker()
+		case "ctrl+l":
+			m.follow = true
+			m.refresh()
+			return m, tea.ClearScreen
+		case "pgup", "pgdown":
 			var c tea.Cmd
 			m.vp, c = m.vp.Update(msg)
 			m.follow = m.vp.AtBottom()
@@ -194,14 +308,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.input.Reset()
+			m.comp.update(&m)
+			m.layout()
 			return m, m.submit(text)
 		}
 		var c tea.Cmd
+		before := m.input.Value()
 		m.input, c = m.input.Update(msg)
+		if m.input.Value() != before {
+			m.comp.update(&m)
+			m.layout()
+		}
 		cmds = append(cmds, c)
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) interrupt() {
+	_ = m.proc.Interrupt()
+	m.stopped = true
+	m.chat.info("interrupted")
+	m.refresh()
 }
 
 func (m *Model) quit() tea.Cmd {
@@ -213,14 +341,30 @@ func (m *Model) quit() tea.Cmd {
 
 func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 	switch {
+	case ev.Initialize != nil:
+		m.initResp = ev.Initialize
+		if ev.Initialize.PermissionMode != "" {
+			m.permMode = ev.Initialize.PermissionMode
+		}
+		if m.model == "" {
+			for _, mi := range ev.Initialize.Models {
+				if mi.Value == "default" {
+					m.model = mi.ResolvedModel
+				}
+			}
+		}
+
 	case ev.Init != nil:
 		m.init = ev.Init
 		m.sessionID = ev.Init.SessionID
 		m.model = ev.Init.Model
 		m.permMode = ev.Init.PermissionMode
-		if m.status == "starting" {
-			m.status = ""
+		if ev.Init.CWD != "" {
+			m.chat.cwd = ev.Init.CWD
 		}
+
+	case ev.ContextWindow > 0:
+		m.ctxWindow = ev.ContextWindow
 
 	case ev.Status != "":
 		m.status = ev.Status
@@ -229,7 +373,19 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 		m.handleStream(ev.Stream)
 
 	case ev.Message != nil:
-		m.handleMessage(ev.Message)
+		if ev.Message.ParentToolUseID != nil {
+			m.track.subagentMessage(*ev.Message.ParentToolUseID, ev.Message.Message)
+			m.chat.markAgentsDirty()
+			return nil
+		}
+		m.applyBlocks(ev.Message.Message.Role, ev.Message.Message.Content, true)
+		if u := ev.Message.Message.Usage; u != nil && ev.Message.Message.Role == "assistant" {
+			m.lastUsage = *u
+		}
+
+	case ev.Task != nil:
+		m.track.task(ev.Task)
+		m.chat.markAgentsDirty()
 
 	case ev.Result != nil:
 		r := ev.Result
@@ -239,6 +395,9 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 		m.costUSD += r.TotalCostUSD
 		if r.SessionID != "" {
 			m.sessionID = r.SessionID
+		}
+		if m.sessionTitle == "" {
+			m.sessionTitle = m.firstPrompt()
 		}
 		if m.stopped {
 			m.stopped = false
@@ -276,7 +435,7 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 		if ev.Err != nil {
 			m.chat.error("claude exited: %v", ev.Err)
 		} else {
-			m.chat.info("claude exited")
+			m.chat.info("claude exited — /new to start again")
 		}
 
 	case ev.Err != nil:
@@ -285,9 +444,18 @@ func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
 	return nil
 }
 
+func (m *Model) firstPrompt() string {
+	for _, e := range m.chat.entries {
+		if e.kind == kindUser {
+			return firstLine(e.text)
+		}
+	}
+	return ""
+}
+
 func (m *Model) handleStream(s *claude.StreamEvent) {
 	if s.ParentToolUseID != nil {
-		return // sub-agent chatter
+		return // sub-agent chatter is tracked from complete messages
 	}
 	e := s.Event
 	switch e.Type {
@@ -317,31 +485,64 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 	}
 }
 
-func (m *Model) handleMessage(ev *claude.MessageEvent) {
-	if ev.ParentToolUseID != nil {
-		return
-	}
-	for _, b := range ev.Message.Content {
+// applyBlocks adds a main-thread message to the chat and trackers. Live
+// messages get their text from stream deltas, so only replayed history
+// renders text blocks here.
+func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool) {
+	for _, b := range blocks {
 		switch b.Type {
+		case "text":
+			if live {
+				continue
+			}
+			if role == "user" && strings.HasPrefix(b.Text, "[Request interrupted") {
+				m.chat.info("interrupted")
+			} else if role == "user" {
+				m.chat.add(&entry{kind: kindUser, text: b.Text})
+			} else if strings.TrimSpace(b.Text) != "" {
+				m.chat.add(&entry{kind: kindAssistant, text: b.Text})
+			}
 		case "tool_use":
 			if _, seen := m.chat.byToolID[b.ID]; !seen {
 				m.chat.add(&entry{kind: kindTool, toolID: b.ID, toolName: b.Name, toolInput: b.Input})
+				m.track.toolUse(b)
 			}
 		case "tool_result":
+			out := toolResultText(b.Content)
+			m.track.toolResult(b.ToolUseID, out, b.IsError)
 			if t, ok := m.chat.byToolID[b.ToolUseID]; ok {
-				t.toolOutput = toolResultText(b.Content)
+				t.toolOutput = out
+				t.toolStatus = toolOK
 				if b.IsError {
 					t.toolStatus = toolFailed
-				} else {
-					t.toolStatus = toolOK
 				}
 				t.dirty = true
 			}
 		}
 	}
-	if ev.Message.Usage != nil && ev.Message.Role == "assistant" {
-		m.lastUsage = *ev.Message.Usage
+}
+
+func (m *Model) replay(t transcriptMsg) {
+	m.sessionTitle = t.info.Title
+	if m.sessionTitle == "" {
+		m.sessionTitle = t.info.FirstPrompt
 	}
+	if m.sessionID == "" {
+		m.sessionID = t.info.ID
+	}
+	for _, msg := range t.msgs {
+		m.applyBlocks(msg.Role, msg.Content, false)
+	}
+	// Agents in history are finished even if no completion event was
+	// saved, and replay timings are meaningless.
+	for _, a := range m.track.agents {
+		if a.running() {
+			a.status = "completed"
+		}
+		a.duration = 0
+	}
+	m.chat.info("resumed %s · %d messages", t.info.ID[:min(8, len(t.info.ID))], len(t.msgs))
+	m.follow = true
 }
 
 func (m *Model) handlePermissionKey(k tea.KeyMsg) tea.Cmd {
@@ -374,7 +575,7 @@ func (m *Model) handlePermissionKey(k tea.KeyMsg) tea.Cmd {
 	if d.Behavior == "deny" {
 		if t, ok := m.chat.byToolID[p.ToolUseID]; ok {
 			t.toolStatus = toolFailed
-			t.toolOutput = "denied"
+			t.toolOutput = "denied by user"
 			t.dirty = true
 		}
 	}
@@ -391,6 +592,81 @@ func (m *Model) afterPermission() {
 	m.refresh()
 }
 
+func (m *Model) openPicker() tea.Cmd {
+	m.picker = newPicker(m.sessionID, m.cwd())
+	m.input.Blur()
+	return loadSessions(m.opts.CWD, false)
+}
+
+func (m *Model) closePicker() {
+	m.picker = nil
+	if len(m.pending) == 0 {
+		m.input.Focus()
+	}
+}
+
+func (m *Model) handlePickerKey(k tea.KeyMsg) tea.Cmd {
+	p := m.picker
+	rows := pickerRows(m.height - 1)
+	switch k.String() {
+	case "esc", "ctrl+c":
+		m.closePicker()
+		return nil
+	case "up", "ctrl+p":
+		p.move(-1, rows)
+		return nil
+	case "down", "ctrl+n":
+		p.move(1, rows)
+		return nil
+	case "pgup":
+		p.move(-rows, rows)
+		return nil
+	case "pgdown":
+		p.move(rows, rows)
+		return nil
+	case "tab":
+		p.all = !p.all
+		p.loading = true
+		return loadSessions(m.opts.CWD, p.all)
+	case "enter":
+		s, ok := p.selected()
+		if !ok {
+			return nil
+		}
+		current := p.isCurrent(s)
+		m.closePicker()
+		if current {
+			return nil
+		}
+		return m.resume(s)
+	}
+	var c tea.Cmd
+	before := p.filter.Value()
+	p.filter, c = p.filter.Update(k)
+	if p.filter.Value() != before {
+		p.applyFilter()
+	}
+	return c
+}
+
+// resume switches to a saved session, moving to its directory if needed.
+func (m *Model) resume(s sessions.Info) tea.Cmd {
+	if s.CWD != "" && s.CWD != m.opts.CWD {
+		if _, err := os.Stat(s.CWD); err == nil {
+			m.opts.CWD = s.CWD
+		}
+	}
+	cmd := m.restart(claude.Options{Resume: s.ID})
+	msgs, err := sessions.Load(s.Path)
+	if err != nil {
+		m.chat.error("could not load transcript: %v", err)
+	} else {
+		m.replay(transcriptMsg{info: s, msgs: msgs})
+	}
+	m.refresh()
+	return tea.Batch(cmd, indexFiles(m.opts.CWD))
+}
+
 func (m *Model) cyclePermissionMode() {
 	next := permissionModes[0]
 	for i, pm := range permissionModes {
@@ -398,9 +674,13 @@ func (m *Model) cyclePermissionMode() {
 			next = permissionModes[(i+1)%len(permissionModes)]
 		}
 	}
-	m.permMode = next
+	m.setPermissionMode(next)
+}
+
+func (m *Model) setPermissionMode(mode string) {
+	m.permMode = mode
 	if m.proc != nil {
-		_ = m.proc.SetPermissionMode(next)
+		_ = m.proc.SetPermissionMode(mode)
 	}
 }
 
@@ -441,11 +721,11 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		return m.quit(), true
 	case "/new", "/clear":
 		return m.restart(claude.Options{}), true
-	case "/resume":
+	case "/resume", "/sessions":
 		if arg == "" {
-			return m.restart(claude.Options{Continue: true}), true
+			return m.openPicker(), true
 		}
-		return m.restart(claude.Options{Resume: arg}), true
+		return tea.Batch(m.restart(claude.Options{Resume: arg}), loadTranscript(m.opts.CWD, arg)), true
 	case "/model":
 		if arg == "" {
 			m.chat.info("model: %s", m.model)
@@ -462,11 +742,24 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 			m.chat.info("permission mode: %s (modes: %s)", m.permMode, strings.Join(permissionModes, ", "))
 			return nil, true
 		}
-		m.permMode = arg
-		if m.proc != nil {
-			_ = m.proc.SetPermissionMode(arg)
-		}
+		m.setPermissionMode(arg)
 		m.chat.info("permission mode → %s", arg)
+	case "/theme":
+		if arg == "" {
+			m.chat.info("theme: %s (themes: %s)", currentTheme().name, strings.Join(themeNames(), ", "))
+			return nil, true
+		}
+		if !applyTheme(arg) {
+			m.chat.error("unknown theme %q", arg)
+			return nil, true
+		}
+		m.spin.Style = lipgloss.NewStyle().Foreground(currentTheme().accent)
+		m.input.FocusedStyle.Placeholder = mutedStyle
+		m.input.BlurredStyle.Placeholder = mutedStyle
+		m.chat.markAllDirty()
+	case "/sidebar":
+		m.sidebarOn = !m.sidebarOn
+		m.layout()
 	case "/session":
 		m.chat.info("session %s\ncwd %s", m.sessionID, m.cwd())
 	default:
@@ -482,14 +775,18 @@ func (m *Model) restart(o claude.Options) tea.Cmd {
 	}
 	opts := m.opts
 	opts.Resume, opts.Continue = o.Resume, o.Continue
-	m.chat.clear()
+	m.track = newTracker()
+	m.chat.reset(m.track)
+	m.chat.cwd = opts.CWD
 	m.pending = nil
 	m.busy = false
 	m.costUSD = 0
+	m.sessionID = o.Resume
+	m.sessionTitle = ""
+	m.lastUsage = claude.Usage{}
 	m.alwaysAllow = map[string]bool{}
-	if o.Resume != "" || o.Continue {
-		m.chat.info("resuming session…")
-	}
+	m.init = nil
+	m.refresh()
 	return startCmd(m.ctx, opts)
 }
 
@@ -500,21 +797,35 @@ func (m *Model) cwd() string {
 	return m.opts.CWD
 }
 
+func (m *Model) contextWindow() int {
+	if m.ctxWindow > 0 {
+		return m.ctxWindow
+	}
+	return 200000
+}
+
+func (m Model) showSidebar() bool { return m.sidebarOn && m.width >= 100 }
+
+func (m Model) mainWidth() int {
+	if m.showSidebar() {
+		return m.width - sidebarWidth
+	}
+	return m.width
+}
+
 // layout sizes the viewport to whatever the bottom panel leaves over.
 func (m *Model) layout() {
 	if m.width == 0 {
 		return
 	}
+	m.input.SetWidth(m.mainWidth() - 4)
 	bottom := lipgloss.Height(m.bottomView()) + 1 // + status bar
-	h := m.height - bottom
-	if h < 3 {
-		h = 3
-	}
+	h := max(3, m.height-bottom)
 	if !m.ready {
-		m.vp = viewport.New(m.width, h)
+		m.vp = viewport.New(m.mainWidth(), h)
 		m.vp.MouseWheelEnabled = true
 	} else {
-		m.vp.Width, m.vp.Height = m.width, h
+		m.vp.Width, m.vp.Height = m.mainWidth(), h
 	}
 }
 
@@ -522,7 +833,7 @@ func (m *Model) refresh() {
 	if !m.ready {
 		return
 	}
-	content := m.chat.View(m.width)
+	content := m.chat.View(m.mainWidth())
 	if len(m.chat.entries) == 0 {
 		content = m.splash()
 	}
@@ -536,7 +847,34 @@ func (m Model) View() string {
 	if !m.ready {
 		return ""
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, m.vp.View(), m.bottomView(), m.statusView())
+	if m.picker != nil {
+		return lipgloss.JoinVertical(lipgloss.Left, m.picker.view(m.width, m.height-1), m.statusView())
+	}
+	chatView := m.vp.View()
+	if pop := m.comp.view(m.mainWidth()); pop != "" {
+		chatView = overlayBottom(chatView, pop, m.vp.Height, m.mainWidth())
+	}
+	main := lipgloss.JoinVertical(lipgloss.Left, chatView, m.bottomView())
+	if m.showSidebar() {
+		main = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(m.mainWidth()).Render(main), m.sidebarView(m.height-1))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, main, m.statusView())
+}
+
+// overlayBottom draws pop over the last lines of base.
+func overlayBottom(base, pop string, height, width int) string {
+	lines := strings.Split(base, "\n")
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	pl := strings.Split(pop, "\n")
+	start := max(0, len(lines)-len(pl))
+	for i, l := range pl {
+		if start+i < len(lines) {
+			lines[start+i] = l + strings.Repeat(" ", max(0, width-lipgloss.Width(l)))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) bottomView() string {
@@ -551,95 +889,114 @@ func (m Model) bottomView() string {
 	if m.busy {
 		label := m.status
 		if label == "" || label == "requesting" {
-			label = "working"
+			label = "Working"
 		}
-		top = m.spin.View() + " " + mutedStyle.Render(fmt.Sprintf("%s… %ds · esc to interrupt", label, int(time.Since(m.turnFrom).Seconds()))) + "\n"
+		extra := fmt.Sprintf(" %ds", int(time.Since(m.turnFrom).Seconds()))
+		if n := m.track.runningAgents(); n > 0 {
+			plural := ""
+			if n > 1 {
+				plural = "s"
+			}
+			extra += fmt.Sprintf(" · %d agent%s running", n, plural)
+		}
+		top = " " + m.spin.View() + " " + statusKey.Render(label+"…") + mutedStyle.Render(extra+" · esc to interrupt") + "\n"
 	}
-	return top + box.Width(m.width-2).Render(m.input.View())
+	return top + box.Width(m.mainWidth()-2).Render(m.input.View())
 }
 
 func (m Model) permissionView() string {
 	p := m.pending[0]
+	w := m.mainWidth() - 6
 	title := warnStyle.Bold(true).Render("Allow " + p.ToolName + "?")
+	if p.AgentID != "" {
+		for _, a := range m.track.agents {
+			if a.taskID == p.AgentID {
+				title += " " + agentStyle.Render("("+a.kind+": "+truncate(a.desc, 30)+")")
+			}
+		}
+	}
 	if len(m.pending) > 1 {
-		title += mutedStyle.Render(fmt.Sprintf("  (+%d queued)", len(m.pending)-1))
+		title += mutedStyle.Render(fmt.Sprintf("  +%d queued", len(m.pending)-1))
 	}
-	detail := prettyInput(p.ToolName, p.Input, m.width-6)
-	if p.Description != "" {
-		detail = mutedStyle.Render(p.Description) + "\n" + detail
+	detail := m.prettyInput(p.ToolName, p.Input, w)
+	if p.Description != "" && filePathOf(p.Input) == "" {
+		if p.ToolName == "Bash" {
+			detail += "\n" + mutedStyle.Render(p.Description)
+		} else {
+			detail = mutedStyle.Render(p.Description) + "\n" + detail
+		}
 	}
-	keys := statusKey.Render("y") + " allow  " + statusKey.Render("a") + " always allow " + p.ToolName + " this session  " + statusKey.Render("n") + " deny"
-	return permBox.Width(m.width - 2).Render(title + "\n" + detail + "\n\n" + keys)
+	keys := statusKey.Render("y") + mutedStyle.Render(" allow  ") +
+		statusKey.Render("a") + mutedStyle.Render(" always allow "+p.ToolName+"  ") +
+		statusKey.Render("n") + mutedStyle.Render(" deny  ") +
+		statusKey.Render("ctrl+c") + mutedStyle.Render(" deny & stop")
+	return permBox.Width(m.mainWidth() - 2).Render(title + "\n\n" + detail + "\n\n" + keys)
 }
 
-func prettyInput(tool string, raw json.RawMessage, width int) string {
-	var m map[string]any
-	_ = json.Unmarshal(raw, &m)
+func (m Model) prettyInput(tool string, raw json.RawMessage, width int) string {
+	var in map[string]any
+	_ = json.Unmarshal(raw, &in)
+	fp := filePathOf(raw)
+	rel := relPath(fp, m.cwd())
 	switch tool {
 	case "Bash":
-		if c, ok := m["command"].(string); ok {
-			return lipgloss.NewStyle().Width(width).Render("$ " + c)
-		}
+		return lipgloss.NewStyle().Width(width).Render(statusKey.Render("$ ") + textStyle.Render(str(in, "command")))
 	case "Edit":
-		fp, _ := m["file_path"].(string)
-		old, _ := m["old_string"].(string)
-		nw, _ := m["new_string"].(string)
-		return fp + "\n" + diffLines(old, nw, 12)
+		return textStyle.Render(rel) + "\n" + renderDiff(computeDiff(str(in, "old_string"), str(in, "new_string")), fp, width, 14)
+	case "MultiEdit":
+		var all []diffLine
+		edits, _ := in["edits"].([]any)
+		for _, ed := range edits {
+			e, _ := ed.(map[string]any)
+			all = append(all, computeDiff(str(e, "old_string"), str(e, "new_string"))...)
+		}
+		return textStyle.Render(rel) + "\n" + renderDiff(all, fp, width, 14)
 	case "Write":
-		fp, _ := m["file_path"].(string)
-		content, _ := m["content"].(string)
-		return fp + "\n" + clip(okStyle, "+ ", content, 12)
+		return textStyle.Render(rel) + "\n" + renderDiff(addedLines(str(in, "content")), fp, width, 12)
+	case "WebFetch":
+		return textStyle.Render(str(in, "url"))
 	}
-	b, _ := json.MarshalIndent(m, "", "  ")
-	return clip(mutedStyle, "", string(b), 12)
-}
-
-func diffLines(old, nw string, max int) string {
-	return clip(errStyle, "- ", old, max/2) + "\n" + clip(okStyle, "+ ", nw, max/2)
-}
-
-func clip(st lipgloss.Style, prefix, s string, max int) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	extra := ""
-	if len(lines) > max {
-		extra = mutedStyle.Render(fmt.Sprintf("\n  … %d more lines", len(lines)-max))
-		lines = lines[:max]
-	}
-	for i, l := range lines {
-		lines[i] = st.Render(prefix + l)
-	}
-	return strings.Join(lines, "\n") + extra
+	b, _ := json.MarshalIndent(in, "", "  ")
+	return mutedStyle.Render(clipText(string(b), width, 12))
 }
 
 func (m Model) statusView() string {
 	sep := mutedStyle.Render(" │ ")
-	parts := []string{statusKey.Render("claudewitz")}
-	if m.model != "" {
-		parts = append(parts, m.model)
-	}
-	mode := m.permMode
-	switch mode {
+	var parts []string
+	mode := mutedStyle.Render("● default")
+	switch m.permMode {
 	case "acceptEdits":
 		mode = okStyle.Render("⏵⏵ accept edits")
 	case "plan":
-		mode = warnStyle.Render("⏸ plan")
+		mode = warnStyle.Render("⏸ plan mode")
 	case "bypassPermissions":
-		mode = errStyle.Render("⚠ bypass")
+		mode = errStyle.Render("⚠ bypass permissions")
 	}
-	parts = append(parts, mode+mutedStyle.Render(" (⇧⇥)"))
-	if ctx := contextTokens(m.lastUsage); ctx > 0 {
-		parts = append(parts, fmt.Sprintf("ctx %s", humanTokens(ctx)))
+	parts = append(parts, mode+mutedStyle.Render(" ⇧⇥"))
+	if !m.showSidebar() {
+		if m.model != "" {
+			parts = append(parts, m.model)
+		}
+		if ctx := contextTokens(m.lastUsage); ctx > 0 {
+			parts = append(parts, "ctx "+humanTokens(ctx))
+		}
+		if w, ok := m.limits["five_hour"]; ok {
+			parts = append(parts, usageGauge("5h", w))
+		}
+		if w, ok := m.limits["seven_day"]; ok {
+			parts = append(parts, usageGauge("7d", w))
+		}
 	}
-	if w, ok := m.limits["five_hour"]; ok {
-		parts = append(parts, usageGauge("5h", w))
+	left := strings.Join(parts, sep)
+	hints := mutedStyle.Render("ctrl+r sessions · ctrl+b sidebar · ctrl+o expand · /help")
+	if m.costUSD > 0 && m.showSidebar() {
+		hints = mutedStyle.Render(fmt.Sprintf("≈$%.2f api-equiv · ", m.costUSD)) + hints
 	}
-	if w, ok := m.limits["seven_day"]; ok {
-		parts = append(parts, usageGauge("7d", w))
+	gap := m.width - 2 - lipgloss.Width(left) - lipgloss.Width(hints)
+	if gap < 2 {
+		return statusBar.Width(m.width).Render(left)
 	}
-	if m.costUSD > 0 {
-		parts = append(parts, mutedStyle.Render(fmt.Sprintf("≈$%.3f api-equiv", m.costUSD)))
-	}
-	return statusBar.Width(m.width).Render(strings.Join(parts, sep))
+	return statusBar.Width(m.width).Render(left + strings.Repeat(" ", gap) + hints)
 }
 
 func usageGauge(label string, w claude.RateLimitWindow) string {
@@ -653,8 +1010,7 @@ func usageGauge(label string, w claude.RateLimitWindow) string {
 	}
 	reset := ""
 	if w.ResetsAt > 0 {
-		d := time.Until(time.Unix(w.ResetsAt, 0)).Round(time.Minute)
-		if d > 0 {
+		if d := time.Until(time.Unix(w.ResetsAt, 0)).Round(time.Minute); d > 0 {
 			reset = mutedStyle.Render(" ↻" + shortDur(d))
 		}
 	}
@@ -676,7 +1032,10 @@ func contextTokens(u claude.Usage) int {
 }
 
 func humanTokens(n int) string {
-	if n >= 1000 {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1000:
 		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
 	return fmt.Sprintf("%d", n)
@@ -687,37 +1046,48 @@ func formatTokens(u claude.Usage) string {
 }
 
 func (m Model) splash() string {
-	logo := assistLabel.Render(`
-   ✻  c l a u d e w i t z`)
+	th := currentTheme()
+	word := []rune("c l a u d e w i t z")
+	var logo strings.Builder
+	for i, r := range word {
+		c := th.accent
+		if i >= len(word)/2 {
+			c = th.second
+		}
+		logo.WriteString(lipgloss.NewStyle().Foreground(c).Bold(true).Render(string(r)))
+	}
+	key := func(k, desc string) string { return statusKey.Render(k) + mutedStyle.Render(" "+desc) }
 	lines := []string{
-		logo,
 		"",
-		mutedStyle.Render("   A terminal front end for Claude Code — runs on your Claude subscription."),
+		"  " + assistLabel.Render("✻  ") + logo.String(),
 		"",
+		mutedStyle.Render("  A terminal front end for Claude Code, running on your Claude subscription."),
+		"",
+		"  " + key("/", "commands") + "        " + key("@", "mention a file"),
+		"  " + key("ctrl+r", "sessions") + "   " + key("⇧⇥", "permission mode"),
+		"",
+		"  " + textStyle.Render(prettyPath(m.opts.CWD)),
 	}
-	if m.init != nil {
-		lines = append(lines,
-			mutedStyle.Render("   cwd      ")+m.init.CWD,
-			mutedStyle.Render("   model    ")+m.init.Model,
-			mutedStyle.Render("   claude   ")+m.init.Version,
-			mutedStyle.Render("   tools    ")+fmt.Sprintf("%d available", len(m.init.Tools)),
-		)
+	if m.initResp != nil {
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("  claude %s · %d commands · %s", m.initResp.Version, len(m.initResp.Commands), m.model)))
 	}
-	lines = append(lines, "", mutedStyle.Render("   /help for commands"))
 	return strings.Join(lines, "\n")
 }
 
 const helpText = `commands
   /new, /clear        start a fresh session
-  /resume [id]        resume a session (most recent if no id)
+  /resume [id]        browse sessions (or resume one by id)
   /model <name>       switch model (opus, sonnet, haiku, …)
   /mode <mode>        permission mode: default, acceptEdits, plan
+  /theme <name>       colour theme: claude, charm, mono
+  /sidebar            toggle the sidebar
   /session            show session id and cwd
   /quit               exit
   other /commands are passed through to Claude Code
 
 keys
-  enter               send          ctrl+j / alt+enter  newline
-  esc                 interrupt     shift+tab           cycle permission mode
-  ctrl+o              expand tool output
-  pgup/pgdown, wheel  scroll        ctrl+c              interrupt / quit`
+  enter      send               ctrl+j / alt+enter  newline
+  esc        interrupt          shift+tab           cycle permission mode
+  ctrl+r     sessions           ctrl+b              toggle sidebar
+  ctrl+o     expand output      pgup/pgdown, wheel  scroll
+  tab        accept completion  ctrl+c              interrupt / clear / quit`

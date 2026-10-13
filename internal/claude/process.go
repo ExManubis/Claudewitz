@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 )
 
@@ -31,9 +33,13 @@ type Event struct {
 	Result     *ResultEvent
 	RateLimit  *RateLimitEvent
 	Permission *PermissionRequest
-	Status     string // system/status payload, e.g. "requesting"
-	Err        error  // stdout closed or unparseable output
-	Exited     bool
+	Task       *TaskEvent
+	Initialize *InitializeResponse
+	// ContextWindow is the effective context size from autocompact_state.
+	ContextWindow int
+	Status        string // system/status payload, e.g. "requesting"
+	Err           error  // stdout closed or unparseable output
+	Exited        bool
 }
 
 // Process is a running `claude` CLI.
@@ -58,6 +64,7 @@ func Start(ctx context.Context, opts Options) (*Process, error) {
 		"--verbose",
 		"--include-partial-messages",
 		"--permission-prompt-tool", "stdio",
+		"--forward-subagent-text",
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -74,6 +81,7 @@ func Start(ctx context.Context, opts Options) (*Process, error) {
 
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = opts.CWD
+	cmd.Env = childEnv(os.Environ())
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -126,6 +134,11 @@ func parseLine(line []byte) (Event, bool) {
 			if json.Unmarshal(line, &e) == nil {
 				return Event{Init: &e}, true
 			}
+		case "task_started", "task_progress", "task_updated", "task_notification":
+			var e TaskEvent
+			if json.Unmarshal(line, &e) == nil {
+				return Event{Task: &e}, true
+			}
 		case "status":
 			var s struct {
 				Status string `json:"status"`
@@ -133,6 +146,15 @@ func parseLine(line []byte) (Event, bool) {
 			if json.Unmarshal(line, &s) == nil {
 				return Event{Status: s.Status}, true
 			}
+		}
+	case "autocompact_state":
+		var a struct {
+			Value struct {
+				EffectiveWindow int `json:"effective_window"`
+			} `json:"value"`
+		}
+		if json.Unmarshal(line, &a) == nil && a.Value.EffectiveWindow > 0 {
+			return Event{ContextWindow: a.Value.EffectiveWindow}, true
 		}
 	case "assistant", "user":
 		var e MessageEvent
@@ -153,6 +175,27 @@ func parseLine(line []byte) (Event, bool) {
 		var e RateLimitEvent
 		if json.Unmarshal(line, &e) == nil {
 			return Event{RateLimit: &e}, true
+		}
+	case "control_response":
+		var cr struct {
+			Response struct {
+				Subtype   string          `json:"subtype"`
+				RequestID string          `json:"request_id"`
+				Response  json.RawMessage `json:"response"`
+				Error     string          `json:"error"`
+			} `json:"response"`
+		}
+		if json.Unmarshal(line, &cr) != nil {
+			break
+		}
+		if strings.HasPrefix(cr.Response.RequestID, "initialize-") {
+			if cr.Response.Error != "" {
+				return Event{Err: fmt.Errorf("initialize: %s", cr.Response.Error)}, true
+			}
+			var ir InitializeResponse
+			if json.Unmarshal(cr.Response.Response, &ir) == nil {
+				return Event{Initialize: &ir}, true
+			}
 		}
 	case "control_request":
 		var cr controlRequest
@@ -215,6 +258,16 @@ func (p *Process) control(req map[string]any) error {
 	})
 }
 
+// Initialize asks the CLI for its commands, models and account info; the
+// answer arrives as an Event with Initialize set.
+func (p *Process) Initialize() error {
+	return p.write(map[string]any{
+		"type":       "control_request",
+		"request_id": "initialize-" + newID(),
+		"request":    map[string]any{"subtype": "initialize"},
+	})
+}
+
 // Interrupt stops the current turn.
 func (p *Process) Interrupt() error {
 	return p.control(map[string]any{"subtype": "interrupt"})
@@ -233,6 +286,28 @@ func (p *Process) SetModel(model string) error {
 // Close ends stdin, which lets the CLI exit cleanly.
 func (p *Process) Close() error {
 	return p.stdin.Close()
+}
+
+// sessionVars identify the Claude Code session that launched us. If
+// claudewitz runs inside Claude Code (e.g. from its shell), passing them on
+// would pin every child to the parent's session.
+var sessionVars = map[string]bool{
+	"CLAUDECODE":                    true,
+	"CLAUDE_CODE_SESSION_ID":        true,
+	"CLAUDE_CODE_CHILD_SESSION":     true,
+	"CLAUDE_CODE_REMOTE_SESSION_ID": true,
+	"CLAUDE_PID":                    true,
+}
+
+func childEnv(env []string) []string {
+	out := env[:0:0]
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		if !sessionVars[k] {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 func newID() string {

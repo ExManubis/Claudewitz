@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -50,16 +51,18 @@ func (e *entry) setText(s string) { e.text = s; e.dirty = true }
 
 // chat holds the transcript and renders it.
 type chat struct {
-	entries    []*entry
-	byToolID   map[string]*entry
-	streaming  map[int]*entry // content block index -> live entry
-	md         *glamour.TermRenderer
-	mdWidth    int
-	showOutput bool
+	entries   []*entry
+	byToolID  map[string]*entry
+	streaming map[int]*entry // content block index -> live entry
+	md        *glamour.TermRenderer
+	mdWidth   int
+	expanded  bool
+	track     *tracker
+	cwd       string
 }
 
-func newChat() *chat {
-	return &chat{byToolID: map[string]*entry{}, streaming: map[int]*entry{}}
+func newChat(t *tracker) *chat {
+	return &chat{byToolID: map[string]*entry{}, streaming: map[int]*entry{}, track: t}
 }
 
 func (c *chat) add(e *entry) *entry {
@@ -79,25 +82,39 @@ func (c *chat) error(format string, a ...any) {
 	c.add(&entry{kind: kindError, text: fmt.Sprintf(format, a...)})
 }
 
-func (c *chat) clear() {
-	*c = chat{byToolID: map[string]*entry{}, streaming: map[int]*entry{}, md: c.md, mdWidth: c.mdWidth, showOutput: c.showOutput}
+func (c *chat) reset(t *tracker) {
+	c.entries = nil
+	c.byToolID = map[string]*entry{}
+	c.streaming = map[int]*entry{}
+	c.track = t
 }
 
 func (c *chat) markAllDirty() {
 	for _, e := range c.entries {
 		e.dirty = true
 	}
+	c.md = nil
+}
+
+// markAgentsDirty forces re-rendering of running sub-agent entries.
+func (c *chat) markAgentsDirty() {
+	for _, e := range c.entries {
+		if e.kind == kindTool && isAgentTool(e.toolName) {
+			if a := c.track.agent(e.toolID); a != nil && a.running() {
+				e.dirty = true
+			}
+		}
+	}
 }
 
 func (c *chat) renderer(width int) *glamour.TermRenderer {
 	if c.md == nil || c.mdWidth != width {
-		r, err := glamour.NewTermRenderer(
-			glamour.WithAutoStyle(),
-			glamour.WithWordWrap(width),
-		)
-		if err == nil {
-			c.md = r
-			c.mdWidth = width
+		style := "dark"
+		if !darkBG {
+			style = "light"
+		}
+		if r, err := glamour.NewTermRenderer(glamour.WithStandardStyle(style), glamour.WithWordWrap(width)); err == nil {
+			c.md, c.mdWidth = r, width
 		}
 	}
 	return c.md
@@ -105,16 +122,21 @@ func (c *chat) renderer(width int) *glamour.TermRenderer {
 
 func (c *chat) View(width int) string {
 	var b strings.Builder
-	for i, e := range c.entries {
+	var prev *entry
+	for _, e := range c.entries {
 		if e.dirty || e.width != width {
 			e.rendered = c.renderEntry(e, width)
-			e.width = width
-			e.dirty = false
+			e.width, e.dirty = width, false
 		}
-		if i > 0 {
+		if prev != nil {
 			b.WriteString("\n")
+			// Breathing room around user messages and between turns.
+			if e.kind == kindUser || prev.kind == kindUser || (e.kind == kindAssistant) != (prev.kind == kindAssistant) {
+				b.WriteString("\n")
+			}
 		}
 		b.WriteString(e.rendered)
+		prev = e
 	}
 	return b.String()
 }
@@ -123,7 +145,7 @@ func (c *chat) renderEntry(e *entry, width int) string {
 	wrap := lipgloss.NewStyle().Width(width - 2).PaddingLeft(2)
 	switch e.kind {
 	case kindUser:
-		return userLabel.Render("❯ You") + "\n" + wrap.Render(e.text)
+		return userBlock.Width(width - 2).Render(textStyle.Render(e.text))
 	case kindAssistant:
 		body := e.text
 		if r := c.renderer(width - 2); r != nil {
@@ -131,13 +153,17 @@ func (c *chat) renderEntry(e *entry, width int) string {
 				body = strings.Trim(out, "\n")
 			}
 		}
-		return assistLabel.Render("✻ Claude") + "\n" + body
+		return body
 	case kindThinking:
 		t := strings.TrimSpace(e.text)
 		if t == "" {
-			t = "thinking…"
+			return wrap.Render(thinkingStyle.Render("∴ Thinking…"))
 		}
-		return wrap.Render(thinkingStyle.Render("∴ " + t))
+		lines := strings.Split(lipgloss.NewStyle().Width(width-6).Render(t), "\n")
+		if !c.expanded && len(lines) > 3 {
+			lines = append(lines[:3], fmt.Sprintf("… %d more lines (ctrl+o)", len(lines)-3))
+		}
+		return wrap.Render(thinkingStyle.Render("∴ " + strings.Join(lines, "\n  ")))
 	case kindTool:
 		return c.renderTool(e, width)
 	case kindError:
@@ -148,36 +174,193 @@ func (c *chat) renderEntry(e *entry, width int) string {
 }
 
 func (c *chat) renderTool(e *entry, width int) string {
+	th := currentTheme()
 	var icon string
 	switch e.toolStatus {
 	case toolPending:
-		icon = warnStyle.Render("●")
+		icon = lipgloss.NewStyle().Foreground(th.warn).Render("●")
 	case toolOK:
 		icon = okStyle.Render("●")
 	default:
 		icon = errStyle.Render("●")
 	}
-	head := fmt.Sprintf("%s %s %s", icon, toolName.Render(e.toolName), mutedStyle.Render(summarizeInput(e.toolName, e.toolInput, width-len(e.toolName)-8)))
-	out := lipgloss.NewStyle().Width(width - 2).PaddingLeft(2).Render(head)
-	if e.toolOutput != "" {
-		lines := strings.Split(strings.TrimRight(e.toolOutput, "\n"), "\n")
-		max := 4
-		if c.showOutput {
-			max = 40
+	name := e.toolName
+	nameStyle := toolName
+	if isAgentTool(name) {
+		nameStyle = agentStyle
+	}
+	summary := summarizeInput(name, e.toolInput, width-lipgloss.Width(name)-8)
+	if fp := filePathOf(e.toolInput); fp != "" {
+		summary = truncateLeft(relPath(fp, c.cwd), max(10, width-lipgloss.Width(name)-8))
+	}
+	head := "  " + icon + " " + nameStyle.Render(name) + " " + mutedStyle.Render(summary)
+	body := c.toolBody(e, width-6)
+	if body == "" {
+		return head
+	}
+	return head + "\n" + indent(body, "    ")
+}
+
+// toolBody is what goes under a tool call header.
+func (c *chat) toolBody(e *entry, width int) string {
+	var in map[string]any
+	_ = json.Unmarshal(e.toolInput, &in)
+	maxLines := 10
+	if c.expanded {
+		maxLines = 80
+	}
+	if isAgentTool(e.toolName) {
+		return c.agentBody(e, width)
+	}
+	if e.toolStatus == toolFailed {
+		return errStyle.Render("⎿ " + clipText(e.toolOutput, width, 6))
+	}
+	if e.toolStatus == toolPending {
+		return ""
+	}
+	fp := filePathOf(e.toolInput)
+	switch e.toolName {
+	case "Edit":
+		d := computeDiff(str(in, "old_string"), str(in, "new_string"))
+		a, r := diffStats(d)
+		return mutedStyle.Render(fmt.Sprintf("⎿ %s %s", okStyle.Render(fmt.Sprintf("+%d", a)), errStyle.Render(fmt.Sprintf("-%d", r)))) + "\n" + renderDiff(d, fp, width, maxLines)
+	case "MultiEdit":
+		var all []diffLine
+		edits, _ := in["edits"].([]any)
+		for i, ed := range edits {
+			m, _ := ed.(map[string]any)
+			if i > 0 {
+				all = append(all, diffLine{kind: '@', text: "⋯"})
+			}
+			all = append(all, computeDiff(str(m, "old_string"), str(m, "new_string"))...)
 		}
-		more := ""
-		if len(lines) > max {
-			more = fmt.Sprintf("\n… %d more lines (ctrl+o to toggle)", len(lines)-max)
-			lines = lines[:max]
+		a, r := diffStats(all)
+		return mutedStyle.Render(fmt.Sprintf("⎿ %d edits %s %s", len(edits), okStyle.Render(fmt.Sprintf("+%d", a)), errStyle.Render(fmt.Sprintf("-%d", r)))) + "\n" + renderDiff(all, fp, width, maxLines)
+	case "Write":
+		d := addedLines(str(in, "content"))
+		return mutedStyle.Render(fmt.Sprintf("⎿ wrote %d lines", len(d))) + "\n" + renderDiff(d, fp, width, min(maxLines, 6))
+	case "Read":
+		n := strings.Count(strings.TrimRight(e.toolOutput, "\n"), "\n") + 1
+		return mutedStyle.Render(fmt.Sprintf("⎿ read %d lines", n))
+	case "TodoWrite", "TaskCreate", "TaskUpdate":
+		return mutedStyle.Render("⎿ todos updated")
+	}
+	if strings.TrimSpace(e.toolOutput) == "" {
+		return mutedStyle.Render("⎿ (no output)")
+	}
+	lim := 4
+	if c.expanded {
+		lim = 60
+	}
+	return mutedStyle.Render("⎿ " + clipText(e.toolOutput, width-2, lim))
+}
+
+func (c *chat) agentBody(e *entry, width int) string {
+	a := c.track.agent(e.toolID)
+	var lines []string
+	if a != nil {
+		stats := []string{}
+		if a.toolUses > 0 {
+			stats = append(stats, fmt.Sprintf("%d tool uses", a.toolUses))
 		}
-		body := strings.Join(lines, "\n") + more
+		if a.tokens > 0 {
+			stats = append(stats, humanTokens(a.tokens)+" tokens")
+		}
+		if a.running() {
+			if a.lastTool != "" {
+				stats = append(stats, "running "+a.lastTool)
+			} else {
+				stats = append(stats, "starting")
+			}
+		} else if a.duration > 0 {
+			stats = append(stats, shortSecs(a.duration))
+		}
+		if len(stats) > 0 {
+			lines = append(lines, mutedStyle.Render("⎿ "+strings.Join(stats, " · ")))
+		}
+		if a.running() {
+			for _, r := range a.recent {
+				lines = append(lines, mutedStyle.Render("  "+truncate(r, width-2)))
+			}
+		}
+	}
+	if a != nil && a.background {
+		if a.running() {
+			lines = append(lines, mutedStyle.Render("⎿ running in the background"))
+		} else if a.summary != "" {
+			lim := 3
+			if c.expanded {
+				lim = 40
+			}
+			lines = append(lines, mutedStyle.Render("⎿ "+clipText(a.summary, width-2, lim)))
+		}
+	} else if e.toolStatus != toolPending && e.toolOutput != "" {
+		lim := 3
+		if c.expanded {
+			lim = 40
+		}
+		out := agentReport(e.toolOutput)
 		st := mutedStyle
 		if e.toolStatus == toolFailed {
 			st = errStyle
 		}
-		out += "\n" + lipgloss.NewStyle().PaddingLeft(4).Width(width-2).Render(st.Render("⎿ "+body))
+		lines = append(lines, st.Render("⎿ "+clipText(out, width-2, lim)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// agentReport strips the harness frame around a sub-agent's final report:
+// a one-line preamble, then the report indented by two spaces, then
+// optional metadata back at column zero.
+func agentReport(s string) string {
+	if !strings.HasPrefix(s, "[Subagent hand-back]") {
+		return s
+	}
+	_, body, ok := strings.Cut(s, "\n")
+	if !ok {
+		return s
+	}
+	var lines []string
+	for _, l := range strings.Split(body, "\n") {
+		if l != "" && !strings.HasPrefix(l, "  ") {
+			break
+		}
+		lines = append(lines, strings.TrimPrefix(l, "  "))
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func clipText(s string, width, maxLines int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	more := 0
+	if len(lines) > maxLines {
+		more = len(lines) - maxLines
+		lines = lines[:maxLines]
+	}
+	for i, l := range lines {
+		lines[i] = truncate(expandTabs(l), width)
+	}
+	out := strings.Join(lines, "\n  ")
+	if more > 0 {
+		out += fmt.Sprintf("\n  … %d more lines (ctrl+o to expand)", more)
 	}
 	return out
+}
+
+func indent(s, pre string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = pre + l
+	}
+	return strings.Join(lines, "\n")
+}
+
+func filePathOf(raw json.RawMessage) string {
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	return firstNonEmpty(str(m, "file_path"), str(m, "notebook_path"))
 }
 
 // summarizeInput produces a one-line description of a tool call.
@@ -186,31 +369,33 @@ func summarizeInput(tool string, raw json.RawMessage, max int) string {
 	if err := json.Unmarshal(raw, &m); err != nil || len(m) == 0 {
 		return ""
 	}
-	pick := func(keys ...string) string {
-		for _, k := range keys {
-			if v, ok := m[k].(string); ok && v != "" {
-				return v
-			}
-		}
-		return ""
-	}
 	var s string
 	switch tool {
 	case "Bash":
-		s = pick("command")
+		s = str(m, "command")
 	case "Read", "Write", "Edit", "MultiEdit", "NotebookEdit":
-		s = pick("file_path", "notebook_path")
+		s = filepath.Base(firstNonEmpty(str(m, "file_path"), str(m, "notebook_path")))
 	case "Glob", "Grep":
-		s = pick("pattern")
-		if p := pick("path"); p != "" {
+		s = str(m, "pattern")
+		if p := str(m, "path"); p != "" {
 			s += " in " + p
 		}
 	case "WebFetch":
-		s = pick("url")
+		s = str(m, "url")
 	case "WebSearch":
-		s = pick("query")
+		s = str(m, "query")
 	case "Task", "Agent":
-		s = pick("description", "prompt")
+		s = firstNonEmpty(str(m, "description"), str(m, "prompt"))
+		if t := str(m, "subagent_type"); t != "" {
+			s = t + " · " + s
+		}
+	case "TodoWrite":
+		items, _ := m["todos"].([]any)
+		s = fmt.Sprintf("%d items", len(items))
+	case "TaskCreate", "TaskUpdate":
+		s = firstNonEmpty(str(m, "subject"), str(m, "status"))
+	case "Skill":
+		s = str(m, "skill")
 	default:
 		keys := make([]string, 0, len(m))
 		for k := range m {
@@ -224,8 +409,8 @@ func summarizeInput(tool string, raw json.RawMessage, max int) string {
 		s = strings.Join(parts, " ")
 	}
 	s = strings.ReplaceAll(s, "\n", " ⏎ ")
-	if max > 10 && len([]rune(s)) > max {
-		s = string([]rune(s)[:max-1]) + "…"
+	if max > 10 {
+		s = truncate(s, max)
 	}
 	return s
 }

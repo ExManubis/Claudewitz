@@ -21,6 +21,7 @@ func main() {
 	flag.StringVar(&opts.Resume, "resume", "", "resume a session by id")
 	flag.BoolVar(&opts.Continue, "continue", false, "continue the most recent session in this directory")
 	flag.StringVar(&opts.CWD, "cwd", "", "working directory (defaults to current)")
+	theme := flag.String("theme", "claude", "colour theme: claude, charm, mono")
 	flag.Parse()
 	opts.ExtraArgs = flag.Args()
 
@@ -32,7 +33,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	p := tea.NewProgram(tui.New(ctx, opts), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(tui.New(ctx, opts, *theme), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

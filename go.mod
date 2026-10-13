@@ -3,6 +3,8 @@ module github.com/exmanubis/claudewitz
 go 1.24.7
 
 require (
+	github.com/alecthomas/chroma/v2 v2.14.0
+	github.com/aymanbagabas/go-udiff v0.2.0
 	github.com/charmbracelet/bubbles v0.20.0
 	github.com/charmbracelet/bubbletea v1.3.4
 	github.com/charmbracelet/glamour v0.9.1
@@ -10,7 +12,6 @@ require (
 )
 
 require (
-	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect

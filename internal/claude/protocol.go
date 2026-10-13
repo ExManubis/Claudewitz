@@ -62,6 +62,7 @@ type MessageEvent struct {
 	Type            string  `json:"type"`
 	Message         Message `json:"message"`
 	ParentToolUseID *string `json:"parent_tool_use_id"`
+	AgentID         string  `json:"agent_id,omitempty"`
 }
 
 // StreamEvent wraps a raw Anthropic API streaming event
@@ -120,6 +121,60 @@ type PermissionRequest struct {
 	Description string          `json:"description"`
 	ToolUseID   string          `json:"tool_use_id"`
 	BlockedPath string          `json:"blocked_path"`
+	AgentID     string          `json:"agent_id,omitempty"`
+}
+
+// TaskEvent tracks a sub-agent (system task_started / task_progress /
+// task_updated / task_notification).
+type TaskEvent struct {
+	Subtype      string `json:"subtype"`
+	TaskID       string `json:"task_id"`
+	ToolUseID    string `json:"tool_use_id"`
+	Description  string `json:"description"`
+	SubagentType string `json:"subagent_type"`
+	Status       string `json:"status"`
+	LastToolName string `json:"last_tool_name"`
+	Summary      string `json:"summary"`
+	Usage        struct {
+		TotalTokens int `json:"total_tokens"`
+		ToolUses    int `json:"tool_uses"`
+		DurationMS  int `json:"duration_ms"`
+	} `json:"usage"`
+	Patch struct {
+		Status string `json:"status"`
+	} `json:"patch"`
+}
+
+// Command is a slash command Claude Code knows about.
+type Command struct {
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	ArgumentHint string   `json:"argumentHint"`
+	Aliases      []string `json:"aliases"`
+}
+
+// ModelInfo is an entry of the CLI's model picker.
+type ModelInfo struct {
+	Value         string `json:"value"`
+	ResolvedModel string `json:"resolvedModel"`
+	DisplayName   string `json:"displayName"`
+	Description   string `json:"description"`
+}
+
+// InitializeResponse answers the host's initialize control request.
+type InitializeResponse struct {
+	Commands []Command   `json:"commands"`
+	Models   []ModelInfo `json:"models"`
+	Agents   []struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	} `json:"agents"`
+	Account struct {
+		SubscriptionType string `json:"subscriptionType"`
+		Email            string `json:"email"`
+	} `json:"account"`
+	Version        string `json:"claude_code_version"`
+	PermissionMode string `json:"current_permission_mode"`
 }
 
 type controlRequest struct {

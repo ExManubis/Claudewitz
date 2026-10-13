@@ -35,21 +35,54 @@ go run . -resume <session-id>
 go run . -- --add-dir ../lib  # anything after -- goes straight to claude
 ```
 
-## Features so far
+## Features
 
+**Chat**
 - Streaming responses with Markdown rendering, plus thinking blocks
-- Tool calls shown inline with status and collapsible output (`ctrl+o`)
-- Permission prompts (allow once, always allow this tool for the session, deny), with
-  Edit diffs and Write previews
-- Permission modes (`shift+tab` cycles default → accept edits → plan)
+- Tool calls inline with status and collapsible output (`ctrl+o`)
+- Edits and writes shown as syntax-highlighted diffs with line numbers
 - Interrupt with `esc`
-- Subscription usage gauges (5-hour and 7-day windows, with time to reset), context size
-- `/new`, `/resume`, `/model`, `/mode`, `/session`, `/help`; other slash commands pass through to Claude Code
+
+**Sidebar** (`ctrl+b`, auto-hidden below 100 columns)
+- Session title, directory, model and account type
+- Context size and subscription usage meters (5-hour and weekly, with time to reset)
+- Todo list (from `TodoWrite` / `TaskCreate` / `TaskUpdate`)
+- Live sub-agent activity: type, task, tool count, tokens, elapsed time and their latest
+  tool calls, also mirrored under the `Agent` call in the chat
+- Modified files with added/removed line counts
+
+**Sessions** (`ctrl+r` or `/resume`)
+- Browse sessions for this project or all projects (`tab`), filter as you type
+- Resuming replays the transcript and switches to the session's directory
+
+**Autocompletion**
+- `/` commands, including every command, skill and plugin Claude Code reports
+- Arguments for `/model` (from the CLI's model list), `/mode` and `/theme`
+- `@` file mentions, fuzzy-matched against `git ls-files` (or a directory walk)
+
+**Permissions**
+- Allow once, always allow a tool for the session, deny, or deny and stop
+- Edit/Write requests preview the diff; sub-agent requests name the agent asking
+- Permission modes: `shift+tab` cycles default → accept edits → plan
+
+**Themes**: `claude` (default), `charm`, `mono`, via `-theme` or `/theme`, each with light and
+dark variants.
+
+## How it talks to Claude Code
+
+- Starts `claude -p` in stream-json mode with `--permission-prompt-tool stdio` and
+  `--forward-subagent-text`
+- Sends an `initialize` control request on startup to get commands, models and account info
+- Renders `stream_event` deltas live and takes tool calls and results from complete messages
+- Follows sub-agents through `task_started` / `task_progress` / `task_updated` /
+  `task_notification` events and messages tagged with `parent_tool_use_id`
+- Reads history from `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`
+- Removes `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` from the child's environment so that running
+  claudewitz inside Claude Code doesn't pin every child to the parent session
 
 ## Roadmap ideas
 
-- Session picker (read `~/.claude/projects/*/*.jsonl`) and sidebar with modified files
-- Slash command / `@file` autocompletion using the `init` event's command list
-- Sub-agent activity (`--forward-subagent-text`), todo list rendering
-- Syntax-highlighted diffs, image paste, themes
+- Drill into a sub-agent's full transcript
+- Image paste, and an external editor for long prompts
 - Multiple concurrent sessions in tabs
+- Persisted per-project "always allow" rules
