@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
@@ -124,5 +125,24 @@ func TestSparkTarget(t *testing.T) {
 	mode, fast := m.sparkTarget()
 	if mode != sparkWorking || fast <= slow {
 		t.Errorf("busy: mode %v energy %v (thinking %v)", mode, fast, slow)
+	}
+}
+
+// Going busy adds the activity line under the chat; the screen must still
+// fit the terminal, or it scrolls and the sidebar jumps up a line.
+func TestBusyKeepsScreenHeight(t *testing.T) {
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 44})
+	m = next.(Model)
+	height := func() int { return strings.Count(m.View(), "\n") + 1 }
+	if h := height(); h != 44 {
+		t.Fatalf("idle screen is %d lines, want 44", h)
+	}
+	m.busy = true
+	m.activity = "Thinking"
+	next, _ = m.Update(nil)
+	m = next.(Model)
+	if h := height(); h != 44 {
+		t.Errorf("busy screen is %d lines, want 44", h)
 	}
 }

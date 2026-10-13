@@ -49,6 +49,7 @@ type Model struct {
 	sparkTicking bool
 	sparkID      int
 	sparkLast    time.Time
+	bottomH      int           // height of the input area at the last layout
 	lastTurn     time.Duration // how long the last turn took, for "Done in …"
 	lastTurnAt   time.Time
 
@@ -220,11 +221,20 @@ func loadTranscript(cwd, id string) tea.Cmd {
 	}
 }
 
-// Update handles a message, then keeps the sidebar's spark indicator in
-// step with whatever changed.
+// Update handles a message, then keeps the layout and the sidebar's spark
+// indicator in step with whatever changed.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	nm := next.(Model)
+	// The area under the chat grows and shrinks (the activity line, pills,
+	// attachments); resize the chat to match, or the screen overflows the
+	// terminal and everything scrolls up a line.
+	if nm.ready && lipgloss.Height(nm.bottomView()) != nm.bottomH {
+		nm.layout()
+		if nm.follow {
+			nm.vp.GotoBottom()
+		}
+	}
 	return nm, tea.Batch(cmd, nm.syncSparks())
 }
 
@@ -1245,7 +1255,8 @@ func (m *Model) layout() {
 	if rows := sparkRows(m.height - 1); rows > 0 && m.sparks != nil {
 		m.sparks.resize(sidebarWidth-3, rows)
 	}
-	bottom := lipgloss.Height(m.bottomView()) + 1 // + status bar
+	m.bottomH = lipgloss.Height(m.bottomView())
+	bottom := m.bottomH + 1 // + status bar
 	if m.showHeader() {
 		bottom++
 	}
