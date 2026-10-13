@@ -23,6 +23,10 @@ const (
 	kindError
 )
 
+// maxProseWidth caps how wide assistant and thinking text wraps, so
+// replies stay readable in wide terminals.
+const maxProseWidth = 120
+
 type toolStatus int
 
 const (
@@ -198,7 +202,7 @@ func (c *chat) renderEntry(e *entry, width int) string {
 		return userBlock.Width(width - 2).Render(body)
 	case kindAssistant:
 		body := e.text
-		if r := c.renderer(width - 2); r != nil {
+		if r := c.renderer(min(width-2, maxProseWidth)); r != nil {
 			if out, err := r.Render(e.text); err == nil {
 				body = strings.Trim(out, "\n")
 			}
@@ -209,7 +213,7 @@ func (c *chat) renderEntry(e *entry, width int) string {
 		if t == "" {
 			return wrap.Render(thinkingStyle.Render("∴ Thinking…"))
 		}
-		lines := strings.Split(lipgloss.NewStyle().Width(width-6).Render(t), "\n")
+		lines := strings.Split(lipgloss.NewStyle().Width(min(width-6, maxProseWidth-4)).Render(t), "\n")
 		if !c.open(e) && len(lines) > 3 {
 			lines = append(lines[:3], fmt.Sprintf("… %d more lines (ctrl+o)", len(lines)-3))
 		}
