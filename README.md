@@ -14,6 +14,9 @@ Instead of calling the Anthropic API directly (which bills per token), claudewit
 with, including a Claude Pro/Max subscription, and you keep Claude Code's tools, MCP servers,
 skills, hooks, `CLAUDE.md` and session history.
 
+<img width="3014" height="2086" alt="CleanShot 2026-10-13 at 23 58 32@2x" src="https://github.com/user-attachments/assets/0d6c251d-8b3f-44e3-bb2f-358428644386" />
+
+
 ```
 ┌──────────────────────────── claudewitz (Go + Bubble Tea) ─────────────────────────────┐
 │ chat viewport · input · permission dialogs · status bar (model, mode, ctx, 5h/7d usage) │
