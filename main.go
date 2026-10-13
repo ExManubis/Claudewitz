@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime/debug"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,6 +15,21 @@ import (
 	"github.com/exmanubis/claudewitz/internal/config"
 	"github.com/exmanubis/claudewitz/internal/tui"
 )
+
+// version is set by release builds (-ldflags "-X main.version=…").
+var version = ""
+
+// versionString is the release version, else the module version go install
+// recorded, else "dev".
+func versionString() string {
+	if version != "" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return "dev"
+}
 
 func main() {
 	var opts claude.Options
@@ -25,7 +41,12 @@ func main() {
 	flag.BoolVar(&opts.Continue, "continue", false, "continue the most recent session in this directory")
 	flag.StringVar(&opts.CWD, "cwd", "", "working directory (defaults to current)")
 	theme := flag.String("theme", "", "colour theme for this run (overrides the saved one)")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("claudewitz", versionString())
+		return
+	}
 	opts.ExtraArgs = flag.Args()
 
 	if _, err := exec.LookPath(opts.Binary); err != nil {

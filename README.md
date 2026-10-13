@@ -34,6 +34,19 @@ skills, hooks, `CLAUDE.md` and session history.
 
 ## Install
 
+**Homebrew** (macOS and Linux):
+
+```sh
+brew install exmanubis/tap/claudewitz
+```
+
+**Prebuilt binaries** for macOS, Linux and Windows (Intel and ARM) are on the
+[releases page](https://github.com/ExManubis/Claudewitz/releases): download the archive for your
+platform, unpack it and put `claudewitz` somewhere on your `PATH`, e.g. `/usr/local/bin` or
+`~/.local/bin`.
+
+**With Go:**
+
 ```sh
 go install github.com/exmanubis/claudewitz@latest
 ```
@@ -46,7 +59,8 @@ in Go's bin folder, `~/go/bin` unless you've set `GOBIN`. If that folder isn't o
 export PATH="$HOME/go/bin:$PATH"
 ```
 
-Run `go install …@latest` again to update.
+`claudewitz -version` shows what you're running. To update: `brew upgrade claudewitz`, a newer
+release archive, or `go install …@latest` again.
 
 ## Run
 
@@ -181,3 +195,16 @@ commits (including ones made outside claudewitz), and Claude Code exiting
 - Drill into a sub-agent's full transcript
 - Multiple concurrent sessions in tabs
 - Persisted per-project "always allow" rules
+
+## Releasing
+
+Push a version tag and the release workflow does the rest: GoReleaser builds the binaries,
+publishes a GitHub release with checksums and updates the cask in
+[ExManubis/homebrew-tap](https://github.com/ExManubis/homebrew-tap).
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+It needs a `HOMEBREW_TAP_GITHUB_TOKEN` repository secret that can push to the tap. Dry run locally
+with `goreleaser release --snapshot --clean`.
