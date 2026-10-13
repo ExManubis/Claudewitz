@@ -1,0 +1,201 @@
+// Package claude drives the Claude Code CLI in headless stream-json mode.
+//
+// The CLI is spawned with --input-format/--output-format stream-json and
+// --permission-prompt-tool stdio, so it authenticates with whatever login the
+// user already has (including a Pro/Max subscription) and asks us, over
+// stdin/stdout, before running tools.
+package claude
+
+import "encoding/json"
+
+// Envelope is the common shape of every line the CLI writes to stdout.
+type Envelope struct {
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	UUID      string `json:"uuid,omitempty"`
+}
+
+// InitEvent is emitted once at startup (type=system, subtype=init).
+type InitEvent struct {
+	CWD            string   `json:"cwd"`
+	SessionID      string   `json:"session_id"`
+	Model          string   `json:"model"`
+	PermissionMode string   `json:"permissionMode"`
+	Tools          []string `json:"tools"`
+	SlashCommands  []string `json:"slash_commands"`
+	Version        string   `json:"claude_code_version"`
+}
+
+// ContentBlock is one block of an assistant or user message.
+type ContentBlock struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
+}
+
+// Usage is token accounting for a message or a whole turn.
+type Usage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+// Message is the inner message of an assistant/user event.
+type Message struct {
+	ID      string         `json:"id"`
+	Role    string         `json:"role"`
+	Model   string         `json:"model"`
+	Content []ContentBlock `json:"content"`
+	Usage   *Usage         `json:"usage,omitempty"`
+}
+
+// MessageEvent is a complete assistant or user (tool result) message.
+type MessageEvent struct {
+	Type            string  `json:"type"`
+	Message         Message `json:"message"`
+	ParentToolUseID *string `json:"parent_tool_use_id"`
+	AgentID         string  `json:"agent_id,omitempty"`
+}
+
+// StreamEvent wraps a raw Anthropic API streaming event
+// (only sent with --include-partial-messages).
+type StreamEvent struct {
+	Event struct {
+		Type  string `json:"type"`
+		Index int    `json:"index"`
+		Delta struct {
+			Type        string `json:"type"`
+			Text        string `json:"text"`
+			Thinking    string `json:"thinking"`
+			PartialJSON string `json:"partial_json"`
+		} `json:"delta"`
+		ContentBlock *ContentBlock `json:"content_block"`
+	} `json:"event"`
+	ParentToolUseID *string `json:"parent_tool_use_id"`
+}
+
+// ResultEvent ends a turn.
+type ResultEvent struct {
+	Subtype      string  `json:"subtype"`
+	IsError      bool    `json:"is_error"`
+	Result       string  `json:"result"`
+	DurationMS   int     `json:"duration_ms"`
+	NumTurns     int     `json:"num_turns"`
+	TotalCostUSD float64 `json:"total_cost_usd"`
+	StopReason   string  `json:"stop_reason"`
+	SessionID    string  `json:"session_id"`
+	Usage        Usage   `json:"usage"`
+}
+
+// RateLimitWindow is utilisation (0..1) of one subscription window.
+type RateLimitWindow struct {
+	Utilization float64 `json:"utilization"`
+	ResetsAt    int64   `json:"resetsAt"`
+}
+
+// RateLimitEvent reports subscription usage limits.
+type RateLimitEvent struct {
+	Info struct {
+		Status         string                     `json:"status"`
+		ResetsAt       int64                      `json:"resetsAt"`
+		RateLimitType  string                     `json:"rateLimitType"`
+		IsUsingOverage bool                       `json:"isUsingOverage"`
+		Windows        map[string]RateLimitWindow `json:"unifiedWindows"`
+	} `json:"rate_limit_info"`
+}
+
+// PermissionRequest is a can_use_tool control request from the CLI.
+type PermissionRequest struct {
+	RequestID   string          `json:"-"`
+	ToolName    string          `json:"tool_name"`
+	DisplayName string          `json:"display_name"`
+	Input       json.RawMessage `json:"input"`
+	Description string          `json:"description"`
+	ToolUseID   string          `json:"tool_use_id"`
+	BlockedPath string          `json:"blocked_path"`
+	AgentID     string          `json:"agent_id,omitempty"`
+}
+
+// TaskEvent tracks a sub-agent (system task_started / task_progress /
+// task_updated / task_notification).
+type TaskEvent struct {
+	Subtype      string `json:"subtype"`
+	TaskID       string `json:"task_id"`
+	ToolUseID    string `json:"tool_use_id"`
+	Description  string `json:"description"`
+	SubagentType string `json:"subagent_type"`
+	Status       string `json:"status"`
+	LastToolName string `json:"last_tool_name"`
+	Summary      string `json:"summary"`
+	Usage        struct {
+		TotalTokens int `json:"total_tokens"`
+		ToolUses    int `json:"tool_uses"`
+		DurationMS  int `json:"duration_ms"`
+	} `json:"usage"`
+	Patch struct {
+		Status string `json:"status"`
+	} `json:"patch"`
+}
+
+// Command is a slash command Claude Code knows about.
+type Command struct {
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	ArgumentHint string   `json:"argumentHint"`
+	Aliases      []string `json:"aliases"`
+}
+
+// ModelInfo is an entry of the CLI's model picker.
+type ModelInfo struct {
+	Value         string `json:"value"`
+	ResolvedModel string `json:"resolvedModel"`
+	DisplayName   string `json:"displayName"`
+	Description   string `json:"description"`
+}
+
+// InitializeResponse answers the host's initialize control request.
+type InitializeResponse struct {
+	Commands []Command   `json:"commands"`
+	Models   []ModelInfo `json:"models"`
+	Agents   []struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	} `json:"agents"`
+	Account struct {
+		SubscriptionType string `json:"subscriptionType"`
+		Email            string `json:"email"`
+	} `json:"account"`
+	Version        string `json:"claude_code_version"`
+	PermissionMode string `json:"current_permission_mode"`
+}
+
+type controlRequest struct {
+	Type      string          `json:"type"`
+	RequestID string          `json:"request_id"`
+	Request   json.RawMessage `json:"request"`
+}
+
+type controlResponse struct {
+	Type     string `json:"type"`
+	Response struct {
+		Subtype   string `json:"subtype"`
+		RequestID string `json:"request_id"`
+		Response  any    `json:"response,omitempty"`
+		Error     string `json:"error,omitempty"`
+	} `json:"response"`
+}
+
+// PermissionDecision answers a PermissionRequest.
+type PermissionDecision struct {
+	Behavior     string          `json:"behavior"` // "allow" or "deny"
+	UpdatedInput json.RawMessage `json:"updatedInput,omitempty"`
+	Message      string          `json:"message,omitempty"`
+}

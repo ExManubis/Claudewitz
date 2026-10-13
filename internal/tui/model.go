@@ -1,0 +1,1093 @@
+// Package tui is the Bubble Tea front end.
+package tui
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/exmanubis/claudewitz/internal/claude"
+	"github.com/exmanubis/claudewitz/internal/sessions"
+)
+
+var permissionModes = []string{"default", "acceptEdits", "plan"}
+
+// Model is the root Bubble Tea model.
+type Model struct {
+	opts claude.Options
+	ctx  context.Context
+	proc *claude.Process
+
+	chat      *chat
+	track     *tracker
+	comp      *completer
+	picker    *picker
+	files     []string
+	vp        viewport.Model
+	input     textarea.Model
+	spin      spinner.Model
+	width     int
+	height    int
+	ready     bool
+	follow    bool // keep viewport pinned to bottom
+	busy      bool
+	stopped   bool // user interrupted the current turn
+	sidebarOn bool
+	status    string
+	turnFrom  time.Time
+	ticks     int
+
+	// session state
+	init         *claude.InitEvent
+	initResp     *claude.InitializeResponse
+	sessionID    string
+	sessionTitle string
+	model        string
+	permMode     string
+	costUSD      float64
+	lastUsage    claude.Usage
+	ctxWindow    int
+	limits       map[string]claude.RateLimitWindow
+
+	// permissions
+	pending     []*claude.PermissionRequest
+	alwaysAllow map[string]bool
+}
+
+// New builds the model; the CLI is started from Init.
+func New(ctx context.Context, opts claude.Options, themeName string) Model {
+	if themeName != "" {
+		applyTheme(themeName)
+	}
+	if opts.CWD == "" {
+		opts.CWD, _ = os.Getwd()
+	}
+	ta := textarea.New()
+	ta.Placeholder = "Ask Claude anything…  / for commands · @ to mention files"
+	ta.ShowLineNumbers = false
+	ta.Prompt = ""
+	ta.CharLimit = 0
+	ta.SetHeight(3)
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.FocusedStyle.Placeholder = mutedStyle
+	ta.BlurredStyle.Placeholder = mutedStyle
+	ta.KeyMap.InsertNewline.SetKeys("ctrl+j", "alt+enter")
+	ta.Focus()
+
+	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(lipgloss.NewStyle().Foreground(currentTheme().accent)))
+
+	pm := opts.PermissionMode
+	if pm == "" {
+		pm = "default"
+	}
+	tr := newTracker()
+	c := newChat(tr)
+	c.cwd = opts.CWD
+	return Model{
+		opts:        opts,
+		ctx:         ctx,
+		chat:        c,
+		track:       tr,
+		comp:        &completer{},
+		input:       ta,
+		spin:        sp,
+		follow:      true,
+		sidebarOn:   true,
+		permMode:    pm,
+		model:       opts.Model,
+		limits:      map[string]claude.RateLimitWindow{},
+		alwaysAllow: map[string]bool{},
+	}
+}
+
+func (m Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, startCmd(m.ctx, m.opts), indexFiles(m.opts.CWD)}
+	if m.opts.Resume != "" || m.opts.Continue {
+		cmds = append(cmds, loadTranscript(m.opts.CWD, m.opts.Resume))
+	}
+	return tea.Batch(cmds...)
+}
+
+type startedMsg struct {
+	proc *claude.Process
+	err  error
+}
+
+func startCmd(ctx context.Context, opts claude.Options) tea.Cmd {
+	return func() tea.Msg {
+		p, err := claude.Start(ctx, opts)
+		if err == nil {
+			err = p.Initialize()
+		}
+		return startedMsg{p, err}
+	}
+}
+
+// procEvent tags events with their process so late events from a replaced
+// process are ignored.
+type procEvent struct {
+	proc *claude.Process
+	ev   claude.Event
+}
+
+func waitEvent(p *claude.Process) tea.Cmd {
+	return func() tea.Msg {
+		ev, ok := <-p.Events()
+		if !ok {
+			return nil
+		}
+		return procEvent{p, ev}
+	}
+}
+
+type transcriptMsg struct {
+	info sessions.Info
+	msgs []sessions.Message
+	err  error
+}
+
+// loadTranscript reads a session from disk for replay. An empty id means the
+// most recent session in cwd.
+func loadTranscript(cwd, id string) tea.Cmd {
+	return func() tea.Msg {
+		path, ok := sessions.Find(sessions.ProjectDir(cwd), id)
+		if !ok {
+			return transcriptMsg{err: fmt.Errorf("no saved session found")}
+		}
+		info, _ := sessions.Read(path)
+		msgs, err := sessions.Load(path)
+		return transcriptMsg{info: info, msgs: msgs, err: err}
+	}
+}
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.layout()
+		m.ready = true
+		m.refresh()
+
+	case startedMsg:
+		if msg.err != nil {
+			m.chat.error("could not start claude: %v", msg.err)
+			m.refresh()
+			return m, nil
+		}
+		m.proc = msg.proc
+		cmds = append(cmds, waitEvent(m.proc))
+
+	case procEvent:
+		if msg.proc != m.proc {
+			return m, nil // stale process
+		}
+		cmds = append(cmds, m.handleEvent(msg.ev))
+		if m.proc != nil && !msg.ev.Exited {
+			cmds = append(cmds, waitEvent(m.proc))
+		}
+		m.refresh()
+
+	case transcriptMsg:
+		if msg.err != nil {
+			m.chat.error("could not load transcript: %v", msg.err)
+		} else {
+			m.replay(msg)
+		}
+		m.refresh()
+
+	case filesIndexedMsg:
+		m.files = msg
+
+	case sessionsLoadedMsg:
+		if m.picker != nil && m.picker.all == msg.all {
+			m.picker.setSessions(msg.list)
+		}
+
+	case spinner.TickMsg:
+		var c tea.Cmd
+		m.spin, c = m.spin.Update(msg)
+		cmds = append(cmds, c)
+		m.ticks++
+		if m.ticks%6 == 0 && m.track.runningAgents() > 0 {
+			m.chat.markAgentsDirty()
+			m.refresh()
+		}
+
+	case tea.MouseMsg:
+		if m.picker == nil {
+			var c tea.Cmd
+			m.vp, c = m.vp.Update(msg)
+			m.follow = m.vp.AtBottom()
+			cmds = append(cmds, c)
+		}
+
+	case tea.KeyMsg:
+		if m.picker != nil {
+			return m, m.handlePickerKey(msg)
+		}
+		if len(m.pending) > 0 {
+			return m, m.handlePermissionKey(msg)
+		}
+		if m.comp.active && !(msg.String() == "enter" && m.comp.complete()) {
+			switch msg.String() {
+			case "up", "ctrl+p":
+				m.comp.move(-1)
+				return m, nil
+			case "down", "ctrl+n":
+				m.comp.move(1)
+				return m, nil
+			case "tab", "enter":
+				m.comp.accept(&m)
+				m.layout()
+				return m, nil
+			case "esc":
+				m.comp.dismiss()
+				m.comp.update(&m)
+				m.layout()
+				return m, nil
+			}
+		}
+		switch msg.String() {
+		case "ctrl+c":
+			if m.busy && m.proc != nil {
+				m.interrupt()
+				return m, nil
+			}
+			if m.input.Value() != "" {
+				m.input.Reset()
+				m.comp.update(&m)
+				m.layout()
+				return m, nil
+			}
+			return m, m.quit()
+		case "ctrl+d":
+			return m, m.quit()
+		case "esc":
+			if m.busy && m.proc != nil {
+				m.interrupt()
+			}
+			return m, nil
+		case "shift+tab":
+			m.cyclePermissionMode()
+			return m, nil
+		case "ctrl+o":
+			m.chat.expanded = !m.chat.expanded
+			m.chat.markAllDirty()
+			m.refresh()
+			return m, nil
+		case "ctrl+b":
+			m.sidebarOn = !m.sidebarOn
+			m.layout()
+			m.refresh()
+			return m, nil
+		case "ctrl+r":
+			return m, m.openPicker()
+		case "ctrl+l":
+			m.follow = true
+			m.refresh()
+			return m, tea.ClearScreen
+		case "pgup", "pgdown":
+			var c tea.Cmd
+			m.vp, c = m.vp.Update(msg)
+			m.follow = m.vp.AtBottom()
+			return m, c
+		case "enter":
+			text := strings.TrimSpace(m.input.Value())
+			if text == "" {
+				return m, nil
+			}
+			m.input.Reset()
+			m.comp.update(&m)
+			m.layout()
+			return m, m.submit(text)
+		}
+		var c tea.Cmd
+		before := m.input.Value()
+		m.input, c = m.input.Update(msg)
+		if m.input.Value() != before {
+			m.comp.update(&m)
+			m.layout()
+		}
+		cmds = append(cmds, c)
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) interrupt() {
+	_ = m.proc.Interrupt()
+	m.stopped = true
+	m.chat.info("interrupted")
+	m.refresh()
+}
+
+func (m *Model) quit() tea.Cmd {
+	if m.proc != nil {
+		_ = m.proc.Close()
+	}
+	return tea.Quit
+}
+
+func (m *Model) handleEvent(ev claude.Event) tea.Cmd {
+	switch {
+	case ev.Initialize != nil:
+		m.initResp = ev.Initialize
+		if ev.Initialize.PermissionMode != "" {
+			m.permMode = ev.Initialize.PermissionMode
+		}
+		if m.model == "" {
+			for _, mi := range ev.Initialize.Models {
+				if mi.Value == "default" {
+					m.model = mi.ResolvedModel
+				}
+			}
+		}
+
+	case ev.Init != nil:
+		m.init = ev.Init
+		m.sessionID = ev.Init.SessionID
+		m.model = ev.Init.Model
+		m.permMode = ev.Init.PermissionMode
+		if ev.Init.CWD != "" {
+			m.chat.cwd = ev.Init.CWD
+		}
+
+	case ev.ContextWindow > 0:
+		m.ctxWindow = ev.ContextWindow
+
+	case ev.Status != "":
+		m.status = ev.Status
+
+	case ev.Stream != nil:
+		m.handleStream(ev.Stream)
+
+	case ev.Message != nil:
+		if ev.Message.ParentToolUseID != nil {
+			m.track.subagentMessage(*ev.Message.ParentToolUseID, ev.Message.Message)
+			m.chat.markAgentsDirty()
+			return nil
+		}
+		m.applyBlocks(ev.Message.Message.Role, ev.Message.Message.Content, true)
+		if u := ev.Message.Message.Usage; u != nil && ev.Message.Message.Role == "assistant" {
+			m.lastUsage = *u
+		}
+
+	case ev.Task != nil:
+		m.track.task(ev.Task)
+		m.chat.markAgentsDirty()
+
+	case ev.Result != nil:
+		r := ev.Result
+		m.busy = false
+		m.status = ""
+		m.chat.streaming = map[int]*entry{}
+		m.costUSD += r.TotalCostUSD
+		if r.SessionID != "" {
+			m.sessionID = r.SessionID
+		}
+		if m.sessionTitle == "" {
+			m.sessionTitle = m.firstPrompt()
+		}
+		if m.stopped {
+			m.stopped = false
+			return nil
+		}
+		if r.IsError && r.Subtype != "success" {
+			m.chat.error("turn ended: %s %s", r.Subtype, r.Result)
+		}
+		m.chat.info("%s · %d turns · %s",
+			(time.Duration(r.DurationMS) * time.Millisecond).Round(100*time.Millisecond),
+			r.NumTurns, formatTokens(r.Usage))
+
+	case ev.RateLimit != nil:
+		for k, w := range ev.RateLimit.Info.Windows {
+			m.limits[k] = w
+		}
+		if ev.RateLimit.Info.Status != "allowed" && ev.RateLimit.Info.Status != "" {
+			m.chat.error("rate limit: %s (resets %s)", ev.RateLimit.Info.Status,
+				time.Unix(ev.RateLimit.Info.ResetsAt, 0).Format("15:04"))
+		}
+
+	case ev.Permission != nil:
+		p := ev.Permission
+		if m.alwaysAllow[p.ToolName] && m.proc != nil {
+			_ = m.proc.Respond(p, claude.PermissionDecision{Behavior: "allow"})
+			return nil
+		}
+		m.pending = append(m.pending, p)
+		m.input.Blur()
+		m.layout()
+
+	case ev.Exited:
+		m.busy = false
+		m.proc = nil
+		if ev.Err != nil {
+			m.chat.error("claude exited: %v", ev.Err)
+		} else {
+			m.chat.info("claude exited — /new to start again")
+		}
+
+	case ev.Err != nil:
+		m.chat.error("%v", ev.Err)
+	}
+	return nil
+}
+
+func (m *Model) firstPrompt() string {
+	for _, e := range m.chat.entries {
+		if e.kind == kindUser {
+			return firstLine(e.text)
+		}
+	}
+	return ""
+}
+
+func (m *Model) handleStream(s *claude.StreamEvent) {
+	if s.ParentToolUseID != nil {
+		return // sub-agent chatter is tracked from complete messages
+	}
+	e := s.Event
+	switch e.Type {
+	case "message_start":
+		m.chat.streaming = map[int]*entry{}
+	case "content_block_start":
+		if e.ContentBlock == nil {
+			return
+		}
+		switch e.ContentBlock.Type {
+		case "text":
+			m.chat.streaming[e.Index] = m.chat.add(&entry{kind: kindAssistant, text: e.ContentBlock.Text})
+		case "thinking":
+			m.chat.streaming[e.Index] = m.chat.add(&entry{kind: kindThinking, text: e.ContentBlock.Thinking})
+		}
+	case "content_block_delta":
+		live := m.chat.streaming[e.Index]
+		if live == nil {
+			return
+		}
+		switch e.Delta.Type {
+		case "text_delta":
+			live.setText(live.text + e.Delta.Text)
+		case "thinking_delta":
+			live.setText(live.text + e.Delta.Thinking)
+		}
+	}
+}
+
+// applyBlocks adds a main-thread message to the chat and trackers. Live
+// messages get their text from stream deltas, so only replayed history
+// renders text blocks here.
+func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool) {
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			if live {
+				continue
+			}
+			if role == "user" && strings.HasPrefix(b.Text, "[Request interrupted") {
+				m.chat.info("interrupted")
+			} else if role == "user" {
+				m.chat.add(&entry{kind: kindUser, text: b.Text})
+			} else if strings.TrimSpace(b.Text) != "" {
+				m.chat.add(&entry{kind: kindAssistant, text: b.Text})
+			}
+		case "tool_use":
+			if _, seen := m.chat.byToolID[b.ID]; !seen {
+				m.chat.add(&entry{kind: kindTool, toolID: b.ID, toolName: b.Name, toolInput: b.Input})
+				m.track.toolUse(b)
+			}
+		case "tool_result":
+			out := toolResultText(b.Content)
+			m.track.toolResult(b.ToolUseID, out, b.IsError)
+			if t, ok := m.chat.byToolID[b.ToolUseID]; ok {
+				t.toolOutput = out
+				t.toolStatus = toolOK
+				if b.IsError {
+					t.toolStatus = toolFailed
+				}
+				t.dirty = true
+			}
+		}
+	}
+}
+
+func (m *Model) replay(t transcriptMsg) {
+	m.sessionTitle = t.info.Title
+	if m.sessionTitle == "" {
+		m.sessionTitle = t.info.FirstPrompt
+	}
+	if m.sessionID == "" {
+		m.sessionID = t.info.ID
+	}
+	for _, msg := range t.msgs {
+		m.applyBlocks(msg.Role, msg.Content, false)
+	}
+	// Agents in history are finished even if no completion event was
+	// saved, and replay timings are meaningless.
+	for _, a := range m.track.agents {
+		if a.running() {
+			a.status = "completed"
+		}
+		a.duration = 0
+	}
+	m.chat.info("resumed %s · %d messages", t.info.ID[:min(8, len(t.info.ID))], len(t.msgs))
+	m.follow = true
+}
+
+func (m *Model) handlePermissionKey(k tea.KeyMsg) tea.Cmd {
+	p := m.pending[0]
+	var d *claude.PermissionDecision
+	switch k.String() {
+	case "y", "enter":
+		d = &claude.PermissionDecision{Behavior: "allow"}
+	case "a":
+		m.alwaysAllow[p.ToolName] = true
+		d = &claude.PermissionDecision{Behavior: "allow"}
+	case "n", "esc":
+		d = &claude.PermissionDecision{Behavior: "deny", Message: "The user denied this tool call."}
+	case "ctrl+c":
+		d = &claude.PermissionDecision{Behavior: "deny", Message: "The user denied this tool call and interrupted."}
+		if m.proc != nil {
+			_ = m.proc.Respond(p, *d)
+			_ = m.proc.Interrupt()
+			m.stopped = true
+		}
+		m.pending = m.pending[1:]
+		m.afterPermission()
+		return nil
+	default:
+		return nil
+	}
+	if m.proc != nil {
+		_ = m.proc.Respond(p, *d)
+	}
+	if d.Behavior == "deny" {
+		if t, ok := m.chat.byToolID[p.ToolUseID]; ok {
+			t.toolStatus = toolFailed
+			t.toolOutput = "denied by user"
+			t.dirty = true
+		}
+	}
+	m.pending = m.pending[1:]
+	m.afterPermission()
+	return nil
+}
+
+func (m *Model) afterPermission() {
+	if len(m.pending) == 0 {
+		m.input.Focus()
+	}
+	m.layout()
+	m.refresh()
+}
+
+func (m *Model) openPicker() tea.Cmd {
+	m.picker = newPicker(m.sessionID, m.cwd())
+	m.input.Blur()
+	return loadSessions(m.opts.CWD, false)
+}
+
+func (m *Model) closePicker() {
+	m.picker = nil
+	if len(m.pending) == 0 {
+		m.input.Focus()
+	}
+}
+
+func (m *Model) handlePickerKey(k tea.KeyMsg) tea.Cmd {
+	p := m.picker
+	rows := pickerRows(m.height - 1)
+	switch k.String() {
+	case "esc", "ctrl+c":
+		m.closePicker()
+		return nil
+	case "up", "ctrl+p":
+		p.move(-1, rows)
+		return nil
+	case "down", "ctrl+n":
+		p.move(1, rows)
+		return nil
+	case "pgup":
+		p.move(-rows, rows)
+		return nil
+	case "pgdown":
+		p.move(rows, rows)
+		return nil
+	case "tab":
+		p.all = !p.all
+		p.loading = true
+		return loadSessions(m.opts.CWD, p.all)
+	case "enter":
+		s, ok := p.selected()
+		if !ok {
+			return nil
+		}
+		current := p.isCurrent(s)
+		m.closePicker()
+		if current {
+			return nil
+		}
+		return m.resume(s)
+	}
+	var c tea.Cmd
+	before := p.filter.Value()
+	p.filter, c = p.filter.Update(k)
+	if p.filter.Value() != before {
+		p.applyFilter()
+	}
+	return c
+}
+
+// resume switches to a saved session, moving to its directory if needed.
+func (m *Model) resume(s sessions.Info) tea.Cmd {
+	if s.CWD != "" && s.CWD != m.opts.CWD {
+		if _, err := os.Stat(s.CWD); err == nil {
+			m.opts.CWD = s.CWD
+		}
+	}
+	cmd := m.restart(claude.Options{Resume: s.ID})
+	msgs, err := sessions.Load(s.Path)
+	if err != nil {
+		m.chat.error("could not load transcript: %v", err)
+	} else {
+		m.replay(transcriptMsg{info: s, msgs: msgs})
+	}
+	m.refresh()
+	return tea.Batch(cmd, indexFiles(m.opts.CWD))
+}
+
+func (m *Model) cyclePermissionMode() {
+	next := permissionModes[0]
+	for i, pm := range permissionModes {
+		if pm == m.permMode {
+			next = permissionModes[(i+1)%len(permissionModes)]
+		}
+	}
+	m.setPermissionMode(next)
+}
+
+func (m *Model) setPermissionMode(mode string) {
+	m.permMode = mode
+	if m.proc != nil {
+		_ = m.proc.SetPermissionMode(mode)
+	}
+}
+
+func (m *Model) submit(text string) tea.Cmd {
+	if strings.HasPrefix(text, "/") {
+		if cmd, handled := m.slash(text); handled {
+			m.refresh()
+			return cmd
+		}
+	}
+	if m.proc == nil {
+		m.chat.error("claude is not running — /new to start a fresh session")
+		m.refresh()
+		return nil
+	}
+	m.chat.add(&entry{kind: kindUser, text: text})
+	if err := m.proc.Send(text); err != nil {
+		m.chat.error("send failed: %v", err)
+	}
+	if !m.busy {
+		m.busy = true
+		m.turnFrom = time.Now()
+	}
+	m.follow = true
+	m.refresh()
+	return nil
+}
+
+// slash handles commands owned by the front end. Unknown ones are passed
+// through to Claude Code, which understands its own slash commands.
+func (m *Model) slash(text string) (tea.Cmd, bool) {
+	fields := strings.Fields(text)
+	arg := strings.TrimSpace(strings.TrimPrefix(text, fields[0]))
+	switch fields[0] {
+	case "/help":
+		m.chat.info(helpText)
+	case "/quit", "/exit":
+		return m.quit(), true
+	case "/new", "/clear":
+		return m.restart(claude.Options{}), true
+	case "/resume", "/sessions":
+		if arg == "" {
+			return m.openPicker(), true
+		}
+		return tea.Batch(m.restart(claude.Options{Resume: arg}), loadTranscript(m.opts.CWD, arg)), true
+	case "/model":
+		if arg == "" {
+			m.chat.info("model: %s", m.model)
+			return nil, true
+		}
+		if m.proc != nil {
+			_ = m.proc.SetModel(arg)
+		}
+		m.opts.Model = arg
+		m.model = arg
+		m.chat.info("model → %s", arg)
+	case "/mode":
+		if arg == "" {
+			m.chat.info("permission mode: %s (modes: %s)", m.permMode, strings.Join(permissionModes, ", "))
+			return nil, true
+		}
+		m.setPermissionMode(arg)
+		m.chat.info("permission mode → %s", arg)
+	case "/theme":
+		if arg == "" {
+			m.chat.info("theme: %s (themes: %s)", currentTheme().name, strings.Join(themeNames(), ", "))
+			return nil, true
+		}
+		if !applyTheme(arg) {
+			m.chat.error("unknown theme %q", arg)
+			return nil, true
+		}
+		m.spin.Style = lipgloss.NewStyle().Foreground(currentTheme().accent)
+		m.input.FocusedStyle.Placeholder = mutedStyle
+		m.input.BlurredStyle.Placeholder = mutedStyle
+		m.chat.markAllDirty()
+	case "/sidebar":
+		m.sidebarOn = !m.sidebarOn
+		m.layout()
+	case "/session":
+		m.chat.info("session %s\ncwd %s", m.sessionID, m.cwd())
+	default:
+		return nil, false
+	}
+	return nil, true
+}
+
+func (m *Model) restart(o claude.Options) tea.Cmd {
+	if m.proc != nil {
+		_ = m.proc.Close()
+		m.proc = nil
+	}
+	opts := m.opts
+	opts.Resume, opts.Continue = o.Resume, o.Continue
+	m.track = newTracker()
+	m.chat.reset(m.track)
+	m.chat.cwd = opts.CWD
+	m.pending = nil
+	m.busy = false
+	m.costUSD = 0
+	m.sessionID = o.Resume
+	m.sessionTitle = ""
+	m.lastUsage = claude.Usage{}
+	m.alwaysAllow = map[string]bool{}
+	m.init = nil
+	m.refresh()
+	return startCmd(m.ctx, opts)
+}
+
+func (m *Model) cwd() string {
+	if m.init != nil {
+		return m.init.CWD
+	}
+	return m.opts.CWD
+}
+
+func (m *Model) contextWindow() int {
+	if m.ctxWindow > 0 {
+		return m.ctxWindow
+	}
+	return 200000
+}
+
+func (m Model) showSidebar() bool { return m.sidebarOn && m.width >= 100 }
+
+func (m Model) mainWidth() int {
+	if m.showSidebar() {
+		return m.width - sidebarWidth
+	}
+	return m.width
+}
+
+// layout sizes the viewport to whatever the bottom panel leaves over.
+func (m *Model) layout() {
+	if m.width == 0 {
+		return
+	}
+	m.input.SetWidth(m.mainWidth() - 4)
+	bottom := lipgloss.Height(m.bottomView()) + 1 // + status bar
+	h := max(3, m.height-bottom)
+	if !m.ready {
+		m.vp = viewport.New(m.mainWidth(), h)
+		m.vp.MouseWheelEnabled = true
+	} else {
+		m.vp.Width, m.vp.Height = m.mainWidth(), h
+	}
+}
+
+func (m *Model) refresh() {
+	if !m.ready {
+		return
+	}
+	content := m.chat.View(m.mainWidth())
+	if len(m.chat.entries) == 0 {
+		content = m.splash()
+	}
+	m.vp.SetContent(content)
+	if m.follow {
+		m.vp.GotoBottom()
+	}
+}
+
+func (m Model) View() string {
+	if !m.ready {
+		return ""
+	}
+	if m.picker != nil {
+		return lipgloss.JoinVertical(lipgloss.Left, m.picker.view(m.width, m.height-1), m.statusView())
+	}
+	chatView := m.vp.View()
+	if pop := m.comp.view(m.mainWidth()); pop != "" {
+		chatView = overlayBottom(chatView, pop, m.vp.Height, m.mainWidth())
+	}
+	main := lipgloss.JoinVertical(lipgloss.Left, chatView, m.bottomView())
+	if m.showSidebar() {
+		main = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(m.mainWidth()).Render(main), m.sidebarView(m.height-1))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, main, m.statusView())
+}
+
+// overlayBottom draws pop over the last lines of base.
+func overlayBottom(base, pop string, height, width int) string {
+	lines := strings.Split(base, "\n")
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	pl := strings.Split(pop, "\n")
+	start := max(0, len(lines)-len(pl))
+	for i, l := range pl {
+		if start+i < len(lines) {
+			lines[start+i] = l + strings.Repeat(" ", max(0, width-lipgloss.Width(l)))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) bottomView() string {
+	if len(m.pending) > 0 {
+		return m.permissionView()
+	}
+	box := inputBox
+	if m.input.Focused() {
+		box = inputBoxFocused
+	}
+	var top string
+	if m.busy {
+		label := m.status
+		if label == "" || label == "requesting" {
+			label = "Working"
+		}
+		extra := fmt.Sprintf(" %ds", int(time.Since(m.turnFrom).Seconds()))
+		if n := m.track.runningAgents(); n > 0 {
+			plural := ""
+			if n > 1 {
+				plural = "s"
+			}
+			extra += fmt.Sprintf(" · %d agent%s running", n, plural)
+		}
+		top = " " + m.spin.View() + " " + statusKey.Render(label+"…") + mutedStyle.Render(extra+" · esc to interrupt") + "\n"
+	}
+	return top + box.Width(m.mainWidth()-2).Render(m.input.View())
+}
+
+func (m Model) permissionView() string {
+	p := m.pending[0]
+	w := m.mainWidth() - 6
+	title := warnStyle.Bold(true).Render("Allow " + p.ToolName + "?")
+	if p.AgentID != "" {
+		for _, a := range m.track.agents {
+			if a.taskID == p.AgentID {
+				title += " " + agentStyle.Render("("+a.kind+": "+truncate(a.desc, 30)+")")
+			}
+		}
+	}
+	if len(m.pending) > 1 {
+		title += mutedStyle.Render(fmt.Sprintf("  +%d queued", len(m.pending)-1))
+	}
+	detail := m.prettyInput(p.ToolName, p.Input, w)
+	if p.Description != "" && filePathOf(p.Input) == "" {
+		if p.ToolName == "Bash" {
+			detail += "\n" + mutedStyle.Render(p.Description)
+		} else {
+			detail = mutedStyle.Render(p.Description) + "\n" + detail
+		}
+	}
+	keys := statusKey.Render("y") + mutedStyle.Render(" allow  ") +
+		statusKey.Render("a") + mutedStyle.Render(" always allow "+p.ToolName+"  ") +
+		statusKey.Render("n") + mutedStyle.Render(" deny  ") +
+		statusKey.Render("ctrl+c") + mutedStyle.Render(" deny & stop")
+	return permBox.Width(m.mainWidth() - 2).Render(title + "\n\n" + detail + "\n\n" + keys)
+}
+
+func (m Model) prettyInput(tool string, raw json.RawMessage, width int) string {
+	var in map[string]any
+	_ = json.Unmarshal(raw, &in)
+	fp := filePathOf(raw)
+	rel := relPath(fp, m.cwd())
+	switch tool {
+	case "Bash":
+		return lipgloss.NewStyle().Width(width).Render(statusKey.Render("$ ") + textStyle.Render(str(in, "command")))
+	case "Edit":
+		return textStyle.Render(rel) + "\n" + renderDiff(computeDiff(str(in, "old_string"), str(in, "new_string")), fp, width, 14)
+	case "MultiEdit":
+		var all []diffLine
+		edits, _ := in["edits"].([]any)
+		for _, ed := range edits {
+			e, _ := ed.(map[string]any)
+			all = append(all, computeDiff(str(e, "old_string"), str(e, "new_string"))...)
+		}
+		return textStyle.Render(rel) + "\n" + renderDiff(all, fp, width, 14)
+	case "Write":
+		return textStyle.Render(rel) + "\n" + renderDiff(addedLines(str(in, "content")), fp, width, 12)
+	case "WebFetch":
+		return textStyle.Render(str(in, "url"))
+	}
+	b, _ := json.MarshalIndent(in, "", "  ")
+	return mutedStyle.Render(clipText(string(b), width, 12))
+}
+
+func (m Model) statusView() string {
+	sep := mutedStyle.Render(" │ ")
+	var parts []string
+	mode := mutedStyle.Render("● default")
+	switch m.permMode {
+	case "acceptEdits":
+		mode = okStyle.Render("⏵⏵ accept edits")
+	case "plan":
+		mode = warnStyle.Render("⏸ plan mode")
+	case "bypassPermissions":
+		mode = errStyle.Render("⚠ bypass permissions")
+	}
+	parts = append(parts, mode+mutedStyle.Render(" ⇧⇥"))
+	if !m.showSidebar() {
+		if m.model != "" {
+			parts = append(parts, m.model)
+		}
+		if ctx := contextTokens(m.lastUsage); ctx > 0 {
+			parts = append(parts, "ctx "+humanTokens(ctx))
+		}
+		if w, ok := m.limits["five_hour"]; ok {
+			parts = append(parts, usageGauge("5h", w))
+		}
+		if w, ok := m.limits["seven_day"]; ok {
+			parts = append(parts, usageGauge("7d", w))
+		}
+	}
+	left := strings.Join(parts, sep)
+	hints := mutedStyle.Render("ctrl+r sessions · ctrl+b sidebar · ctrl+o expand · /help")
+	if m.costUSD > 0 && m.showSidebar() {
+		hints = mutedStyle.Render(fmt.Sprintf("≈$%.2f api-equiv · ", m.costUSD)) + hints
+	}
+	gap := m.width - 2 - lipgloss.Width(left) - lipgloss.Width(hints)
+	if gap < 2 {
+		return statusBar.Width(m.width).Render(left)
+	}
+	return statusBar.Width(m.width).Render(left + strings.Repeat(" ", gap) + hints)
+}
+
+func usageGauge(label string, w claude.RateLimitWindow) string {
+	pct := int(w.Utilization*100 + 0.5)
+	st := okStyle
+	switch {
+	case pct >= 90:
+		st = errStyle
+	case pct >= 70:
+		st = warnStyle
+	}
+	reset := ""
+	if w.ResetsAt > 0 {
+		if d := time.Until(time.Unix(w.ResetsAt, 0)).Round(time.Minute); d > 0 {
+			reset = mutedStyle.Render(" ↻" + shortDur(d))
+		}
+	}
+	return fmt.Sprintf("%s %s%s", label, st.Render(fmt.Sprintf("%d%%", pct)), reset)
+}
+
+func shortDur(d time.Duration) string {
+	if d >= 24*time.Hour {
+		return fmt.Sprintf("%dd%dh", int(d.Hours())/24, int(d.Hours())%24)
+	}
+	if d >= time.Hour {
+		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+	return fmt.Sprintf("%dm", int(d.Minutes()))
+}
+
+func contextTokens(u claude.Usage) int {
+	return u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+}
+
+func humanTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+func formatTokens(u claude.Usage) string {
+	return fmt.Sprintf("%s in · %s out", humanTokens(contextTokens(u)), humanTokens(u.OutputTokens))
+}
+
+func (m Model) splash() string {
+	th := currentTheme()
+	word := []rune("c l a u d e w i t z")
+	var logo strings.Builder
+	for i, r := range word {
+		c := th.accent
+		if i >= len(word)/2 {
+			c = th.second
+		}
+		logo.WriteString(lipgloss.NewStyle().Foreground(c).Bold(true).Render(string(r)))
+	}
+	key := func(k, desc string) string { return statusKey.Render(k) + mutedStyle.Render(" "+desc) }
+	lines := []string{
+		"",
+		"  " + assistLabel.Render("✻  ") + logo.String(),
+		"",
+		mutedStyle.Render("  A terminal front end for Claude Code, running on your Claude subscription."),
+		"",
+		"  " + key("/", "commands") + "        " + key("@", "mention a file"),
+		"  " + key("ctrl+r", "sessions") + "   " + key("⇧⇥", "permission mode"),
+		"",
+		"  " + textStyle.Render(prettyPath(m.opts.CWD)),
+	}
+	if m.initResp != nil {
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("  claude %s · %d commands · %s", m.initResp.Version, len(m.initResp.Commands), m.model)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+const helpText = `commands
+  /new, /clear        start a fresh session
+  /resume [id]        browse sessions (or resume one by id)
+  /model <name>       switch model (opus, sonnet, haiku, …)
+  /mode <mode>        permission mode: default, acceptEdits, plan
+  /theme <name>       colour theme: claude, charm, mono
+  /sidebar            toggle the sidebar
+  /session            show session id and cwd
+  /quit               exit
+  other /commands are passed through to Claude Code
+
+keys
+  enter      send               ctrl+j / alt+enter  newline
+  esc        interrupt          shift+tab           cycle permission mode
+  ctrl+r     sessions           ctrl+b              toggle sidebar
+  ctrl+o     expand output      pgup/pgdown, wheel  scroll
+  tab        accept completion  ctrl+c              interrupt / clear / quit`
