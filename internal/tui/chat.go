@@ -58,6 +58,11 @@ type entry struct {
 
 	expanded bool // opened individually from the focused chat
 
+	// streamed replies and thinking: text is revealed at a steady pace,
+	// shown bytes at a time (see reveal.go)
+	paced bool
+	shown int
+
 	// render cache
 	rendered string
 	width    int
@@ -65,7 +70,12 @@ type entry struct {
 	md       streamMD // assistant and thinking Markdown
 }
 
-func (e *entry) setText(s string) { e.text = s; e.dirty = true }
+// setText replaces an entry's text. Paced entries redraw as the reveal
+// catches up rather than on every change.
+func (e *entry) setText(s string) {
+	e.text = s
+	e.dirty = e.dirty || !e.paced
+}
 
 // open reports whether an entry shows in full: everything is open with
 // ctrl+o, or one entry at a time with space in the focused chat.
@@ -225,10 +235,10 @@ func (c *chat) renderEntry(e *entry, width int) string {
 		}
 		return userBlock.Width(width - 2).Render(body)
 	case kindAssistant:
-		body := e.text
+		body := e.visibleText()
 		w := min(width-2, maxProseWidth)
 		if r := c.renderer(w); r != nil {
-			if out, err := e.md.render(e.text, w, r); err == nil {
+			if out, err := e.md.render(body, w, r); err == nil {
 				body = strings.Trim(out, "\n")
 			}
 		}
@@ -256,7 +266,7 @@ func (c *chat) renderThinking(e *entry, width int) string {
 	if e.thought >= time.Second {
 		footer = "  " + thinkingStyle.Render("∴ Thought for "+shortSecs(e.thought))
 	}
-	t := strings.TrimSpace(e.text)
+	t := strings.TrimSpace(e.visibleText())
 	if t == "" {
 		if footer != "" {
 			return footer

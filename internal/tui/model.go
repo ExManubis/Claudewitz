@@ -91,6 +91,10 @@ type Model struct {
 	animID    int // generation of the running shimmer tick loop
 	animating bool
 
+	revealTicking bool // the streamed-text reveal loop is running
+	revealID      int
+	revealLast    time.Time
+
 	// session state
 	init         *claude.InitEvent
 	initResp     *claude.InitializeResponse
@@ -344,6 +348,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sparkTickMsg:
 		return m, m.onSparkTick(msg)
+
+	case revealTickMsg:
+		return m, m.onRevealTick(msg)
 
 	case toastTickMsg:
 		if msg.id != m.toastID {
@@ -616,7 +623,7 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 
 	case ev.Stream != nil:
 		m.handleStream(ev.Stream)
-		return m.markBusy()
+		return tea.Batch(m.markBusy(), m.startReveal())
 
 	case ev.Message != nil:
 		if ev.Message.ParentToolUseID != nil {
@@ -754,13 +761,13 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 		switch e.ContentBlock.Type {
 		case "text":
 			m.activity = "Writing"
-			m.chat.streaming[e.Index] = m.chat.add(&entry{kind: kindAssistant, text: e.ContentBlock.Text})
+			m.chat.streaming[e.Index] = m.chat.add(&entry{kind: kindAssistant, text: e.ContentBlock.Text, paced: true})
 		case "thinking":
 			m.activity = "Thinking"
 			// Joins the transcript with its first text: models that keep
 			// their thinking hidden send none, and the activity line
 			// already says Claude is thinking.
-			th := &entry{kind: kindThinking, text: e.ContentBlock.Thinking, thinkStart: time.Now()}
+			th := &entry{kind: kindThinking, text: e.ContentBlock.Thinking, thinkStart: time.Now(), paced: true}
 			if th.text != "" {
 				m.chat.add(th)
 			}
