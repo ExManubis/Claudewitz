@@ -235,9 +235,58 @@ func renderDiff(lines []diffLine, filename string, width, max int) string {
 	return out
 }
 
+// hunkHeaders gives every hunk of a diff a header row, "@@ -a,b +c,d @@"
+// from its line numbers, in place of the bare separators between hunks.
+func hunkHeaders(lines []diffLine) []diffLine {
+	var out []diffLine
+	for start := 0; start < len(lines); {
+		end := start
+		for end < len(lines) && lines[end].kind != '@' {
+			end++
+		}
+		if end > start {
+			var oldFrom, oldN, newFrom, newN int
+			for _, l := range lines[start:end] {
+				if l.kind != '+' {
+					if oldN++; oldFrom == 0 {
+						oldFrom = l.oldNo
+					}
+				}
+				if l.kind != '-' {
+					if newN++; newFrom == 0 {
+						newFrom = l.newNo
+					}
+				}
+			}
+			out = append(out, diffLine{kind: '@', text: fmt.Sprintf("@@ -%d,%d +%d,%d @@", oldFrom, oldN, newFrom, newN)})
+			out = append(out, lines[start:end]...)
+		}
+		start = end + 1
+	}
+	return out
+}
+
+// shiftLines moves a diff's line numbers by old and new offsets, for
+// snippets whose numbers start at 1 but sit further down a file.
+func shiftLines(lines []diffLine, old, new int) {
+	for i := range lines {
+		if lines[i].oldNo > 0 {
+			lines[i].oldNo += old
+		}
+		if lines[i].newNo > 0 {
+			lines[i].newNo += new
+		}
+	}
+}
+
 // diffCell draws one diff line in width cells: line number, sign, code.
 func diffCell(l *diffLine, no, numW, width int, lexer chroma.Lexer, style *chroma.Style) string {
 	th := currentTheme()
+	if l.kind == '@' && strings.HasPrefix(l.text, "@@") {
+		// A hunk header: a tinted row, like a fold in the file.
+		st := lipgloss.NewStyle().Background(th.thinkBg).Foreground(th.muted)
+		return st.Width(width).MaxWidth(width).Render(fmt.Sprintf("%*s   %s", numW, "…", l.text))
+	}
 	if l.kind == '@' {
 		return lipgloss.NewStyle().Foreground(th.muted).Width(width).MaxWidth(width).Render(strings.Repeat(" ", numW+1) + l.text)
 	}

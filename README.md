@@ -170,8 +170,12 @@ config.
 
 **Permissions**
 - Allow once, always allow a tool for the session, deny, or deny and stop
-- Edit/Write requests preview the diff (`t` switches between side-by-side and unified); sub-agent
-  requests name the agent asking
+- Edit, MultiEdit and Write requests open a centred panel with the whole diff: placed at the
+  file's real line numbers with a header per hunk, and a Write over an existing file diffs
+  against it. Scroll with `j`/`k`, `d`/`u` or the wheel, `t` switches between side-by-side and
+  unified, and answer with the buttons (`←→` and `enter`, or a click) or `y`/`a`/`n`/`ctrl+c`.
+  Whether Claude asks at all follows its permission mode: in accept-edits mode edits just happen
+- Other requests show above the input; sub-agent requests name the agent asking
 - Permission modes: `shift+tab` cycles default → accept edits → plan
 
 **Questions and plan approval**

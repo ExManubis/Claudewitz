@@ -107,7 +107,7 @@ func (m *Model) applyChangeDiff(msg changeDiffMsg) {
 		v.err = msg.err.Error()
 		return
 	}
-	v.lines = parseUnified(msg.text)
+	v.lines = hunkHeaders(parseUnified(msg.text))
 	v.binary = len(v.lines) == 0 && strings.Contains(msg.text, "Binary files")
 	if n := len(v.lines); n > maxViewerDiffLines {
 		v.lines = append(v.lines[:maxViewerDiffLines], diffLine{kind: '@', text: fmt.Sprintf("… %d more lines not shown", n-maxViewerDiffLines)})
@@ -161,7 +161,7 @@ func (m Model) changesLayout() (boxW, boxH, listW, diffW, bodyH int) {
 	if listW > 0 {
 		diffW -= listW + 3 // a gap, the rule, a gap
 	}
-	bodyH = boxH - 2 - 2 // border, then the title and a blank row
+	bodyH = boxH - 2 - 3 // border, then the title, the file and a blank row
 	return
 }
 
@@ -230,9 +230,9 @@ func (m *Model) handleChangesMouse(msg tea.MouseMsg) tea.Cmd {
 		m.scrollChanges(3)
 	case ev.Action == tea.MouseActionPress && ev.Button == tea.MouseButtonLeft:
 		// Clicks on the file list pick a file: inside the border and
-		// padding, under the title and a blank row.
+		// padding, under the title, the file and a blank row.
 		_, _, listW, _, bodyH := m.changesLayout()
-		row := msg.Y - 3
+		row := msg.Y - 4
 		if listW > 0 && msg.X >= 2 && msg.X < 2+listW && row >= 0 && row < bodyH {
 			if i := m.changes.listOffset(bodyH) + row; i < len(m.changes.files) && i != m.changes.sel {
 				m.changes.sel, m.changes.scroll = i, 0
@@ -368,5 +368,10 @@ func (m Model) changesView() string {
 	}
 
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(th.accent).Padding(0, 1).Width(boxW - 2).Height(boxH - 2)
-	return box.Render(title + "\n\n" + content)
+	head := lipgloss.NewStyle().Foreground(th.accent).Bold(true).Render("Changes")
+	if m.git.Branch != "" {
+		head += " " + agentStyle.Render(m.branchLabel(false))
+	}
+	head += " " + stripes(max(0, innerW-lipgloss.Width(head)-1), th.accent, th.subtle)
+	return box.Render(head + "\n" + title + "\n\n" + content)
 }

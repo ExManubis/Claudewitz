@@ -42,6 +42,8 @@ func (m Model) helpPairs() [][2]string {
 		return [][2]string{{"↑↓", "move"}, {"enter", "resume"}, {"tab", "scope"}, {"esc", "close"}}
 	case m.question != nil || m.plan != nil:
 		return m.interactionHelp()
+	case m.editPanel != nil && len(m.pending) > 0:
+		return [][2]string{{"y", "allow"}, {"a", "for session"}, {"n", "deny"}, {"ctrl+c", "deny & stop"}, {"t", "diff layout"}, {"j/k", "scroll"}}
 	case len(m.pending) > 0:
 		pairs := [][2]string{{"y", "allow"}, {"a", "always"}, {"n", "deny"}, {"ctrl+c", "deny & stop"}}
 		if isDiffTool(m.pending[0].ToolName) {
@@ -119,6 +121,8 @@ var helpSections = []struct {
 		{"a", "always allow tool"},
 		{"n", "deny"},
 		{"ctrl+c", "deny and stop"},
+		{"←→ enter", "edit panel buttons"},
+		{"j/k t", "scroll diff, layout"},
 	}},
 }
 

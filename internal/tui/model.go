@@ -113,6 +113,7 @@ type Model struct {
 	alwaysAllow map[string]bool
 	question    *questionState // AskUserQuestion at the head of pending
 	plan        *planState     // ExitPlanMode at the head of pending
+	editPanel   *editPanel     // Edit, MultiEdit or Write at the head of pending
 }
 
 const inputPlaceholder = "Ask Claude anything…  / for commands · @ to mention files"
@@ -392,6 +393,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.changes != nil {
 			cmds = append(cmds, m.handleChangesMouse(msg))
+		} else if m.editPanel != nil && len(m.pending) > 0 && !overlaid {
+			cmds = append(cmds, m.handlePanelMouse(msg))
 		} else if path != "" {
 			cmds = append(cmds, m.openChanges(path))
 		} else if m.showDrawer() && msg.Action == tea.MouseActionPress && msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
@@ -919,6 +922,10 @@ func (m *Model) handlePermissionKey(k tea.KeyMsg) tea.Cmd {
 		return m.handleQuestionKey(k)
 	case m.plan != nil:
 		return m.handlePlanKey(k)
+	case m.editPanel != nil:
+		if cmd, ok := m.handlePanelKey(k); ok {
+			return cmd
+		}
 	}
 	p := m.pending[0]
 	var d *claude.PermissionDecision
@@ -1326,7 +1333,7 @@ func (m *Model) restart(o claude.Options) tea.Cmd {
 	m.chat.reset(m.track)
 	m.chat.cwd = opts.CWD
 	m.pending = nil
-	m.question, m.plan = nil, nil
+	m.question, m.plan, m.editPanel = nil, nil, nil
 	m.queued = nil
 	m.setSuggestion("")
 	m.attachments = nil
@@ -1478,6 +1485,9 @@ func (m Model) View() string {
 		screen = center(screen, m.picker.view(m.width, h), m.width, h)
 	case m.changes != nil:
 		screen = overlay(screen, m.changesView(), 0, 0)
+	case m.editPanel != nil && len(m.pending) > 0:
+		x, y := m.panelPos()
+		screen = overlay(screen, m.panelView(x, y), x, y)
 	}
 	return screen
 }
@@ -1560,6 +1570,8 @@ func (m Model) permissionView() string {
 		return m.questionView(m.mainWidth())
 	case m.plan != nil:
 		return m.planView(m.mainWidth())
+	case m.editPanel != nil:
+		return m.panelWaiting()
 	}
 	p := m.pending[0]
 	w := m.mainWidth() - 6
