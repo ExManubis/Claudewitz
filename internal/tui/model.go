@@ -869,7 +869,12 @@ func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool
 			}
 		case "tool_use":
 			if _, seen := m.chat.byToolID[b.ID]; !seen {
-				m.chat.add(&entry{kind: kindTool, toolID: b.ID, toolName: b.Name, toolInput: b.Input})
+				e := m.chat.add(&entry{kind: kindTool, toolID: b.ID, toolName: b.Name, toolInput: b.Input})
+				if isDiffTool(b.Name) {
+					// Live calls are read now, while the file is (usually)
+					// still as it was.
+					e.diff, _ = editDiff(b.Name, b.Input, live)
+				}
 				m.track.toolUse(b)
 			}
 		case "tool_result":

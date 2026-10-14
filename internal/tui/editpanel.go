@@ -71,52 +71,72 @@ func lineOf(content, s string) int {
 	return 0
 }
 
-// newEditPanel works out the diff a request would make. Edits are placed in
-// the file as it is now, so their line numbers are the file's; a Write over
-// an existing file diffs against what's there.
+// newEditPanel opens the panel for a request.
 func newEditPanel(p *claude.PermissionRequest) *editPanel {
+	lines, note := editDiff(p.ToolName, p.Input, true)
+	return &editPanel{req: p, lines: lines, note: note}
+}
+
+// editDiff works out the diff an Edit, MultiEdit or Write makes, with a
+// header per hunk. Edits are placed in the file so their line numbers are
+// the file's: by where the old text is, before the edit lands, or where
+// the new text is, after. A Write over an existing file diffs against
+// what's there, but only for a call that hasn't run (pending): in history
+// the file may have changed since.
+func editDiff(tool string, raw json.RawMessage, pending bool) (lines []diffLine, note string) {
 	var in map[string]any
-	_ = json.Unmarshal(p.Input, &in)
-	path := filePathOf(p.Input)
-	cur, exists := readSmallFile(path)
-	ep := &editPanel{req: p}
-	switch p.ToolName {
+	_ = json.Unmarshal(raw, &in)
+	cur, exists := readSmallFile(filePathOf(raw))
+	// place shifts one edit's lines into the file; delta is how many lines
+	// earlier edits in the same call added.
+	place := func(d []diffLine, old, new string, delta int) {
+		if !exists {
+			return
+		}
+		if strings.Contains(cur, old) && old != "" {
+			off := lineOf(cur, old)
+			shiftLines(d, off, off+delta)
+		} else if strings.Contains(cur, new) && new != "" {
+			off := lineOf(cur, new)
+			shiftLines(d, off-delta, off)
+		}
+	}
+	switch tool {
 	case "Edit":
-		old := str(in, "old_string")
-		ep.lines = computeDiff(old, str(in, "new_string"))
-		off := lineOf(cur, old)
-		shiftLines(ep.lines, off, off)
+		old, new := str(in, "old_string"), str(in, "new_string")
+		lines = computeDiff(old, new)
+		place(lines, old, new, 0)
 		if in["replace_all"] == true {
-			ep.note = "every occurrence"
+			note = "every occurrence"
 		}
 	case "MultiEdit":
 		edits, _ := in["edits"].([]any)
-		delta := 0 // lines added so far by earlier edits
+		delta := 0
 		for i, ed := range edits {
 			e, _ := ed.(map[string]any)
-			d := computeDiff(str(e, "old_string"), str(e, "new_string"))
-			off := lineOf(cur, str(e, "old_string"))
-			shiftLines(d, off, off+delta)
+			old, new := str(e, "old_string"), str(e, "new_string")
+			d := computeDiff(old, new)
+			place(d, old, new, delta)
 			a, r := diffStats(d)
 			delta += a - r
 			if i > 0 {
-				ep.lines = append(ep.lines, diffLine{kind: '@', text: "⋯"})
+				lines = append(lines, diffLine{kind: '@', text: "⋯"})
 			}
-			ep.lines = append(ep.lines, d...)
+			lines = append(lines, d...)
 		}
-		ep.note = fmt.Sprintf("%d edits", len(edits))
+		note = fmt.Sprintf("%d edits", len(edits))
 	case "Write":
 		content := str(in, "content")
-		if exists {
-			ep.lines = computeDiff(cur, content)
-			ep.note = "overwrites the file"
-		} else {
-			ep.lines = addedLines(content)
-			ep.note = "new file"
+		switch {
+		case pending && exists && strings.TrimRight(cur, "\n") != strings.TrimRight(content, "\n"):
+			lines, note = computeDiff(cur, content), "overwrites the file"
+		case exists || !pending:
+			lines = addedLines(content) // what it replaced is gone
+		default:
+			lines, note = addedLines(content), "new file"
 		}
 	}
-	ep.lines = hunkHeaders(ep.lines)
-	return ep
+	return hunkHeaders(lines), note
 }
 
 // panelLayout sizes the panel: most of the width, and tall enough for the

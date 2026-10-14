@@ -102,3 +102,38 @@ func TestHunkHeaders(t *testing.T) {
 		t.Fatalf("header %+v", h[0])
 	}
 }
+
+// The chat places edits too: before they land (live) by the old text, and
+// after (accept-edits, history) by the new text.
+func TestChatDiffsUseFileLineNumbers(t *testing.T) {
+	m, path := panelModel(t, 120, 40)
+	in, _ := json.Marshal(map[string]any{"file_path": path, "old_string": "line 50\n", "new_string": "line fifty\n"})
+
+	m.applyBlocks("assistant", []claude.ContentBlock{{Type: "tool_use", ID: "live", Name: "Edit", Input: in}}, true)
+	os.WriteFile(path, []byte(strings.Replace(mustRead(t, path), "line 50\n", "line fifty\n", 1)), 0o644)
+	m.applyBlocks("assistant", []claude.ContentBlock{{Type: "tool_use", ID: "replayed", Name: "Edit", Input: in}}, false)
+	for _, id := range []string{"live", "replayed"} {
+		e := m.chat.byToolID[id]
+		e.toolStatus = toolOK
+		if v := ansi.Strip(m.chat.renderEntry(e, 100)); !strings.Contains(v, "@@ -50,1 +50,1 @@") || !strings.Contains(v, "50 + line fifty") {
+			t.Errorf("%s:\n%s", id, v)
+		}
+	}
+}
+
+func TestReplayedWriteDoesNotDiffAgainstDisk(t *testing.T) {
+	_, path := panelModel(t, 120, 40)
+	in, _ := json.Marshal(map[string]any{"file_path": path, "content": "something else\n"})
+	if d, _ := editDiff("Write", in, false); len(d) != 2 || d[1].kind != '+' {
+		t.Fatalf("got %+v", d)
+	}
+}
+
+func mustRead(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}

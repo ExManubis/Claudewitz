@@ -51,6 +51,7 @@ type entry struct {
 	planText   string      // ExitPlanMode: plan as read from its file
 	images     []string    // user messages: names of attached images
 	pics       []*picture  // images to draw: attached, or returned by a tool
+	diff       []diffLine  // Edit, MultiEdit, Write: placed in the file (see editDiff)
 
 	// thinking: when the block started streaming, and how long it took
 	// once it stopped (zero while running, and for replayed history)
@@ -370,26 +371,30 @@ func (c *chat) toolBody(e *entry, width int) string {
 		return mutedStyle.Render(label) + "\n" + picturesView(e.pics, width, c.open(e))
 	}
 	fp := filePathOf(e.toolInput)
-	switch e.toolName {
-	case "Edit":
-		d := computeDiff(str(in, "old_string"), str(in, "new_string"))
-		a, r := diffStats(d)
-		return mutedStyle.Render(fmt.Sprintf("⎿ %s %s", okStyle.Render(fmt.Sprintf("+%d", a)), errStyle.Render(fmt.Sprintf("-%d", r)))) + "\n" + renderDiff(d, fp, width, maxLines)
-	case "MultiEdit":
-		var all []diffLine
-		edits, _ := in["edits"].([]any)
-		for i, ed := range edits {
-			m, _ := ed.(map[string]any)
-			if i > 0 {
-				all = append(all, diffLine{kind: '@', text: "⋯"})
-			}
-			all = append(all, computeDiff(str(m, "old_string"), str(m, "new_string"))...)
+	if isDiffTool(e.toolName) {
+		d := e.diff
+		if d == nil {
+			d, _ = editDiff(e.toolName, e.toolInput, false)
 		}
-		a, r := diffStats(all)
-		return mutedStyle.Render(fmt.Sprintf("⎿ %d edits %s %s", len(edits), okStyle.Render(fmt.Sprintf("+%d", a)), errStyle.Render(fmt.Sprintf("-%d", r)))) + "\n" + renderDiff(all, fp, width, maxLines)
-	case "Write":
-		d := addedLines(str(in, "content"))
-		return mutedStyle.Render(fmt.Sprintf("⎿ wrote %d lines", len(d))) + "\n" + renderDiff(d, fp, width, min(maxLines, 6))
+		a, r := diffStats(d)
+		stats := okStyle.Render(fmt.Sprintf("+%d", a)) + " " + errStyle.Render(fmt.Sprintf("-%d", r))
+		var head string
+		switch e.toolName {
+		case "MultiEdit":
+			edits, _ := in["edits"].([]any)
+			head = fmt.Sprintf("⎿ %d edits %s", len(edits), stats)
+		case "Write":
+			lim := min(maxLines, 6)
+			if c.open(e) {
+				lim = maxLines
+			}
+			return mutedStyle.Render(fmt.Sprintf("⎿ wrote %d lines ", strings.Count(strings.TrimRight(str(in, "content"), "\n"), "\n")+1)) + stats + "\n" + renderDiff(d, fp, width, lim)
+		default:
+			head = "⎿ " + stats
+		}
+		return mutedStyle.Render(head) + "\n" + renderDiff(d, fp, width, maxLines)
+	}
+	switch e.toolName {
 	case "Read":
 		n := strings.Count(strings.TrimRight(e.toolOutput, "\n"), "\n") + 1
 		return mutedStyle.Render(fmt.Sprintf("⎿ read %d lines", n))
