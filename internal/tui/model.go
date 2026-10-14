@@ -282,6 +282,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.handleEvent(msg.ev))
 		if touchesTree(msg.ev) {
 			cmds = append(cmds, m.refreshGit())
+			if m.changes != nil && m.changes.session {
+				cmds = append(cmds, m.refreshChanges())
+			}
 		}
 		if m.proc != nil && !msg.ev.Exited {
 			cmds = append(cmds, waitEvent(m.proc))
@@ -1494,7 +1497,8 @@ func (m Model) View() string {
 	case m.picker != nil:
 		screen = center(screen, m.picker.view(m.width, h), m.width, h)
 	case m.changes != nil:
-		screen = overlay(screen, m.changesView(), 0, 0)
+		x, y := m.changesPos()
+		screen = overlay(screen, m.changesView(), x, y)
 	case m.diffView != nil || m.editPanel != nil && len(m.pending) > 0:
 		x, y := m.panelPos()
 		screen = overlay(screen, m.panelView(x, y), x, y)

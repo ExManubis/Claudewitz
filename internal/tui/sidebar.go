@@ -451,8 +451,10 @@ func (m Model) sidebarLines(height int) ([]string, map[int]string) {
 		}
 		sec = append(sec, gs...)
 	} else if len(t.files) > 0 {
-		sec = append(sec, sectionTitle.Render("Modified files")+mutedStyle.Render(fmt.Sprintf(" %d", len(t.files))))
+		sec = append(sec, sectionTitle.Render("Modified files")+mutedStyle.Render(fmt.Sprintf(" %d", len(t.files)))+mutedStyle.Faint(true).Render(" · ctrl+s"))
+		fileSec = map[int]string{}
 		for _, f := range t.files {
+			fileSec[len(sec)] = f.path
 			stats := ""
 			if f.added > 0 {
 				stats += okStyle.Render(fmt.Sprintf("+%d", f.added))

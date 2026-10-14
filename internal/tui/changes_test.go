@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -126,5 +127,50 @@ func TestParseUnifiedSkipsGitHeaders(t *testing.T) {
 	d := parseUnified("diff --git a/x b/x\nindex 1..2 100644\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n keep\n--- old dashes\n+++ new pluses\n")
 	if len(d) != 3 || d[1].kind != '-' || d[1].text != "-- old dashes" || d[2].kind != '+' || d[2].text != "++ new pluses" {
 		t.Fatalf("got %+v", d)
+	}
+}
+
+func TestChangesListClickInCentredPanel(t *testing.T) {
+	m := changesRepo(t, 140, 40)
+	m = feed(t, m, m.openChanges("main.go"))
+	x0, y0 := m.changesPos()
+	// The second file is on the second list row.
+	next, cmd := m.Update(tea.MouseMsg{X: x0 + 4, Y: y0 + 5 + 1, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	m = feed(t, next.(Model), cmd)
+	if f, _ := m.changes.file(); f.Path != "notes.txt" {
+		t.Fatalf("selected %q", f.Path)
+	}
+}
+
+// Outside a repository the viewer lists Claude's edits this session, and
+// the sidebar's Modified files open it.
+func TestSessionChangesOutsideARepo(t *testing.T) {
+	m, path := panelModel(t, 140, 40) // a plain temp dir
+	m.pending, m.editPanel = nil, nil
+	in, _ := json.Marshal(map[string]any{"file_path": path, "old_string": "line 12\n", "new_string": "line twelve\n"})
+	m.applyBlocks("assistant", []claude.ContentBlock{{Type: "tool_use", ID: "e1", Name: "Edit", Input: in}}, true)
+	m.applyBlocks("user", []claude.ContentBlock{{Type: "tool_result", ToolUseID: "e1", Content: json.RawMessage(`"ok"`)}}, true)
+	m.layout()
+
+	lines, files := m.sidebarLines(m.height - 1)
+	row := -1
+	for l, p := range files {
+		if p == path {
+			row = l
+		}
+	}
+	if row < 0 {
+		t.Fatalf("Modified files row not mapped:\n%s", ansi.Strip(strings.Join(lines, "\n")))
+	}
+	next, cmd := m.Update(tea.MouseMsg{X: m.width - sidebarWidth + 4, Y: row, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	m = feed(t, next.(Model), cmd)
+	if m.changes == nil || !m.changes.session {
+		t.Fatal("click didn't open the session viewer")
+	}
+	v := ansi.Strip(m.View())
+	for _, want := range []string{"Edits this session", "notes.txt", "@@ -12,1 +12,1 @@", "12 + line twelve"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("missing %q in:\n%s", want, v)
+		}
 	}
 }

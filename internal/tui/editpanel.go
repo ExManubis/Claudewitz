@@ -188,7 +188,7 @@ func editDiff(tool string, raw json.RawMessage, pending bool) (lines []diffLine,
 // panelLayout sizes the panel: most of the width, and tall enough for the
 // diff up to the room above the waiting line under the chat.
 func (m Model) panelLayout() (boxW, boxH, innerW, bodyH int) {
-	boxW = max(40, min(m.width-4, max(80, m.width*9/10)))
+	boxW = panelWidth(m.width)
 	innerW = boxW - 4 // border and padding
 	// border 2, title + blank, details + blank, blank + buttons, blank + hints
 	fixed := 2 + 2 + len(m.panelDetails(innerW)) + 1 + 2
@@ -311,20 +311,19 @@ func panelButton(b editButton, focused bool) string {
 // panelView draws the edit panel; x and y are where it will be placed, so
 // the buttons can be found again for clicks.
 func (m Model) panelView(x, y int) string {
-	th := currentTheme()
 	ep := m.panel()
 	boxW, boxH, innerW, bodyH := m.panelLayout()
 
 	var head string
 	if ep.readOnly {
-		head = lipgloss.NewStyle().Foreground(th.accent).Bold(true).Render(ep.tool) + mutedStyle.Render(" · "+ep.status)
+		head = panelTitle(ep.tool, mutedStyle.Render(" · "+ep.status), innerW)
 	} else {
-		head = lipgloss.NewStyle().Foreground(th.accent).Bold(true).Render("Permission Required")
+		extra := ""
 		if n := len(m.pending) - 1; n > 0 {
-			head += mutedStyle.Render(fmt.Sprintf("  +%d more", n))
+			extra = mutedStyle.Render(fmt.Sprintf("  +%d more", n))
 		}
+		head = panelTitle("Permission Required", extra, innerW)
 	}
-	head += " " + stripes(max(0, innerW-lipgloss.Width(head)-1), th.accent, th.subtle)
 
 	rows := ep.panelRows(innerW)
 	from := min(ep.scroll, len(rows))
@@ -351,21 +350,11 @@ func (m Model) panelView(x, y int) string {
 	details := m.panelDetails(innerW)
 	ep.buttonsY = y + 1 + 2 + len(details) + 1 + bodyH + 1
 
-	layout := "split view"
-	if splitDiff(innerW) {
-		layout = "unified view"
-	}
-	hints := [][2]string{{"←→", "choose"}, {"enter", "confirm"}, {"t", layout}, {"j/k", "scroll"}}
+	hints := [][2]string{{"←→", "choose"}, {"enter", "confirm"}, {"t", layoutHint(innerW)}, {"j/k", "scroll"}}
 	if ep.readOnly {
-		hints = [][2]string{{"esc", "close"}, {"t", layout}, {"j/k", "scroll"}}
+		hints = [][2]string{{"esc", "close"}, {"t", layoutHint(innerW)}, {"j/k", "scroll"}}
 	}
-	if len(rows) > bodyH {
-		hints = append(hints, [2]string{"", fmt.Sprintf("%d%%", 100*min(len(rows), from+bodyH)/len(rows))})
-	}
-	var hl []string
-	for _, h := range hints {
-		hl = append(hl, strings.TrimSpace(statusKey.Render(h[0])+" "+mutedStyle.Render(h[1])))
-	}
+	hints = scrollHint(hints, len(rows), from, bodyH)
 
 	content := []string{head, ""}
 	content = append(content, details...)
@@ -374,9 +363,8 @@ func (m Model) panelView(x, y int) string {
 	if !ep.readOnly {
 		content = append(content, "", strings.Repeat(" ", pad)+row)
 	}
-	content = append(content, "", strings.Join(hl, mutedStyle.Render(" · ")))
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(th.accent).Padding(0, 1).Width(boxW - 2).Height(boxH - 2)
-	return box.Render(strings.Join(content, "\n"))
+	content = append(content, "", panelHints(hints))
+	return panelFrame(boxW, boxH, content)
 }
 
 // panelPos is where the panel sits: centred over the screen, above the

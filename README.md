@@ -145,7 +145,7 @@ config.
 - Git: branch, ahead/behind upstream, staged/changed/new counts and the last commit
 - Changes: the working tree's changed files with status letters and +/- counts, ✻ marking
   files Claude edited this session (outside a repository: the files Claude edited). Click one to
-  open it in the changes viewer
+  open it in the changes viewer, in either case
 - The mascot, pinned to the bottom (about a quarter of the sidebar, hidden when it's under 20
   rows): a 3D bean in headphones, ray-marched and dithered into Braille dots, bopping to a beat
   with music notes drifting up. While Claude works it dissolves into a swirl of sparks (faster
@@ -160,6 +160,10 @@ config.
 - `j`/`k`, `d`/`u`, `f`/`b`, `g`/`G` and the wheel scroll; `tab`/`shift+tab` (or `[`/`]`) switch
   files; `t` flips split/unified; `e` opens the file in `$VISUAL`/`$EDITOR`; `esc` closes
 - Follows the sidebar's git polling, so the diff updates while Claude works
+- Outside a git repository it lists the files Claude edited this session instead (click one under
+  Modified files in the sidebar), each with the diffs of those edits
+- It's the same centred panel as edit approvals and transcript diffs: every diff in claudewitz
+  opens in one place and looks the same
 
 **Sessions** (`ctrl+r` or `/resume`)
 - Browse sessions for this project or all projects (`tab`), filter as you type
