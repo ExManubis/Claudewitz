@@ -385,10 +385,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, animTick(m.animID)
 
 	case tea.MouseMsg:
-		click := msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft
+		overlaid := m.picker != nil || m.palette != nil || m.modelPick != nil || m.themePick != nil || m.showHelp
+		var path string // a changed file clicked in the sidebar
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.changes == nil && !overlaid {
+			path, _ = m.sidebarFileAt(msg.X, msg.Y)
+		}
 		if m.changes != nil {
 			cmds = append(cmds, m.handleChangesMouse(msg))
-		} else if path, ok := m.sidebarFileAt(msg.X, msg.Y); ok && click && m.picker == nil && m.palette == nil && m.modelPick == nil && m.themePick == nil && !m.showHelp {
+		} else if path != "" {
 			cmds = append(cmds, m.openChanges(path))
 		} else if m.showDrawer() && msg.Action == tea.MouseActionPress && msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
 			// A click closes the drawer rather than landing on the chat under it.
