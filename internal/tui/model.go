@@ -82,6 +82,7 @@ type Model struct {
 	busy      bool
 	stopped   bool // user interrupted the current turn
 	sidebarOn bool
+	drawer    bool // sidebar open over the chat, below sidebarMinWidth
 	status    string
 	activity  string // what the live turn is doing, for the shimmer label
 	turnFrom  time.Time
@@ -117,6 +118,7 @@ const inputPlaceholder = "Ask Claude anything…  / for commands · @ to mention
 func New(ctx context.Context, opts claude.Options, cfg config.Config) Model {
 	setAppearance(cfg.Appearance)
 	applyIcons(cfg.Icons)
+	applyDiffMode(cfg.Diff)
 	if !applyTheme(cfg.Theme) {
 		applyTheme(themes[0].name)
 	}
@@ -250,6 +252,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		if m.width >= sidebarMinWidth {
+			m.drawer = false // docked (or hidden) from here on
+		}
 		m.layout()
 		m.ready = true
 		m.refresh()
@@ -362,7 +367,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, animTick(m.animID)
 
 	case tea.MouseMsg:
-		if m.picker == nil && m.palette == nil && m.modelPick == nil && m.themePick == nil && !m.showHelp {
+		if m.showDrawer() && msg.Action == tea.MouseActionPress && msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+			// A click closes the drawer rather than landing on the chat under it.
+			m.drawer = false
+		} else if m.picker == nil && m.palette == nil && m.modelPick == nil && m.themePick == nil && !m.showHelp {
 			cmds = append(cmds, m.handleMouse(msg))
 		}
 
@@ -456,10 +464,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.notify(toastInfo, "Tool output collapsed", "")
 		case "ctrl+b":
-			m.sidebarOn = !m.sidebarOn
-			m.layout()
-			m.refresh()
-			return m, nil
+			return m, m.toggleSidebar()
 		case "ctrl+r":
 			return m, m.openPicker()
 		case "ctrl+p":
@@ -888,6 +893,13 @@ func (m *Model) handlePermissionKey(k tea.KeyMsg) tea.Cmd {
 		d = &claude.PermissionDecision{Behavior: "allow"}
 	case "n", "esc":
 		d = &claude.PermissionDecision{Behavior: "deny", Message: "The user denied this tool call."}
+	case "t":
+		if !isDiffTool(p.ToolName) {
+			return nil
+		}
+		cmd := m.toggleDiffLayout(m.mainWidth() - 6)
+		m.layout()
+		return cmd
 	case "ctrl+c":
 		d = &claude.PermissionDecision{Behavior: "deny", Message: "The user denied this tool call and interrupted."}
 		if m.proc != nil {
@@ -1249,9 +1261,10 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		return m.setNotifications(arg), true
 	case "/icons":
 		return m.setIcons(arg), true
+	case "/diff":
+		return m.setDiffMode(arg), true
 	case "/sidebar":
-		m.sidebarOn = !m.sidebarOn
-		m.layout()
+		return m.toggleSidebar(), true
 	case "/session":
 		m.chat.info("session %s\ncwd %s", m.sessionID, m.cwd())
 	default:
@@ -1306,7 +1319,30 @@ func (m *Model) contextWindow() int {
 	return 200000
 }
 
-func (m Model) showSidebar() bool { return m.sidebarOn && m.width >= 100 }
+// sidebarMinWidth is the narrowest window that docks the sidebar.
+const sidebarMinWidth = 100
+
+func (m Model) showSidebar() bool { return m.sidebarOn && m.width >= sidebarMinWidth }
+
+// showDrawer is true when the sidebar is open over the chat instead.
+func (m Model) showDrawer() bool { return m.drawer && m.width < sidebarMinWidth }
+
+// sidebarVisible is true when the sidebar is on screen either way.
+func (m Model) sidebarVisible() bool { return m.showSidebar() || m.showDrawer() }
+
+// toggleSidebar docks or hides the sidebar, or below sidebarMinWidth opens
+// and closes it as a drawer over the chat.
+func (m *Model) toggleSidebar() tea.Cmd {
+	if m.width < sidebarMinWidth {
+		m.drawer = !m.drawer
+		return m.syncSparks()
+	}
+	m.sidebarOn = !m.sidebarOn
+	m.drawer = false
+	m.layout()
+	m.refresh()
+	return m.syncSparks()
+}
 
 func (m Model) mainWidth() int {
 	if m.showSidebar() {
@@ -1374,6 +1410,13 @@ func (m Model) View() string {
 	}
 	screen := lipgloss.JoinVertical(lipgloss.Left, main, m.statusView())
 
+	if m.showDrawer() {
+		top := 0
+		if m.showHeader() {
+			top = 1
+		}
+		screen = overlay(screen, m.sidebarView(m.height-1-top), m.width-sidebarWidth, top)
+	}
 	screen = m.drawToasts(screen)
 
 	// Floating dialogs.
@@ -1407,7 +1450,15 @@ func (m Model) headerInfo() string {
 		parts = append(parts, b)
 	}
 	parts = append(parts, prettyPath(m.cwd()))
-	return mutedStyle.Render(truncateLeft(strings.Join(parts, " • "), max(10, m.mainWidth()/2)))
+	hint := " • " + statusKey.Render("ctrl+b") + mutedStyle.Render(" sidebar")
+	if m.width < sidebarMinWidth {
+		hint = " • " + statusKey.Render("ctrl+b") + mutedStyle.Render(" details")
+		if m.drawer {
+			hint = " • " + statusKey.Render("ctrl+b") + mutedStyle.Render(" close")
+		}
+	}
+	info := truncateLeft(strings.Join(parts, " • "), max(10, m.mainWidth()/2-lipgloss.Width(hint)))
+	return mutedStyle.Render(info) + hint
 }
 
 // overlayBottom draws pop over the last lines of base.
@@ -1491,6 +1542,13 @@ func (m Model) permissionView() string {
 		statusKey.Render("a") + mutedStyle.Render(" always allow "+p.ToolName+"  ") +
 		statusKey.Render("n") + mutedStyle.Render(" deny  ") +
 		statusKey.Render("ctrl+c") + mutedStyle.Render(" deny & stop")
+	if isDiffTool(p.ToolName) {
+		layout := "split view"
+		if splitDiff(w) {
+			layout = "unified view"
+		}
+		keys += statusKey.Render("  t") + mutedStyle.Render(" "+layout)
+	}
 	return permBox.Width(m.mainWidth() - 2).Render(title + "\n\n" + detail + "\n\n" + keys)
 }
 
@@ -1507,8 +1565,11 @@ func (m Model) prettyInput(tool string, raw json.RawMessage, width int) string {
 	case "MultiEdit":
 		var all []diffLine
 		edits, _ := in["edits"].([]any)
-		for _, ed := range edits {
+		for i, ed := range edits {
 			e, _ := ed.(map[string]any)
+			if i > 0 {
+				all = append(all, diffLine{kind: '@', text: "⋯"})
+			}
 			all = append(all, computeDiff(str(e, "old_string"), str(e, "new_string"))...)
 		}
 		return textStyle.Render(rel) + "\n" + renderDiff(all, fp, width, 14)
@@ -1644,6 +1705,7 @@ const helpText = `commands
   /image <path>       attach an image (ctrl+f; ctrl+v pastes one; or drag a file in)
   /notifications [m]  desktop notifications: auto, osc, bell, off
   /icons [set]        icon set: nerd (Nerd Font) or unicode
+  /diff [layout]      diffs: auto, split (side by side) or unified
   /session            show session id and cwd
   /quit               exit
   other /commands are passed through to Claude Code
