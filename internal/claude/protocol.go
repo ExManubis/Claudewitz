@@ -41,6 +41,14 @@ type ContentBlock struct {
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
+	Source    *ImageSource    `json:"source,omitempty"` // image blocks
+}
+
+// ImageSource is the payload of an image block.
+type ImageSource struct {
+	Type      string `json:"type"` // "base64"
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 // Usage is token accounting for a message or a whole turn.

@@ -809,6 +809,7 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool) {
 	// Images in replayed user messages: the transcript keeps no file names.
 	var images []string
+	var pics []*picture
 	hasText := false
 	for _, b := range blocks {
 		switch b.Type {
@@ -818,8 +819,11 @@ func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool
 			hasText = true
 		}
 	}
+	if !live && role == "user" {
+		pics = imagePictures(blocks)
+	}
 	if !live && role == "user" && len(images) > 0 && !hasText {
-		m.chat.add(&entry{kind: kindUser, images: images})
+		m.chat.add(&entry{kind: kindUser, images: images, pics: pics})
 	}
 	for _, b := range blocks {
 		switch b.Type {
@@ -830,8 +834,8 @@ func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool
 			if role == "user" && strings.HasPrefix(b.Text, "[Request interrupted") {
 				m.chat.info("interrupted")
 			} else if role == "user" {
-				m.chat.add(&entry{kind: kindUser, text: b.Text, images: images})
-				images = nil
+				m.chat.add(&entry{kind: kindUser, text: b.Text, images: images, pics: pics})
+				images, pics = nil, nil
 			} else if strings.TrimSpace(b.Text) != "" {
 				m.chat.add(&entry{kind: kindAssistant, text: b.Text})
 			}
@@ -845,6 +849,7 @@ func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool
 			m.track.toolResult(b.ToolUseID, out, b.IsError)
 			if t, ok := m.chat.byToolID[b.ToolUseID]; ok {
 				t.toolOutput = out
+				t.pics = toolResultPictures(b.Content)
 				t.toolStatus = toolOK
 				if b.IsError {
 					t.toolStatus = toolFailed
@@ -1127,18 +1132,20 @@ func (m *Model) submit(text string) tea.Cmd {
 		return nil
 	}
 	var names []string
+	var pics []*picture
 	for _, a := range m.attachments {
 		names = append(names, a.name)
+		pics = append(pics, newPicture(a.name, a.data))
 	}
 	m.attachments = nil
 	if m.busy {
 		// The CLI holds it until the turn ends; it joins the transcript when
 		// the CLI acknowledges it (see takeQueued).
-		m.queued = append(m.queued, queuedMsg{text: text, images: names})
+		m.queued = append(m.queued, queuedMsg{text: text, images: names, pics: pics})
 		m.layout()
 		return nil
 	}
-	m.chat.add(&entry{kind: kindUser, text: text, images: names})
+	m.chat.add(&entry{kind: kindUser, text: text, images: names, pics: pics})
 	if !m.busy {
 		m.busy = true
 		m.turnFrom = time.Now()
@@ -1152,6 +1159,7 @@ func (m *Model) submit(text string) tea.Cmd {
 type queuedMsg struct {
 	text   string
 	images []string
+	pics   []*picture
 }
 
 // takeQueued moves queued messages into the transcript once the CLI
@@ -1160,7 +1168,7 @@ func (m *Model) takeQueued(replay string) {
 	kept := m.queued[:0]
 	for _, q := range m.queued {
 		if strings.Contains(replay, q.text) { // image-only messages have no text to match
-			m.chat.add(&entry{kind: kindUser, text: q.text, images: q.images})
+			m.chat.add(&entry{kind: kindUser, text: q.text, images: q.images, pics: q.pics})
 		} else {
 			kept = append(kept, q)
 		}

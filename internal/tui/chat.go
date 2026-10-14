@@ -50,6 +50,7 @@ type entry struct {
 	feedback   string      // ExitPlanMode: why the plan was sent back
 	planText   string      // ExitPlanMode: plan as read from its file
 	images     []string    // user messages: names of attached images
+	pics       []*picture  // images to draw: attached, or returned by a tool
 
 	// thinking: when the block started streaming, and how long it took
 	// once it stopped (zero while running, and for replayed history)
@@ -222,15 +223,21 @@ func (c *chat) renderEntry(e *entry, width int) string {
 	switch e.kind {
 	case kindUser:
 		body := textStyle.Render(e.text)
-		if len(e.images) > 0 {
+		var imgs string
+		if len(e.pics) > 0 {
+			imgs = picturesView(e.pics, width-4, c.open(e)) // inside the bar and its padding
+		} else if len(e.images) > 0 {
 			var chips []string
 			for _, name := range e.images {
 				chips = append(chips, lipgloss.NewStyle().Foreground(currentTheme().user).Render(icons.image+" ")+mutedStyle.Render(name))
 			}
+			imgs = strings.Join(chips, "  ")
+		}
+		if imgs != "" {
 			if strings.TrimSpace(e.text) == "" {
-				body = strings.Join(chips, "  ")
+				body = imgs
 			} else {
-				body += "\n" + strings.Join(chips, "  ")
+				body += "\n" + imgs
 			}
 		}
 		return userBlock.Width(width - 2).Render(body)
@@ -354,6 +361,13 @@ func (c *chat) toolBody(e *entry, width int) string {
 	}
 	if e.toolStatus == toolPending {
 		return ""
+	}
+	if len(e.pics) > 0 {
+		label := "⎿ image"
+		if len(e.pics) > 1 {
+			label = fmt.Sprintf("⎿ %d images", len(e.pics))
+		}
+		return mutedStyle.Render(label) + "\n" + picturesView(e.pics, width, c.open(e))
 	}
 	fp := filePathOf(e.toolInput)
 	switch e.toolName {
