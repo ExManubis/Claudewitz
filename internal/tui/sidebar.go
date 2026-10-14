@@ -345,7 +345,15 @@ func truncateLeft(s string, w int) string {
 
 // sidebarView renders the right-hand panel.
 func (m Model) sidebarView(height int) string {
-	w := sidebarWidth - 3 // border + padding
+	lines, _ := m.sidebarLines(height)
+	return sidebarStyle.Width(sidebarWidth - 1).Height(height).Render(strings.Join(lines, "\n"))
+}
+
+// sidebarLines lays out the sidebar's rows, and which rows show a changed
+// file (by path in the repository), for clicks.
+func (m Model) sidebarLines(height int) ([]string, map[int]string) {
+	w := sidebarWidth - 3      // border + padding
+	var fileSec map[int]string // index in sec -> path
 	t := m.track
 	var sec []string
 
@@ -436,10 +444,17 @@ func (m Model) sidebarView(height int) string {
 	// Git state and working-tree changes; outside a repository, fall back
 	// to the files Claude edited.
 	if m.git.IsRepo {
-		sec = append(sec, m.gitSection(w)...)
+		gs, rows := m.gitSection(w)
+		fileSec = map[int]string{}
+		for i, p := range rows {
+			fileSec[len(sec)+i] = p
+		}
+		sec = append(sec, gs...)
 	} else if len(t.files) > 0 {
-		sec = append(sec, sectionTitle.Render("Modified files")+mutedStyle.Render(fmt.Sprintf(" %d", len(t.files))))
+		sec = append(sec, sectionTitle.Render("Modified files")+mutedStyle.Render(fmt.Sprintf(" %d", len(t.files)))+mutedStyle.Faint(true).Render(" · ctrl+s"))
+		fileSec = map[int]string{}
 		for _, f := range t.files {
+			fileSec[len(sec)] = f.path
 			stats := ""
 			if f.added > 0 {
 				stats += okStyle.Render(fmt.Sprintf("+%d", f.added))
@@ -467,6 +482,14 @@ func (m Model) sidebarView(height int) string {
 		sec = append(sec, "", mutedStyle.Render("Todos, sub-agents and edited"), mutedStyle.Render("files will show up here."))
 	}
 
+	files := map[int]string{}
+	line := 0
+	for i, s := range sec {
+		if p, ok := fileSec[i]; ok {
+			files[line] = p
+		}
+		line += lipgloss.Height(s)
+	}
 	body := lipgloss.JoinVertical(lipgloss.Left, sec...)
 	lines := strings.Split(body, "\n")
 	// The spark indicator and its caption are pinned to the bottom, with
@@ -485,7 +508,35 @@ func (m Model) sidebarView(height int) string {
 	if len(lines) > height {
 		lines = lines[:height]
 	}
-	return sidebarStyle.Width(sidebarWidth - 1).Height(height).Render(strings.Join(lines, "\n"))
+	for l := range files {
+		if l >= len(lines) || (m.sparks != nil && sparkRows(height) > 0 && l >= height-sparkRows(height)-3) {
+			delete(files, l) // cut off, or under the mascot
+		}
+	}
+	return lines, files
+}
+
+// sidebarFileAt is the changed file shown at a screen cell in the sidebar,
+// docked or open as a drawer.
+func (m Model) sidebarFileAt(x, y int) (string, bool) {
+	var top, height int
+	switch {
+	case m.showSidebar():
+		top, height = 0, m.height-1
+	case m.showDrawer():
+		if m.showHeader() {
+			top = 1
+		}
+		height = m.height - 1 - top
+	default:
+		return "", false
+	}
+	if x < m.width-sidebarWidth+1 || y < top || y >= top+height {
+		return "", false
+	}
+	_, files := m.sidebarLines(height)
+	p, ok := files[y-top]
+	return p, ok
 }
 
 func (m Model) agentCard(a *agentState, w int) string {

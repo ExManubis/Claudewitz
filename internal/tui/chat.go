@@ -50,6 +50,8 @@ type entry struct {
 	feedback   string      // ExitPlanMode: why the plan was sent back
 	planText   string      // ExitPlanMode: plan as read from its file
 	images     []string    // user messages: names of attached images
+	pics       []*picture  // images to draw: attached, or returned by a tool
+	diff       []diffLine  // Edit, MultiEdit, Write: placed in the file (see editDiff)
 
 	// thinking: when the block started streaming, and how long it took
 	// once it stopped (zero while running, and for replayed history)
@@ -58,6 +60,11 @@ type entry struct {
 
 	expanded bool // opened individually from the focused chat
 
+	// streamed replies and thinking: text is revealed at a steady pace,
+	// shown bytes at a time (see reveal.go)
+	paced bool
+	shown int
+
 	// render cache
 	rendered string
 	width    int
@@ -65,7 +72,12 @@ type entry struct {
 	md       streamMD // assistant and thinking Markdown
 }
 
-func (e *entry) setText(s string) { e.text = s; e.dirty = true }
+// setText replaces an entry's text. Paced entries redraw as the reveal
+// catches up rather than on every change.
+func (e *entry) setText(s string) {
+	e.text = s
+	e.dirty = e.dirty || !e.paced
+}
 
 // open reports whether an entry shows in full: everything is open with
 // ctrl+o, or one entry at a time with space in the focused chat.
@@ -212,23 +224,29 @@ func (c *chat) renderEntry(e *entry, width int) string {
 	switch e.kind {
 	case kindUser:
 		body := textStyle.Render(e.text)
-		if len(e.images) > 0 {
+		var imgs string
+		if len(e.pics) > 0 {
+			imgs = picturesView(e.pics, width-4, c.open(e)) // inside the bar and its padding
+		} else if len(e.images) > 0 {
 			var chips []string
 			for _, name := range e.images {
 				chips = append(chips, lipgloss.NewStyle().Foreground(currentTheme().user).Render(icons.image+" ")+mutedStyle.Render(name))
 			}
+			imgs = strings.Join(chips, "  ")
+		}
+		if imgs != "" {
 			if strings.TrimSpace(e.text) == "" {
-				body = strings.Join(chips, "  ")
+				body = imgs
 			} else {
-				body += "\n" + strings.Join(chips, "  ")
+				body += "\n" + imgs
 			}
 		}
 		return userBlock.Width(width - 2).Render(body)
 	case kindAssistant:
-		body := e.text
+		body := e.visibleText()
 		w := min(width-2, maxProseWidth)
 		if r := c.renderer(w); r != nil {
-			if out, err := e.md.render(e.text, w, r); err == nil {
+			if out, err := e.md.render(body, w, r); err == nil {
 				body = strings.Trim(out, "\n")
 			}
 		}
@@ -256,7 +274,7 @@ func (c *chat) renderThinking(e *entry, width int) string {
 	if e.thought >= time.Second {
 		footer = "  " + thinkingStyle.Render("∴ Thought for "+shortSecs(e.thought))
 	}
-	t := strings.TrimSpace(e.text)
+	t := strings.TrimSpace(e.visibleText())
 	if t == "" {
 		if footer != "" {
 			return footer
@@ -345,27 +363,38 @@ func (c *chat) toolBody(e *entry, width int) string {
 	if e.toolStatus == toolPending {
 		return ""
 	}
-	fp := filePathOf(e.toolInput)
-	switch e.toolName {
-	case "Edit":
-		d := computeDiff(str(in, "old_string"), str(in, "new_string"))
-		a, r := diffStats(d)
-		return mutedStyle.Render(fmt.Sprintf("⎿ %s %s", okStyle.Render(fmt.Sprintf("+%d", a)), errStyle.Render(fmt.Sprintf("-%d", r)))) + "\n" + renderDiff(d, fp, width, maxLines)
-	case "MultiEdit":
-		var all []diffLine
-		edits, _ := in["edits"].([]any)
-		for i, ed := range edits {
-			m, _ := ed.(map[string]any)
-			if i > 0 {
-				all = append(all, diffLine{kind: '@', text: "⋯"})
-			}
-			all = append(all, computeDiff(str(m, "old_string"), str(m, "new_string"))...)
+	if len(e.pics) > 0 {
+		label := "⎿ image"
+		if len(e.pics) > 1 {
+			label = fmt.Sprintf("⎿ %d images", len(e.pics))
 		}
-		a, r := diffStats(all)
-		return mutedStyle.Render(fmt.Sprintf("⎿ %d edits %s %s", len(edits), okStyle.Render(fmt.Sprintf("+%d", a)), errStyle.Render(fmt.Sprintf("-%d", r)))) + "\n" + renderDiff(all, fp, width, maxLines)
-	case "Write":
-		d := addedLines(str(in, "content"))
-		return mutedStyle.Render(fmt.Sprintf("⎿ wrote %d lines", len(d))) + "\n" + renderDiff(d, fp, width, min(maxLines, 6))
+		return mutedStyle.Render(label) + "\n" + picturesView(e.pics, width, c.open(e))
+	}
+	fp := filePathOf(e.toolInput)
+	if isDiffTool(e.toolName) {
+		d := e.diff
+		if d == nil {
+			d, _ = editDiff(e.toolName, e.toolInput, false)
+		}
+		a, r := diffStats(d)
+		stats := okStyle.Render(fmt.Sprintf("+%d", a)) + " " + errStyle.Render(fmt.Sprintf("-%d", r))
+		var head string
+		switch e.toolName {
+		case "MultiEdit":
+			edits, _ := in["edits"].([]any)
+			head = fmt.Sprintf("⎿ %d edits %s", len(edits), stats)
+		case "Write":
+			lim := min(maxLines, 6)
+			if c.open(e) {
+				lim = maxLines
+			}
+			return mutedStyle.Render(fmt.Sprintf("⎿ wrote %d lines ", strings.Count(strings.TrimRight(str(in, "content"), "\n"), "\n")+1)) + stats + "\n" + renderDiff(d, fp, width, lim)
+		default:
+			head = "⎿ " + stats
+		}
+		return mutedStyle.Render(head) + "\n" + renderDiff(d, fp, width, maxLines)
+	}
+	switch e.toolName {
 	case "Read":
 		n := strings.Count(strings.TrimRight(e.toolOutput, "\n"), "\n") + 1
 		return mutedStyle.Render(fmt.Sprintf("⎿ read %d lines", n))

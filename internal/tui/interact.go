@@ -35,12 +35,14 @@ func newFreeText(placeholder string) textinput.Model {
 // is a question or a plan. Malformed input falls back to the plain
 // permission prompt.
 func (m *Model) startInteraction() {
-	m.question, m.plan = nil, nil
+	m.question, m.plan, m.editPanel = nil, nil, nil
 	if len(m.pending) == 0 {
 		return
 	}
 	p := m.pending[0]
 	switch p.ToolName {
+	case "Edit", "MultiEdit", "Write":
+		m.editPanel = newEditPanel(p)
 	case toolAskUser:
 		qs, err := claude.ParseQuestions(p.Input)
 		if err != nil || len(qs) == 0 {

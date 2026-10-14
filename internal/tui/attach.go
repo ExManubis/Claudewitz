@@ -106,8 +106,7 @@ func newAttachment(name string, data []byte) (attachment, error) {
 	return attachment{}, fmt.Errorf("%s is too large to send even after resizing", name)
 }
 
-// shrink scales img so its long edge is at most edge pixels, averaging
-// the source pixels under each destination pixel (a box filter).
+// shrink scales img so its long edge is at most edge pixels.
 func shrink(img image.Image, edge int) image.Image {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -118,7 +117,16 @@ func shrink(img image.Image, edge int) image.Image {
 	if h > w {
 		nw, nh = w*edge/h, edge
 	}
-	dst := image.NewRGBA(image.Rect(0, 0, max(1, nw), max(1, nh)))
+	return resample(img, nw, nh)
+}
+
+// resample scales img to nw×nh, averaging the source pixels under each
+// destination pixel (a box filter).
+func resample(img image.Image, nw, nh int) *image.RGBA {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	nw, nh = max(1, nw), max(1, nh)
+	dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
 	for y := 0; y < nh; y++ {
 		y0, y1 := b.Min.Y+y*h/nh, b.Min.Y+max((y+1)*h/nh, y*h/nh+1)
 		for x := 0; x < nw; x++ {

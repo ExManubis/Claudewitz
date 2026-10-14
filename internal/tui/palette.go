@@ -127,6 +127,10 @@ func (m *Model) actions() []action {
 		add("Mode", pm, modeDesc[pm], cur, func(m *Model) tea.Cmd { return m.setPermissionMode(pm) })
 	}
 
+	add("Git", "Review changes…", "changed files as diffs against HEAD", "ctrl+s", func(m *Model) tea.Cmd {
+		return m.openChanges("")
+	})
+
 	add("Theme", "Choose theme…", "browse themes with a live preview", "/theme", func(m *Model) tea.Cmd {
 		m.openThemePicker()
 		return nil

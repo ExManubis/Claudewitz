@@ -87,7 +87,10 @@ on macOS; they're moved over automatically the first time you start a new versio
 ## Features
 
 **Chat**
-- Streaming responses with Markdown rendering, plus thinking blocks
+- Streaming responses with Markdown rendering, plus thinking blocks. Streamed text is revealed at
+  a steady pace that speeds up as it falls behind, so replies flow instead of arriving in bursts
+- Images inline: ones you attach, and ones tools return (Read on a screenshot, browser tools),
+  drawn in colour with half blocks; `space` on a selected message or `ctrl+o` shows them larger
 - Tool calls inline with status and collapsible output (`ctrl+o`)
 - Edits and writes shown as syntax-highlighted diffs with line numbers, side by side (old on the
   left, new on the right) when there's room for it. `/diff auto|split|unified` picks the layout,
@@ -99,7 +102,9 @@ on macOS; they're moved over automatically the first time you start a new versio
 **Transcript navigation** (`tab` to focus the chat, `tab`/`esc` to go back)
 - `j`/`k` or arrows select messages and tool calls; `g`/`G` jump to the top or bottom; `d`/`u`
   and `f`/`b` page the view and carry the selection
-- `space`/`enter` expands or collapses just the selected item (`ctrl+o` still toggles them all)
+- `space` expands or collapses just the selected item (`ctrl+o` still toggles them all); `enter`
+  does the same, except on an Edit, MultiEdit or Write, where it opens the whole diff in the
+  centred panel, read-only (`j`/`k` scroll, `t` layout, `esc` closes)
 - `y` copies the selected item's source (Markdown, command and output, file contents) via OSC 52
 - Click an entry to select it, click again to expand it; start typing to return to the input
 - Drag across the transcript to select text; releasing copies it (OSC 52). Dragging past the top
@@ -139,7 +144,8 @@ config.
   tool calls, also mirrored under the `Agent` call in the chat
 - Git: branch, ahead/behind upstream, staged/changed/new counts and the last commit
 - Changes: the working tree's changed files with status letters and +/- counts, ✻ marking
-  files Claude edited this session (outside a repository: the files Claude edited)
+  files Claude edited this session (outside a repository: the files Claude edited). Click one to
+  open it in the changes viewer, in either case
 - The mascot, pinned to the bottom (about a quarter of the sidebar, hidden when it's under 20
   rows): a 3D bean in headphones, ray-marched and dithered into Braille dots, bopping to a beat
   with music notes drifting up. While Claude works it dissolves into a swirl of sparks (faster
@@ -147,6 +153,17 @@ config.
   the bean with a flash. When a prompt waits for you it stops, faces you wide-eyed and its
   headphones pulse amber. It holds still while the terminal isn't focused. The caption under it
   shows the activity and elapsed time
+
+**Changes viewer** (`ctrl+s`, `/changes`, the palette, or a click on a file in the sidebar)
+- The changed files beside the selected one's diff against HEAD, staged and unstaged together,
+  with the same highlighted, side-by-side-when-wide diffs as the chat. New files show in full
+- `j`/`k`, `d`/`u`, `f`/`b`, `g`/`G` and the wheel scroll; `tab`/`shift+tab` (or `[`/`]`) switch
+  files; `t` flips split/unified; `e` opens the file in `$VISUAL`/`$EDITOR`; `esc` closes
+- Follows the sidebar's git polling, so the diff updates while Claude works
+- Outside a git repository it lists the files Claude edited this session instead (click one under
+  Modified files in the sidebar), each with the diffs of those edits
+- It's the same centred panel as edit approvals and transcript diffs: every diff in claudewitz
+  opens in one place and looks the same
 
 **Sessions** (`ctrl+r` or `/resume`)
 - Browse sessions for this project or all projects (`tab`), filter as you type
@@ -159,8 +176,12 @@ config.
 
 **Permissions**
 - Allow once, always allow a tool for the session, deny, or deny and stop
-- Edit/Write requests preview the diff (`t` switches between side-by-side and unified); sub-agent
-  requests name the agent asking
+- Edit, MultiEdit and Write requests open a centred panel with the whole diff: placed at the
+  file's real line numbers with a header per hunk, and a Write over an existing file diffs
+  against it. Scroll with `j`/`k`, `d`/`u` or the wheel, `t` switches between side-by-side and
+  unified, and answer with the buttons (`←→` and `enter`, or a click) or `y`/`a`/`n`/`ctrl+c`.
+  Whether Claude asks at all follows its permission mode: in accept-edits mode edits just happen
+- Other requests show above the input; sub-agent requests name the agent asking
 - Permission modes: `shift+tab` cycles default → accept edits → plan
 
 **Questions and plan approval**

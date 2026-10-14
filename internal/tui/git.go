@@ -122,8 +122,9 @@ func gitCodeStyle(c byte) lipgloss.Style {
 	return warnStyle
 }
 
-// gitSection renders the sidebar's Git and Changes blocks.
-func (m Model) gitSection(w int) []string {
+// gitSection renders the sidebar's Git and Changes blocks, and which of
+// the returned rows show which changed file (by path in the repository).
+func (m Model) gitSection(w int) ([]string, map[int]string) {
 	st := m.git
 	var sec []string
 
@@ -172,9 +173,10 @@ func (m Model) gitSection(w int) []string {
 	}
 
 	if len(st.Files) == 0 {
-		return sec
+		return sec, nil
 	}
-	sec = append(sec, sectionTitle.Render("Changes")+mutedStyle.Render(fmt.Sprintf(" %d", len(st.Files))))
+	sec = append(sec, sectionTitle.Render("Changes")+mutedStyle.Render(fmt.Sprintf(" %d", len(st.Files)))+mutedStyle.Faint(true).Render(" · ctrl+s"))
+	rows := map[int]string{}
 	cwd := m.cwd()
 	for i, f := range st.Files {
 		if i == gitMaxFiles {
@@ -208,7 +210,8 @@ func (m Model) gitSection(w int) []string {
 		nameW := w - lipgloss.Width(prefix) - lipgloss.Width(stats) - 1
 		name := truncateLeft(relPath(abs, cwd), max(4, nameW))
 		gap := w - lipgloss.Width(prefix) - lipgloss.Width(name) - lipgloss.Width(stats)
+		rows[len(sec)] = f.Path
 		sec = append(sec, prefix+textStyle.Render(name)+strings.Repeat(" ", max(1, gap))+stats)
 	}
-	return sec
+	return sec, rows
 }

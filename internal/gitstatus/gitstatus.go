@@ -4,6 +4,7 @@ package gitstatus
 import (
 	"bufio"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strconv"
@@ -210,4 +211,36 @@ func applyNumstat(out string, st *Status) {
 		st.Files[i].Added, _ = strconv.Atoi(f[0])
 		st.Files[i].Removed, _ = strconv.Atoi(f[1])
 	}
+}
+
+// Diff returns the unified diff of one changed file against HEAD, staged
+// and unstaged changes together (against the index before the first
+// commit). Untracked files diff against nothing, so every line is added.
+// Binary files yield git's one-line "Binary files … differ" with no hunks.
+func Diff(ctx context.Context, root string, f File) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	args := []string{"diff", "--no-color", "--no-ext-diff", "-M"}
+	switch {
+	case f.Untracked():
+		args = append(args, "--no-index", "--", os.DevNull, f.Path)
+	default:
+		if _, err := git(ctx, root, "rev-parse", "--verify", "-q", "HEAD"); err == nil {
+			args = append(args, "HEAD")
+		} else {
+			args = append(args, "--cached") // no commits yet
+		}
+		args = append(args, "--")
+		if f.Orig != "" {
+			args = append(args, f.Orig)
+		}
+		args = append(args, f.Path)
+	}
+	out, err := git(ctx, root, args...)
+	// --no-index exits 1 when the files differ, which they always do here.
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 && out != "" {
+		err = nil
+	}
+	return out, err
 }

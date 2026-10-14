@@ -44,6 +44,9 @@ func TestThinkingWithTextIsShown(t *testing.T) {
 	if n := len(m.chat.entries); n != 1 {
 		t.Fatalf("got %d entries, want 1", n)
 	}
+	for m.chat.revealing() {
+		m.chat.reveal(1)
+	}
 	if v := ansi.Strip(m.chat.View(80)); !strings.Contains(v, "Let me look at chat.go") || strings.Contains(v, "Thinking…") {
 		t.Errorf("view = %q", v)
 	}

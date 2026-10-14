@@ -37,6 +37,7 @@ type Model struct {
 	palette   *palette
 	modelPick *modelPicker
 	themePick *themePicker
+	changes   *changesView // the changes viewer, when open
 	cfg       config.Config
 
 	hist   *history
@@ -91,6 +92,10 @@ type Model struct {
 	animID    int // generation of the running shimmer tick loop
 	animating bool
 
+	revealTicking bool // the streamed-text reveal loop is running
+	revealID      int
+	revealLast    time.Time
+
 	// session state
 	init         *claude.InitEvent
 	initResp     *claude.InitializeResponse
@@ -108,6 +113,8 @@ type Model struct {
 	alwaysAllow map[string]bool
 	question    *questionState // AskUserQuestion at the head of pending
 	plan        *planState     // ExitPlanMode at the head of pending
+	editPanel   *editPanel     // Edit, MultiEdit or Write at the head of pending
+	diffView    *editPanel     // a transcript edit's diff, opened read-only
 }
 
 const inputPlaceholder = "Ask Claude anything…  / for commands · @ to mention files"
@@ -275,6 +282,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.handleEvent(msg.ev))
 		if touchesTree(msg.ev) {
 			cmds = append(cmds, m.refreshGit())
+			if m.changes != nil && m.changes.session {
+				cmds = append(cmds, m.refreshChanges())
+			}
 		}
 		if m.proc != nil && !msg.ev.Exited {
 			cmds = append(cmds, waitEvent(m.proc))
@@ -293,7 +303,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.files = msg
 
 	case gitStatusMsg:
-		return m, m.applyGit(msg)
+		cmd := m.applyGit(msg)
+		return m, tea.Batch(cmd, m.refreshChanges())
+
+	case changeDiffMsg:
+		m.applyChangeDiff(msg)
+
+	case changeEditedMsg:
+		if msg.err != nil {
+			return m, tea.Batch(m.notify(toastError, "Editor exited with an error", msg.err.Error()), m.refreshGit())
+		}
+		return m, m.refreshGit()
 
 	case historyLoadedMsg:
 		if msg.project == m.hist.project {
@@ -345,6 +365,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sparkTickMsg:
 		return m, m.onSparkTick(msg)
 
+	case revealTickMsg:
+		return m, m.onRevealTick(msg)
+
 	case toastTickMsg:
 		if msg.id != m.toastID {
 			return m, nil
@@ -367,7 +390,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, animTick(m.animID)
 
 	case tea.MouseMsg:
-		if m.showDrawer() && msg.Action == tea.MouseActionPress && msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+		overlaid := m.picker != nil || m.palette != nil || m.modelPick != nil || m.themePick != nil || m.showHelp
+		var path string // a changed file clicked in the sidebar
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.changes == nil && !overlaid {
+			path, _ = m.sidebarFileAt(msg.X, msg.Y)
+		}
+		if m.changes != nil {
+			cmds = append(cmds, m.handleChangesMouse(msg))
+		} else if (m.diffView != nil || m.editPanel != nil && len(m.pending) > 0) && !overlaid {
+			cmds = append(cmds, m.handlePanelMouse(msg))
+		} else if path != "" {
+			cmds = append(cmds, m.openChanges(path))
+		} else if m.showDrawer() && msg.Action == tea.MouseActionPress && msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
 			// A click closes the drawer rather than landing on the chat under it.
 			m.drawer = false
 		} else if m.picker == nil && m.palette == nil && m.modelPick == nil && m.themePick == nil && !m.showHelp {
@@ -384,6 +418,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHelp = false
 			}
 			return m, nil
+		}
+		if m.changes != nil {
+			return m, m.handleChangesKey(msg)
+		}
+		if m.diffView != nil {
+			return m, m.handleDiffViewKey(msg)
 		}
 		if m.themePick != nil {
 			return m, m.handleThemePickerKey(msg)
@@ -513,6 +553,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+t":
 			m.openModelPicker()
 			return m, nil
+		case "ctrl+s":
+			return m, m.openChanges("")
 		case "ctrl+g":
 			m.showHelp = true
 			return m, nil
@@ -616,7 +658,7 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 
 	case ev.Stream != nil:
 		m.handleStream(ev.Stream)
-		return m.markBusy()
+		return tea.Batch(m.markBusy(), m.startReveal())
 
 	case ev.Message != nil:
 		if ev.Message.ParentToolUseID != nil {
@@ -698,6 +740,7 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 			return nil
 		}
 		m.pending = append(m.pending, p)
+		m.diffView = nil // the request needs the panel
 		if len(m.pending) == 1 {
 			m.startInteraction()
 		}
@@ -754,13 +797,13 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 		switch e.ContentBlock.Type {
 		case "text":
 			m.activity = "Writing"
-			m.chat.streaming[e.Index] = m.chat.add(&entry{kind: kindAssistant, text: e.ContentBlock.Text})
+			m.chat.streaming[e.Index] = m.chat.add(&entry{kind: kindAssistant, text: e.ContentBlock.Text, paced: true})
 		case "thinking":
 			m.activity = "Thinking"
 			// Joins the transcript with its first text: models that keep
 			// their thinking hidden send none, and the activity line
 			// already says Claude is thinking.
-			th := &entry{kind: kindThinking, text: e.ContentBlock.Thinking, thinkStart: time.Now()}
+			th := &entry{kind: kindThinking, text: e.ContentBlock.Thinking, thinkStart: time.Now(), paced: true}
 			if th.text != "" {
 				m.chat.add(th)
 			}
@@ -802,6 +845,7 @@ func (m *Model) handleStream(s *claude.StreamEvent) {
 func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool) {
 	// Images in replayed user messages: the transcript keeps no file names.
 	var images []string
+	var pics []*picture
 	hasText := false
 	for _, b := range blocks {
 		switch b.Type {
@@ -811,8 +855,11 @@ func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool
 			hasText = true
 		}
 	}
+	if !live && role == "user" {
+		pics = imagePictures(blocks)
+	}
 	if !live && role == "user" && len(images) > 0 && !hasText {
-		m.chat.add(&entry{kind: kindUser, images: images})
+		m.chat.add(&entry{kind: kindUser, images: images, pics: pics})
 	}
 	for _, b := range blocks {
 		switch b.Type {
@@ -823,14 +870,19 @@ func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool
 			if role == "user" && strings.HasPrefix(b.Text, "[Request interrupted") {
 				m.chat.info("interrupted")
 			} else if role == "user" {
-				m.chat.add(&entry{kind: kindUser, text: b.Text, images: images})
-				images = nil
+				m.chat.add(&entry{kind: kindUser, text: b.Text, images: images, pics: pics})
+				images, pics = nil, nil
 			} else if strings.TrimSpace(b.Text) != "" {
 				m.chat.add(&entry{kind: kindAssistant, text: b.Text})
 			}
 		case "tool_use":
 			if _, seen := m.chat.byToolID[b.ID]; !seen {
-				m.chat.add(&entry{kind: kindTool, toolID: b.ID, toolName: b.Name, toolInput: b.Input})
+				e := m.chat.add(&entry{kind: kindTool, toolID: b.ID, toolName: b.Name, toolInput: b.Input})
+				if isDiffTool(b.Name) {
+					// Live calls are read now, while the file is (usually)
+					// still as it was.
+					e.diff, _ = editDiff(b.Name, b.Input, live)
+				}
 				m.track.toolUse(b)
 			}
 		case "tool_result":
@@ -838,6 +890,7 @@ func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool
 			m.track.toolResult(b.ToolUseID, out, b.IsError)
 			if t, ok := m.chat.byToolID[b.ToolUseID]; ok {
 				t.toolOutput = out
+				t.pics = toolResultPictures(b.Content)
 				t.toolStatus = toolOK
 				if b.IsError {
 					t.toolStatus = toolFailed
@@ -882,6 +935,10 @@ func (m *Model) handlePermissionKey(k tea.KeyMsg) tea.Cmd {
 		return m.handleQuestionKey(k)
 	case m.plan != nil:
 		return m.handlePlanKey(k)
+	case m.editPanel != nil:
+		if cmd, ok := m.handlePanelKey(k); ok {
+			return cmd
+		}
 	}
 	p := m.pending[0]
 	var d *claude.PermissionDecision
@@ -1120,18 +1177,20 @@ func (m *Model) submit(text string) tea.Cmd {
 		return nil
 	}
 	var names []string
+	var pics []*picture
 	for _, a := range m.attachments {
 		names = append(names, a.name)
+		pics = append(pics, newPicture(a.name, a.data))
 	}
 	m.attachments = nil
 	if m.busy {
 		// The CLI holds it until the turn ends; it joins the transcript when
 		// the CLI acknowledges it (see takeQueued).
-		m.queued = append(m.queued, queuedMsg{text: text, images: names})
+		m.queued = append(m.queued, queuedMsg{text: text, images: names, pics: pics})
 		m.layout()
 		return nil
 	}
-	m.chat.add(&entry{kind: kindUser, text: text, images: names})
+	m.chat.add(&entry{kind: kindUser, text: text, images: names, pics: pics})
 	if !m.busy {
 		m.busy = true
 		m.turnFrom = time.Now()
@@ -1145,6 +1204,7 @@ func (m *Model) submit(text string) tea.Cmd {
 type queuedMsg struct {
 	text   string
 	images []string
+	pics   []*picture
 }
 
 // takeQueued moves queued messages into the transcript once the CLI
@@ -1153,7 +1213,7 @@ func (m *Model) takeQueued(replay string) {
 	kept := m.queued[:0]
 	for _, q := range m.queued {
 		if strings.Contains(replay, q.text) { // image-only messages have no text to match
-			m.chat.add(&entry{kind: kindUser, text: q.text, images: q.images})
+			m.chat.add(&entry{kind: kindUser, text: q.text, images: q.images, pics: q.pics})
 		} else {
 			kept = append(kept, q)
 		}
@@ -1265,6 +1325,8 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		return m.setDiffMode(arg), true
 	case "/sidebar":
 		return m.toggleSidebar(), true
+	case "/changes":
+		return m.openChanges(arg), true
 	case "/session":
 		m.chat.info("session %s\ncwd %s", m.sessionID, m.cwd())
 	default:
@@ -1284,7 +1346,7 @@ func (m *Model) restart(o claude.Options) tea.Cmd {
 	m.chat.reset(m.track)
 	m.chat.cwd = opts.CWD
 	m.pending = nil
-	m.question, m.plan = nil, nil
+	m.question, m.plan, m.editPanel, m.diffView = nil, nil, nil, nil
 	m.queued = nil
 	m.setSuggestion("")
 	m.attachments = nil
@@ -1434,6 +1496,12 @@ func (m Model) View() string {
 		screen = center(screen, m.palette.view(m.width), m.width, h)
 	case m.picker != nil:
 		screen = center(screen, m.picker.view(m.width, h), m.width, h)
+	case m.changes != nil:
+		x, y := m.changesPos()
+		screen = overlay(screen, m.changesView(), x, y)
+	case m.diffView != nil || m.editPanel != nil && len(m.pending) > 0:
+		x, y := m.panelPos()
+		screen = overlay(screen, m.panelView(x, y), x, y)
 	}
 	return screen
 }
@@ -1516,6 +1584,8 @@ func (m Model) permissionView() string {
 		return m.questionView(m.mainWidth())
 	case m.plan != nil:
 		return m.planView(m.mainWidth())
+	case m.editPanel != nil:
+		return m.panelWaiting()
 	}
 	p := m.pending[0]
 	w := m.mainWidth() - 6
@@ -1701,6 +1771,7 @@ const helpText = `commands
   /mode <mode>        permission mode: default, acceptEdits, plan
   /theme [name]       colour theme (no name opens the picker); saved to config
   /sidebar            toggle the sidebar
+  /changes            review changed files as diffs (ctrl+s)
   /edit               write the prompt in $EDITOR (ctrl+x)
   /image <path>       attach an image (ctrl+f; ctrl+v pastes one; or drag a file in)
   /notifications [m]  desktop notifications: auto, osc, bell, off
@@ -1715,5 +1786,6 @@ keys
   enter      send               ctrl+j / alt+enter  newline
   esc        interrupt          shift+tab           cycle permission mode
   ctrl+r     sessions           ctrl+b              toggle sidebar
+  ctrl+s     changed files      ctrl+t              model & effort
   ctrl+o     expand output      pgup/pgdown, wheel  scroll
   tab        accept completion  ctrl+c              interrupt / clear / quit`

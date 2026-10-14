@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -92,5 +93,12 @@ func TestReadRealRepo(t *testing.T) {
 	}
 	if b == nil || !b.Untracked() {
 		t.Fatalf("b.txt: %+v", b)
+	}
+
+	if d, err := Diff(context.Background(), st.Root, *a); err != nil || !strings.Contains(d, "@@") || !strings.Contains(d, "+two\n+three") {
+		t.Fatalf("diff a.txt: %v\n%s", err, d)
+	}
+	if d, err := Diff(context.Background(), st.Root, *b); err != nil || !strings.Contains(d, "+new") {
+		t.Fatalf("diff untracked b.txt: %v\n%s", err, d)
 	}
 }
