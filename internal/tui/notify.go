@@ -45,7 +45,7 @@ func notificationSeq(mode, title, body string) string {
 func oscNotification(title, body string) string {
 	clean := func(s string) string {
 		return strings.Map(func(r rune) rune {
-			if r < 0x20 || r == 0x7f || r == ';' {
+			if r < 0x20 || (r >= 0x7f && r <= 0x9f) || r == ';' {
 				return ' '
 			}
 			return r

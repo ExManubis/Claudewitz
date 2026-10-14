@@ -19,6 +19,7 @@ import (
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
 	"github.com/exmanubis/claudewitz/internal/gitstatus"
+	"github.com/exmanubis/claudewitz/internal/safetext"
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
 
@@ -1507,7 +1508,9 @@ func (m Model) View() string {
 		x, y := m.panelPos()
 		screen = overlay(screen, m.panelView(x, y), x, y)
 	}
-	return screen
+	// Strip any control sequence that slipped in with file contents, tool
+	// output or the like; only colours and text attributes get through.
+	return safetext.Screen(screen)
 }
 
 // showHeader is true when the compact brand strip replaces the sidebar.
