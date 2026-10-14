@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/exmanubis/claudewitz/internal/safetext"
 )
 
 var notifyModes = []string{"auto", "osc", "bell", "off"}
@@ -43,14 +45,8 @@ func notificationSeq(mode, title, body string) string {
 // oscNotification picks the escape sequence the terminal understands, with
 // a bell as well so terminals without notification support still alert.
 func oscNotification(title, body string) string {
-	clean := func(s string) string {
-		return strings.Map(func(r rune) rune {
-			if r < 0x20 || (r >= 0x7f && r <= 0x9f) || r == ';' {
-				return ' '
-			}
-			return r
-		}, s)
-	}
+	// ';' separates the sequence's fields, and a ␛ would show literally.
+	clean := func(s string) string { return strings.NewReplacer(";", " ", "␛", " ").Replace(safetext.Line(s)) }
 	title, body = clean(title), clean(body)
 	var seq string
 	switch {
