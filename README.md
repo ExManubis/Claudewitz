@@ -87,7 +87,10 @@ on macOS; they're moved over automatically the first time you start a new versio
 ## Features
 
 **Chat**
-- Streaming responses with Markdown rendering, plus thinking blocks
+- Streaming responses with Markdown rendering, plus thinking blocks. Streamed text is revealed at
+  a steady pace that speeds up as it falls behind, so replies flow instead of arriving in bursts
+- Images inline: ones you attach, and ones tools return (Read on a screenshot, browser tools),
+  drawn in colour with half blocks; `space` on a selected message or `ctrl+o` shows them larger
 - Tool calls inline with status and collapsible output (`ctrl+o`)
 - Edits and writes shown as syntax-highlighted diffs with line numbers, side by side (old on the
   left, new on the right) when there's room for it. `/diff auto|split|unified` picks the layout,
@@ -139,7 +142,8 @@ config.
   tool calls, also mirrored under the `Agent` call in the chat
 - Git: branch, ahead/behind upstream, staged/changed/new counts and the last commit
 - Changes: the working tree's changed files with status letters and +/- counts, ✻ marking
-  files Claude edited this session (outside a repository: the files Claude edited)
+  files Claude edited this session (outside a repository: the files Claude edited). Click one to
+  open it in the changes viewer
 - The mascot, pinned to the bottom (about a quarter of the sidebar, hidden when it's under 20
   rows): a 3D bean in headphones, ray-marched and dithered into Braille dots, bopping to a beat
   with music notes drifting up. While Claude works it dissolves into a swirl of sparks (faster
@@ -147,6 +151,13 @@ config.
   the bean with a flash. When a prompt waits for you it stops, faces you wide-eyed and its
   headphones pulse amber. It holds still while the terminal isn't focused. The caption under it
   shows the activity and elapsed time
+
+**Changes viewer** (`ctrl+s`, `/changes`, the palette, or a click on a file in the sidebar)
+- The changed files beside the selected one's diff against HEAD, staged and unstaged together,
+  with the same highlighted, side-by-side-when-wide diffs as the chat. New files show in full
+- `j`/`k`, `d`/`u`, `f`/`b`, `g`/`G` and the wheel scroll; `tab`/`shift+tab` (or `[`/`]`) switch
+  files; `t` flips split/unified; `e` opens the file in `$VISUAL`/`$EDITOR`; `esc` closes
+- Follows the sidebar's git polling, so the diff updates while Claude works
 
 **Sessions** (`ctrl+r` or `/resume`)
 - Browse sessions for this project or all projects (`tab`), filter as you type

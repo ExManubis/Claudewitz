@@ -28,18 +28,25 @@ func computeDiff(old, new string) []diffLine {
 	if !strings.HasSuffix(new, "\n") {
 		new += "\n"
 	}
-	u := udiff.Unified("a", "b", old, new)
+	return parseUnified(udiff.Unified("a", "b", old, new))
+}
+
+// parseUnified reads a unified diff of one file. Everything before the
+// first hunk (git's diff, index and ---/+++ headers) is skipped.
+func parseUnified(u string) []diffLine {
 	var out []diffLine
 	var o, n int
+	inHunk := false
 	for _, l := range strings.Split(u, "\n") {
 		switch {
-		case strings.HasPrefix(l, "---"), strings.HasPrefix(l, "+++"), l == "":
-			continue
 		case strings.HasPrefix(l, "@@"):
 			o, n = parseHunk(l)
 			if len(out) > 0 {
 				out = append(out, diffLine{kind: '@', text: "⋯"})
 			}
+			inHunk = true
+		case !inHunk, l == "":
+			continue
 		case l[0] == '+':
 			out = append(out, diffLine{kind: '+', text: l[1:], newNo: n})
 			n++

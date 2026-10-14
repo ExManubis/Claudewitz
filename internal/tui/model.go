@@ -37,6 +37,7 @@ type Model struct {
 	palette   *palette
 	modelPick *modelPicker
 	themePick *themePicker
+	changes   *changesView // the changes viewer, when open
 	cfg       config.Config
 
 	hist   *history
@@ -297,7 +298,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.files = msg
 
 	case gitStatusMsg:
-		return m, m.applyGit(msg)
+		cmd := m.applyGit(msg)
+		return m, tea.Batch(cmd, m.refreshChanges())
+
+	case changeDiffMsg:
+		m.applyChangeDiff(msg)
+
+	case changeEditedMsg:
+		if msg.err != nil {
+			return m, tea.Batch(m.notify(toastError, "Editor exited with an error", msg.err.Error()), m.refreshGit())
+		}
+		return m, m.refreshGit()
 
 	case historyLoadedMsg:
 		if msg.project == m.hist.project {
@@ -374,7 +385,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, animTick(m.animID)
 
 	case tea.MouseMsg:
-		if m.showDrawer() && msg.Action == tea.MouseActionPress && msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+		click := msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft
+		if m.changes != nil {
+			cmds = append(cmds, m.handleChangesMouse(msg))
+		} else if path, ok := m.sidebarFileAt(msg.X, msg.Y); ok && click && m.picker == nil && m.palette == nil && m.modelPick == nil && m.themePick == nil && !m.showHelp {
+			cmds = append(cmds, m.openChanges(path))
+		} else if m.showDrawer() && msg.Action == tea.MouseActionPress && msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
 			// A click closes the drawer rather than landing on the chat under it.
 			m.drawer = false
 		} else if m.picker == nil && m.palette == nil && m.modelPick == nil && m.themePick == nil && !m.showHelp {
@@ -391,6 +407,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHelp = false
 			}
 			return m, nil
+		}
+		if m.changes != nil {
+			return m, m.handleChangesKey(msg)
 		}
 		if m.themePick != nil {
 			return m, m.handleThemePickerKey(msg)
@@ -520,6 +539,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+t":
 			m.openModelPicker()
 			return m, nil
+		case "ctrl+s":
+			return m, m.openChanges("")
 		case "ctrl+g":
 			m.showHelp = true
 			return m, nil
@@ -1280,6 +1301,8 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		return m.setDiffMode(arg), true
 	case "/sidebar":
 		return m.toggleSidebar(), true
+	case "/changes":
+		return m.openChanges(arg), true
 	case "/session":
 		m.chat.info("session %s\ncwd %s", m.sessionID, m.cwd())
 	default:
@@ -1449,6 +1472,8 @@ func (m Model) View() string {
 		screen = center(screen, m.palette.view(m.width), m.width, h)
 	case m.picker != nil:
 		screen = center(screen, m.picker.view(m.width, h), m.width, h)
+	case m.changes != nil:
+		screen = overlay(screen, m.changesView(), 0, 0)
 	}
 	return screen
 }
@@ -1716,6 +1741,7 @@ const helpText = `commands
   /mode <mode>        permission mode: default, acceptEdits, plan
   /theme [name]       colour theme (no name opens the picker); saved to config
   /sidebar            toggle the sidebar
+  /changes            review changed files as diffs (ctrl+s)
   /edit               write the prompt in $EDITOR (ctrl+x)
   /image <path>       attach an image (ctrl+f; ctrl+v pastes one; or drag a file in)
   /notifications [m]  desktop notifications: auto, osc, bell, off
@@ -1730,5 +1756,6 @@ keys
   enter      send               ctrl+j / alt+enter  newline
   esc        interrupt          shift+tab           cycle permission mode
   ctrl+r     sessions           ctrl+b              toggle sidebar
+  ctrl+s     changed files      ctrl+t              model & effort
   ctrl+o     expand output      pgup/pgdown, wheel  scroll
   tab        accept completion  ctrl+c              interrupt / clear / quit`

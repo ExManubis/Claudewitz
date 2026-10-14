@@ -30,6 +30,8 @@ func (m Model) helpPairs() [][2]string {
 	switch {
 	case m.showHelp:
 		return [][2]string{{"esc", "close"}}
+	case m.changes != nil:
+		return [][2]string{{"j/k", "scroll"}, {"tab/⇧tab", "file"}, {"d/u", "page"}, {"t", "layout"}, {"e", "edit"}, {"esc", "close"}}
 	case m.themePick != nil:
 		return [][2]string{{"↑↓", "theme"}, {"←→", "appearance"}, {"enter", "save"}, {"esc", "cancel"}}
 	case m.modelPick != nil:
@@ -98,6 +100,7 @@ var helpSections = []struct {
 	{"View", [][2]string{
 		{"ctrl+o", "expand tool output"},
 		{"ctrl+b", "toggle sidebar"},
+		{"ctrl+s", "review changes"},
 		{"pgup/pgdn", "scroll"},
 		{"ctrl+l", "redraw"},
 		{"ctrl+g", "this help"},

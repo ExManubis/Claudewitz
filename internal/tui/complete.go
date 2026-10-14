@@ -43,6 +43,7 @@ var localCommands = []suggestion{
 	{label: "/mode", desc: "permission mode"},
 	{label: "/theme", desc: "switch colour theme"},
 	{label: "/sidebar", desc: "toggle the sidebar"},
+	{label: "/changes", desc: "review changed files as diffs"},
 	{label: "/edit", desc: "write the prompt in $EDITOR"},
 	{label: "/image", desc: "attach an image (ctrl+f)"},
 	{label: "/notifications", desc: "desktop notification mode"},
