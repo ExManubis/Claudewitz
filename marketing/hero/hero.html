@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claudewitz hero</title>
+<style>
+  @font-face { font-family: "JBM"; src: url("fonts/jbm-400.woff2") format("woff2"); font-weight: 400; }
+  @font-face { font-family: "JBM"; src: url("fonts/jbm-600.woff2") format("woff2"); font-weight: 600; }
+  @font-face { font-family: "JBM"; src: url("fonts/jbm-800.woff2") format("woff2"); font-weight: 800; }
+  html, body { margin: 0; background: #141210; }
+  body { display: grid; place-items: center; min-height: 100vh; }
+  canvas { display: block; width: min(100vw, 177.78vh); height: auto; }
+  body.render canvas { width: 1920px; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// The claudewitz hero video, as one deterministic function of time:
+// renderFrame(t) draws frame t (seconds) and nothing carries over between
+// frames, so render.js can step through it frame by frame and the loop is
+// seamless (frame DUR is frame 0).
+//
+// Story: the headphone bean and the CLAUDEWITZ wordmark bop to the beat, burst
+// into a swirl of sparks that build a claudewitz session, which plays out and
+// then gathers back into the logo with a flash.
+//
+// The bean is the same ray-marched scene as internal/tui/bean.go, and the
+// wordmark uses the glyphs from internal/tui/fx.go.
+
+const W = 1920, H = 1080, FPS = 30, DUR = 16;
+
+// ── Palette: the "claude" theme, dark variant ───────────────────────────
+const C = {
+  bg: "#141210", panel: "#1a1715", accent: "#DA7756", second: "#B497FF",
+  muted: "#8C8680", subtle: "#3A3633", text: "#E8E2DC", user: "#7AB8FF",
+  ok: "#7BD88F", err: "#FF7B72", warn: "#F2CC60", addBg: "#16301E", delBg: "#3A1A1C",
+};
+const hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+const mixc = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+const rgb = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const BG = hex(C.bg);
+
+// ── Small maths ─────────────────────────────────────────────────────────
+const { sin, cos, sqrt, hypot, min, max, abs, PI } = Math;
+const clamp = (x, a = 0, b = 1) => min(b, max(a, x));
+const lerp = (a, b, k) => a + (b - a) * k;
+const prog = (t, a, d) => clamp((t - a) / d);
+const ease = x => x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2;
+const easeOut = x => 1 - (1 - x) ** 3;
+const easeBack = x => { const c = 1.9; return 1 + (c + 1) * (x - 1) ** 3 + c * (x - 1) ** 2; };
+function rng(seed) {
+  return () => {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ── The bean (port of internal/tui/bean.go) ─────────────────────────────
+const NONE = -1, BODY = 0, DARK = 1, EYE = 2, PINK = 3, PHONE = 4, GOLD = 5;
+const MAT = [];
+MAT[BODY] = hex(C.accent);
+MAT[PHONE] = hex(C.second);
+MAT[PINK] = mixc(hex(C.err), hex(C.text), 0.4);
+MAT[EYE] = hex(C.text);
+MAT[GOLD] = hex(C.warn);
+
+function sdSphere(x, y, z, cx, cy, cz, r) { return hypot(x - cx, y - cy, z - cz) - r; }
+function sdEll(x, y, z, cx, cy, cz, rx, ry, rz) {
+  return (hypot((x - cx) / rx, (y - cy) / ry, (z - cz) / rz) - 1) * min(rx, ry, rz);
+}
+function sdTorusZ(x, y, z, cx, cy, cz, big, small) {
+  return hypot(hypot(x - cx, y - cy) - big, z - cz) - small;
+}
+function sdCylX(x, y, z, cx, cy, cz, r, h) {
+  const dx = hypot(y - cy, z - cz) - r, dy = abs(x - cx) - h;
+  return min(max(dx, dy), 0) + hypot(max(dx, 0), max(dy, 0));
+}
+function sdCap(x, y, z, ax, ay, az, bx, by, bz, r) {
+  const px = x - ax, py = y - ay, pz = z - az, qx = bx - ax, qy = by - ay, qz = bz - az;
+  const h = clamp((px * qx + py * qy + pz * qz) / (qx * qx + qy * qy + qz * qz));
+  return hypot(px - qx * h, py - qy * h, pz - qz * h) - r;
+}
+
+let sd = 0, sm = NONE; // results of sdf()
+function sdf(ps, x, y, z) {
+  sd = Infinity; sm = NONE;
+  const add = (d, m) => { if (d < sd) { sd = d; sm = m; } };
+  for (const t of ps.notes) {
+    const cx = 1.15 + 0.15 * sin(t * 6), cy = 0.5 - t * 1.6, cz = 0.2;
+    add(sdEll(x, y, z, cx, cy, cz, 0.09, 0.07, 0.06), GOLD);
+    add(sdCap(x, y, z, cx + 0.07, cy, cz, cx + 0.07, cy - 0.25, cz, 0.02), GOLD);
+  }
+  // Bop: rotate about the pivot at the feet.
+  const s = sin(ps.bop), c = cos(ps.bop), px = x, py = y - 1.2;
+  const qx = c * px - s * py, qy = s * px + c * py + 1.2, qz = z;
+
+  add(sdEll(qx, qy, qz, 0, 0.12, 0, 0.88, 1, 0.78), BODY);
+  for (const k of [-1, 1]) {
+    add(sdEll(qx, qy, qz, k * 0.38, 1.1, 0.18, 0.2, 0.14, 0.27), PHONE);
+    add(sdSphere(qx, qy, qz, k * 0.9, 0.35, 0, 0.14), BODY);
+    add(sdCylX(qx, qy, qz, k * 0.92, 0, 0, 0.26, 0.1), PINK);
+    add(sdEll(qx, qy, qz, k * 0.62, 0.25, 0.68, 0.15, 0.08, 0.1), PINK);
+  }
+  add(max(sdTorusZ(qx, qy, qz, 0, -0.05, 0, 1, 0.06), qy), PHONE);
+  const fz = 0.74, ey = -0.05;
+  for (const k of [-1, 1]) {
+    if (ps.happy) {
+      for (let i = 0; i < 5; i++) {
+        const a = -1.1 + 2.2 * i / 4;
+        add(sdSphere(qx, qy, qz, k * 0.34 + sin(a) * 0.13, ey + 0.06 - cos(a) * 0.12, fz - 0.02, 0.04), EYE);
+      }
+    } else {
+      add(sdEll(qx, qy, qz, k * 0.34, ey, fz - 0.06, 0.16, max(0.025, 0.23 * ps.eyeOpen), 0.1), EYE);
+    }
+  }
+  for (let i = 0; i < 5; i++) {
+    const a = -0.8 + 1.6 * i / 4;
+    add(sdSphere(qx, qy, qz, sin(a) * 0.14, ey + 0.34 - cos(a) * 0.06, fz - 0.01, 0.04), EYE);
+  }
+  return sd;
+}
+
+const BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+
+// renderBean ray-marches the scene into a w×h dot grid and returns the dots
+// that are on: [{x, y, col}] in grid units.
+function renderBean(w, h, ps) {
+  const inten = new Float32Array(w * h), mat = new Int8Array(w * h).fill(NONE);
+  const depth = new Float64Array(w * h).fill(Infinity), nrm = new Float64Array(w * h * 3);
+  const top = -1.25, bottom = 1.32, view = (bottom - top) * 1.06, cy0 = (top + bottom) / 2, cam = 7;
+  const sp = sin(ps.pitch), cp = cos(ps.pitch), sy = sin(ps.yaw), cyw = cos(ps.yaw);
+  const rot = (x, y, z) => { // rotX(pitch) then rotY(yaw)
+    const y1 = cp * y + sp * z, z1 = -sp * y + cp * z;
+    return [cyw * x - sy * z1, y1, sy * x + cyw * z1];
+  };
+  const ro = rot(0, 0, cam);
+  let L = rot(-0.45, -0.55, 0.75); const ll = hypot(...L); L = L.map(v => v / ll);
+  const bound = 2, roro = ro[0] * ro[0] + ro[1] * ro[1] + ro[2] * ro[2];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const u = (x + 0.5 - w / 2) / h * view, v = (y + 0.5 - h / 2) / h * view + cy0;
+      let rd = rot(u, v, -cam); const rl = hypot(...rd); rd = rd.map(q => q / rl);
+      const b = ro[0] * rd[0] + ro[1] * rd[1] + ro[2] * rd[2];
+      const disc = b * b - roro + bound * bound;
+      if (disc <= 0) continue;
+      let t = -b - sqrt(disc); const far = -b + sqrt(disc);
+      for (let step = 0; step < 48 && t < far; step++) {
+        const d = sdf(ps, ro[0] + rd[0] * t, ro[1] + rd[1] * t, ro[2] + rd[2] * t);
+        if (d < 0.004) { mat[i] = sm; depth[i] = t; break; }
+        t += d * 0.9;
+      }
+      if (mat[i] === NONE) continue;
+      const px = ro[0] + rd[0] * t, py = ro[1] + rd[1] * t, pz = ro[2] + rd[2] * t, e = 0.004;
+      let nx = sdf(ps, px + e, py, pz) - sdf(ps, px - e, py, pz);
+      let ny = sdf(ps, px, py + e, pz) - sdf(ps, px, py - e, pz);
+      let nz = sdf(ps, px, py, pz + e) - sdf(ps, px, py, pz - e);
+      const nl = hypot(nx, ny, nz) + 1e-12; nx /= nl; ny /= nl; nz /= nl;
+      nrm[i * 3] = nx; nrm[i * 3 + 1] = ny; nrm[i * 3 + 2] = nz;
+      const lam = max(0, nx * L[0] + ny * L[1] + nz * L[2]);
+      const rim = max(0, 1 - abs(nx * rd[0] + ny * rd[1] + nz * rd[2])) ** 3;
+      let inn;
+      switch (mat[i]) {
+        case DARK: inn = 0; break;
+        case EYE: case PINK: inn = 1; break;
+        case GOLD: case PHONE: inn = 0.45 + 0.55 * lam; break;
+        default: inn = 0.12 + 0.7 * lam ** 1.3 + 0.2 * rim;
+      }
+      inten[i] = min(1, inn);
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (mat[i] !== BODY) continue;
+      for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + ox, ny = y + oy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const j = ny * w + nx;
+        const dn = nrm[i * 3] * nrm[j * 3] + nrm[i * 3 + 1] * nrm[j * 3 + 1] + nrm[i * 3 + 2] * nrm[j * 3 + 2];
+        if (depth[j] - depth[i] > 0.12 || (mat[j] !== NONE && dn < 0.6 && depth[j] >= depth[i] - 0.02)) { inten[i] = 1; break; }
+      }
+    }
+  }
+  const dots = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (mat[i] === NONE || !(inten[i] > (BAYER[y % 4][x % 4] / 16 + 1 / 32) * 0.92)) continue;
+      dots.push({ x, y, col: mixc(BG, MAT[mat[i]], 0.45 + 0.55 * inten[i]), mat: mat[i] });
+    }
+  }
+  return dots;
+}
+
+// The bopping loop, periodic in DUR: beat 0.5s, sway 4s, notes 1.6s, blink 2s.
+function heroPose(t) {
+  const beat = sin(t * 2 * PI * 2);
+  const ps = { yaw: 0.42 * sin(t * 2 * PI / 4), pitch: -0.15, bop: 0.12 * beat, eyeOpen: 1.05, happy: beat > 0.6, notes: [] };
+  const bl = ((t % 2) + 2) % 2;
+  if (bl > 1.32 && bl < 1.44) ps.eyeOpen = 0.12;
+  for (let k = 0; k < 2; k++) ps.notes.push((((t / 1.6 + k * 0.5) % 1) + 1) % 1);
+  return ps;
+}
+
+// ── Wordmark (glyphs from internal/tui/fx.go) ───────────────────────────
+const GLYPHS = {
+  C: ["█▀▀", "█  ", "▀▀▀"], L: ["█  ", "█  ", "▀▀▀"], A: ["█▀█", "█▀█", "▀ ▀"],
+  U: ["█ █", "█ █", "▀▀▀"], D: ["█▀▄", "█ █", "▀▀ "], E: ["█▀▀", "█▀▀", "▀▀▀"],
+  W: ["█ █ █", "█ █ █", "▀▀▀▀▀"], I: ["█", "█", "▀"], T: ["▀█▀", " █ ", " ▀ "],
+  Z: ["▀▀█", "▄▀ ", "▀▀▀"],
+};
+// wordPixels returns the half-block pixels of the word and its width.
+function wordPixels(word) {
+  const px = []; let gx = 0;
+  [...word].forEach((ch, i) => {
+    const g = GLYPHS[ch]; if (i > 0) gx++;
+    let width = 0;
+    g.forEach((line, row) => {
+      [...line].forEach((cell, col) => {
+        width = max(width, col + 1);
+        if (cell === "█" || cell === "▀") px.push([gx + col, row * 2]);
+        if (cell === "█" || cell === "▄") px.push([gx + col, row * 2 + 1]);
+      });
+    });
+    gx += width;
+  });
+  return { px, cols: gx };
+}
+const WORD = wordPixels("CLAUDEWITZ");
+const WSCALE = 3; // each pixel becomes 3×3 dots
+
+// ── Lockup layout ───────────────────────────────────────────────────────
+const BW = 72, BH = 64, P = 8.6, DOT_R = P * 0.4;
+const LOCK_W = (BW + 4 + WORD.cols * WSCALE) * P;
+const LX = (W - LOCK_W) / 2, LY = (H - BH * P) / 2 - 10;
+const WX = LX + (BW + 4) * P, WY = LY + BH * P / 2 - 6 * WSCALE * P * 0.8;
+const WORD_W = WORD.cols * WSCALE * P;
+const TAG_Y = WY + 6 * WSCALE * P + 7 * P;
+const BEAN_C = [LX + BW * P / 2, LY + BH * P / 2];
+const A_RGB = hex(C.accent), S_RGB = hex(C.second);
+
+function wordDots() {
+  const out = [];
+  for (const [gx, gy] of WORD.px) {
+    for (let dy = 0; dy < WSCALE; dy++) {
+      for (let dx = 0; dx < WSCALE; dx++) {
+        const x = WX + (gx * WSCALE + dx) * P + P / 2, y = WY + (gy * WSCALE + dy) * P + P / 2;
+        out.push({ x, y, col: mixc(A_RGB, S_RGB, clamp((x - WX) / WORD_W)) });
+      }
+    }
+  }
+  return out;
+}
+const WDOTS = wordDots();
+
+function beanScreenDots(t) {
+  return renderBean(BW, BH, heroPose(t)).map(d => ({ x: LX + d.x * P + P / 2, y: LY + d.y * P + P / 2, col: d.col }));
+}
+
+// ── Timeline (seconds) ──────────────────────────────────────────────────
+const T_DIS = 3.2;          // the logo bursts into sparks
+const T_FLY = 4.6;          // sparks fly out to build the window
+const T_UI = 5.6;           // the session starts (τ = t - T_UI)
+const T_TD = 12.2;          // the window dissolves back into sparks
+const T_G = 13.0;           // sparks spring home
+const T_GE = 14.05;         // everyone's home: the live logo takes over
+const T_TAG = 14.3;         // the tagline types itself back in
+
+// Terminal window, in screen space at camera scale 1.
+const TR = { x: 170, y: 96, w: 1580, h: 888 };
+const camScale = t => lerp(0.965, 1, ease(prog(t, T_FLY, T_TD - T_FLY)));
+const camApply = (x, y, s) => [W / 2 + (x - W / 2) * s, H / 2 + (y - H / 2) * s];
+
+// ── Particles ───────────────────────────────────────────────────────────
+// Each spark is a dot of the logo with a fixed plan: lift into the swirl,
+// fly out to a spot on the window, wait, lift back into the swirl and spring
+// home. Its position is a pure function of t.
+const parts = [];
+function buildParticles() {
+  const r = rng(7);
+  const beanA = beanScreenDots(T_DIS);   // what bursts
+  const beanB = beanScreenDots(T_GE);    // what it lands as
+  const homes = [...beanA.map(d => ({ ...d, kind: 0 })), ...WDOTS.map(d => ({ ...d, kind: 1 }))];
+  const perim = (s, sc) => { // a point on the window's edge, s in [0, 1)
+    const { x, y, w, h } = TR, L = 2 * (w + h); let d = s * L, px, py;
+    if (d < w) { px = x + d; py = y; } else if ((d -= w) < h) { px = x + w; py = y + d; }
+    else if ((d -= h) < w) { px = x + w - d; py = y + h; } else { d -= w; px = x; py = y + h - d; }
+    return camApply(px, py, sc);
+  };
+  const sA = camScale(T_UI), sB = camScale(T_TD);
+  homes.forEach((h, i) => {
+    const onEdge = r() < 0.45;
+    const s = r(), ix = r(), iy = r();
+    const inner = sc => camApply(TR.x + 30 + ix * (TR.w - 60), TR.y + 50 + iy * (TR.h - 80), sc);
+    const dx = h.x - BEAN_C[0], dy = h.y - BEAN_C[1];
+    const g = h.kind === 0 ? beanB[i % beanB.length] : h;
+    const R = 140 + r() ** 0.7 * 560;
+    parts.push({
+      hx: h.x, hy: h.y, col: h.col, kind: h.kind,
+      gx: g.x, gy: g.y, gcol: g.col,
+      t1: onEdge ? perim(s, sA) : inner(sA),
+      t2: onEdge ? perim(s, sB) : inner(sB),
+      edge: onEdge,
+      R, ang: r() * 2 * PI, w: (2.4 + r() * 1.6) * (360 / (R + 120)) * (r() < 0.12 ? -1 : 1),
+      ph: r() * 6.28, z: (r() - 0.5) * 80,
+      // burst from the centre of the bean outwards, wordmark a beat later
+      d1: h.kind === 0 ? clamp(hypot(dx, dy) / 330) * 0.45 + r() * 0.12 : 0.25 + (h.x - WX) / WORD_W * 0.45 + r() * 0.1,
+      d2: r() * 0.55, d3: r() * 0.4, d4: r() * 0.3,
+    });
+  });
+}
+
+function orbit(p, t) {
+  const a = p.ang + p.w * t, r = p.R * (1 + 0.07 * sin(t * 2.3 + p.ph));
+  const x = cos(a) * r, y = sin(a) * r * 0.36 + p.z * 0.3 + sin(t * 1.7 + p.ph) * 14;
+  const tl = -0.22, ct = cos(tl), st = sin(tl);
+  return [W / 2 + x * ct - y * st, H / 2 + x * st + y * ct, sin(a)];
+}
+
+// pstate returns [x, y, alpha, size, colorMix(0 home → 1 gather)] at t.
+function pstate(p, t) {
+  if (t < T_DIS || t >= T_GE) return null;
+  if (t < T_TD) {
+    const u1 = ease(prog(t, T_DIS + p.d1, 0.95));
+    const u2 = ease(prog(t, T_FLY + p.d2, 0.85));
+    let [ox, oy, depth] = orbit(p, t);
+    let x = lerp(p.hx, ox, u1), y = lerp(p.hy, oy, u1);
+    x = lerp(x, p.t1[0], u2); y = lerp(y, p.t1[1], u2);
+    const fade = 1 - prog(t, T_FLY + p.d2 + 0.85, p.edge ? 0.7 : 0.35);
+    const sz = lerp(1, 0.75 + 0.45 * (depth + 1) / 2, u1 * (1 - u2));
+    return [x, y, fade, sz, 0];
+  }
+  const u0 = prog(t, T_TD + p.d3 * 0.5, 0.25);
+  const u3 = ease(prog(t, T_TD + p.d3, 0.75));
+  const u4 = prog(t, T_G + p.d4, 0.75);
+  let [ox, oy, depth] = orbit(p, t);
+  let x = lerp(p.t2[0], ox, u3), y = lerp(p.t2[1], oy, u3);
+  const b = easeBack(u4);
+  x = lerp(x, p.gx, b); y = lerp(y, p.gy, b);
+  const sz = lerp(1, 0.75 + 0.45 * (depth + 1) / 2, u3 * (1 - u4));
+  return [x, y, u0, sz, ease(u4)];
+}
+
+// ── Canvases ────────────────────────────────────────────────────────────
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const glow = document.createElement("canvas"); glow.width = W; glow.height = H;
+const gx = glow.getContext("2d");
+const MONO = '"JBM", "DejaVu Sans Mono", monospace';
+
+function background(t) {
+  const g = ctx.createRadialGradient(W / 2, H * 0.48, 80, W / 2, H / 2, W * 0.75);
+  g.addColorStop(0, "#1d1916"); g.addColorStop(0.55, "#161311"); g.addColorStop(1, "#0d0b0a");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // A faint dot grid that ripples outward on every beat.
+  const beatPh = ((t * 2) % 1 + 1) % 1;
+  const ring = beatPh * 1500;
+  const logoOn = t < T_DIS + 0.6 || t > T_GE - 0.3 ? 1 : 0.35;
+  const pitch = 30;
+  for (let y = pitch / 2; y < H; y += pitch) {
+    for (let x = pitch / 2; x < W; x += pitch) {
+      const d = hypot(x - BEAN_C[0], y - BEAN_C[1]);
+      const wave = Math.exp(-(((d - ring) / 70) ** 2)) * (1 - beatPh) * logoOn;
+      const vig = 1 - clamp(hypot(x - W / 2, y - H / 2) / (W * 0.62));
+      const a = 0.035 + 0.06 * vig + 0.22 * wave * vig;
+      ctx.fillStyle = `rgba(232,226,220,${a})`;
+      ctx.fillRect(x - 1, y - 1, 2, 2);
+    }
+  }
+}
+
+function drawDot(g, x, y, r, col, a) {
+  g.fillStyle = rgb(col, a);
+  g.beginPath(); g.arc(x, y, r, 0, 2 * PI); g.fill();
+}
+
+// The logo at rest: live bean, wordmark with a beat-synced wave, tagline.
+function drawLockup(t, alpha) {
+  if (alpha <= 0) return;
+  for (const d of beanScreenDots(t)) drawDot(gx, d.x, d.y, DOT_R, d.col, alpha);
+  const beatPh = ((t * 2) % 1 + 1) % 1;
+  for (const d of WDOTS) {
+    const k = (d.x - WX) / WORD_W;
+    // a pulse that rolls across the letters on each beat, like a level meter
+    const pulse = Math.exp(-(((beatPh * 1.6 - k) / 0.12) ** 2)) * 0.5;
+    // and a slow light sweep twice a loop
+    const sw = ((t / 8) % 1) * 2.2 - 0.6;
+    const sweep = Math.exp(-(((k - sw) / 0.06) ** 2));
+    const col = mixc(d.col, [255, 244, 236], clamp(pulse * 0.45 + sweep * 0.6));
+    drawDot(gx, d.x, d.y, DOT_R * (1 + pulse * 0.12), col, alpha);
+  }
+}
+
+function drawTagline(t) {
+  const full = "Claude Code, in your terminal";
+  let shown = full, a = 1, cursor = false;
+  if (t >= T_DIS && t < T_TAG) { a = 1 - prog(t, T_DIS, 0.35); }
+  if (t >= T_TAG) {
+    const n = Math.floor((t - T_TAG) * 34);
+    shown = full.slice(0, n);
+    cursor = t < DUR - 0.25 && (n < full.length || ((t * 2.5) % 1) < 0.55);
+  }
+  if (a <= 0) return;
+  ctx.font = `400 ${Math.round(P * 3.6)}px ${MONO}`;
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = rgb(hex(C.muted), a);
+  ctx.fillText(shown, WX + P / 2, TAG_Y);
+  if (cursor) {
+    const w = ctx.measureText(shown).width;
+    ctx.fillStyle = rgb(A_RGB, 0.9);
+    ctx.fillRect(WX + P / 2 + w + 3, TAG_Y - P * 3.1, P * 1.9, P * 3.7);
+  }
+}
+
+function drawParticles(t) {
+  const dt = 0.026;
+  gx.lineCap = "round";
+  for (const p of parts) {
+    const s = pstate(p, t);
+    if (!s || s[2] <= 0.01) continue;
+    const [x, y, a, sz, cm] = s;
+    const col = cm > 0 ? mixc(p.col, p.gcol, cm) : p.col;
+    const prev = pstate(p, t - dt) || s;
+    const hot = mixc(col, [255, 240, 228], min(0.18, 0.12 * hypot(x - prev[0], y - prev[1]) / 30));
+    if (hypot(x - prev[0], y - prev[1]) > 1.5) {
+      // a fading streak behind the spark
+      const g = gx.createLinearGradient(prev[0], prev[1], x, y);
+      g.addColorStop(0, rgb(hot, 0)); g.addColorStop(1, rgb(hot, a * 0.7));
+      gx.strokeStyle = g; gx.lineWidth = DOT_R * 1.6 * sz;
+      gx.beginPath(); gx.moveTo(prev[0], prev[1]); gx.lineTo(x, y); gx.stroke();
+    }
+    drawDot(gx, x, y, DOT_R * sz, hot, a);
+  }
+}
+
+// ── The claudewitz session ──────────────────────────────────────────────
+let CW = 11.4; // monospace cell width, measured once the font is loaded
+const FS = 20, LH = 30;
+
+// segs draws [[text, color, weight?, bg?]] left to right on the cell grid.
+function segs(x, y, list, alpha = 1) {
+  let cx = x;
+  for (const [txt, col, wt, bg] of list) {
+    const w = [...txt].length * CW;
+    if (bg) { ctx.fillStyle = rgb(hex(bg), alpha); ctx.fillRect(cx, y - LH * 0.72, w, LH); }
+    ctx.font = `${wt || 400} ${FS}px ${MONO}`;
+    ctx.fillStyle = rgb(hex(col), alpha);
+    let i = 0;
+    for (const ch of txt) { ctx.fillText(ch, cx + i * CW, y); i++; }
+    cx += w;
+  }
+  return cx;
+}
+const typed = (s, t0, cps, t) => s.slice(0, max(0, Math.floor((t - t0) * cps)));
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+}
+
+// Transcript rows: [appear τ, draw(x, y, τ, alpha)].
+const PROMPT = "add rate limiting to the public API";
+const STREAM1 = ["I'll add a token-bucket limiter as middleware, wire it into", "the router, and cover it with a test."];
+const STREAM2 = ["Done. Clients over 100 req/min now get a 429 with a", "Retry-After header; the other routes are untouched."];
+const toolDot = (tau, done) => tau < done ? ["● ", ((tau * 3) % 1) < 0.6 ? C.warn : C.subtle] : ["● ", C.ok];
+function streamRows(lines, t0, cps) {
+  let start = t0;
+  return lines.map(line => {
+    const s = start; start += line.length / cps;
+    return [s, (x, y, tau, a) => {
+      const shown = typed(line, s, cps, tau);
+      const end = segs(x, y, [[shown, C.text]], a);
+      if (shown.length < line.length) { ctx.fillStyle = rgb(A_RGB, a); ctx.fillRect(end + 1, y - 17, 9, 21); }
+    }];
+  });
+}
+const DIFF = [
+  [" ", "41", "func Chain(h http.Handler) http.Handler {"],
+  ["-", "42", "    return logging(h)"],
+  ["+", "42", "    lim := ratelimit.New(100, time.Minute)"],
+  ["+", "43", "    lim.OnLimit(retryAfter)"],
+  ["+", "44", "    return logging(lim.Wrap(h))"],
+  [" ", "45", "}"],
+];
+const ROWS = [
+  [1.6, (x, y, t, a) => segs(x, y, [["▌ ", C.accent, 800], [PROMPT, C.text, 600]], a)],
+  [1.6, null],
+  [1.95, (x, y, t, a) => segs(x, y, [["∴ Thought for 2s", C.muted]], a)],
+  ...streamRows(STREAM1, 2.15, 92),
+  [2.15, null],
+  [3.25, (x, y, t, a) => segs(x, y, [toolDot(t, 3.6), ["Read ", C.text, 600], ["internal/api/router.go", C.muted]], a)],
+  [3.6, (x, y, t, a) => segs(x, y, [["  └ read 142 lines", C.muted]], a)],
+  [3.6, null],
+  [3.75, (x, y, t, a) => segs(x, y, [toolDot(t, 4.1), ["Edit ", C.text, 600], ["internal/api/middleware.go", C.muted]], a)],
+  [4.1, (x, y, t, a) => segs(x, y, [["  └ ", C.muted], ["+3", C.ok], [" ", C.muted], ["-1", C.err]], a)],
+  ...DIFF.map(([k, n, code], i) => [4.2 + i * 0.1, (x, y, t, a) => {
+    const bg = k === "+" ? C.addBg : k === "-" ? C.delBg : null, col = k === "+" ? C.ok : k === "-" ? C.err : C.muted;
+    if (bg) { ctx.fillStyle = rgb(hex(bg), a); ctx.fillRect(x + 4 * CW, y - LH * 0.72, CW * 62, LH); }
+    segs(x, y, [["    ", C.text], [n.padStart(3) + " ", C.subtle], [k + " ", col], [code, k === " " ? C.muted : C.text]], a);
+  }]),
+  [4.8, null],
+  [4.85, (x, y, t, a) => segs(x, y, [toolDot(t, 5.35), ["Bash ", C.text, 600], ["go test ./internal/api/...", C.muted]], a)],
+  [5.35, (x, y, t, a) => segs(x, y, [["  └ ", C.muted], ["ok", C.ok, 600], ["   github.com/acme/api/internal/api   0.412s", C.muted]], a)],
+  [5.35, null],
+  ...streamRows(STREAM2, 5.5, 110),
+];
+
+function miniWordmark(x, y, pitch, a) {
+  for (const [gx_, gy] of WORD.px) {
+    for (let dy = 0; dy < WSCALE; dy++) for (let dx = 0; dx < WSCALE; dx++) {
+      const px = x + (gx_ * WSCALE + dx) * pitch, py = y + (gy * WSCALE + dy) * pitch;
+      ctx.fillStyle = rgb(mixc(A_RGB, S_RGB, (px - x) / (WORD.cols * WSCALE * pitch)), a);
+      ctx.beginPath(); ctx.arc(px, py, pitch * 0.42, 0, 2 * PI); ctx.fill();
+    }
+  }
+}
+
+function meter(x, y, w, label, pct, extra, a) {
+  segs(x, y, [[label, C.muted]], a);
+  const v = `${Math.round(pct)}%`;
+  segs(x + w - [...v].length * CW, y, [[v, C.text, 600]], a);
+  const by = y + 12, bh = 6;
+  ctx.fillStyle = rgb(hex(C.subtle), a); roundRect(ctx, x, by, w, bh, 3); ctx.fill();
+  const g = ctx.createLinearGradient(x, 0, x + w, 0);
+  g.addColorStop(0, rgb(A_RGB, a)); g.addColorStop(1, rgb(S_RGB, a));
+  ctx.fillStyle = g; roundRect(ctx, x, by, max(bh, w * pct / 100), bh, 3); ctx.fill();
+  if (extra) segs(x, y + 40, [[extra, C.subtle]], a);
+}
+
+// The sidebar mascot: bops while idle, a swirl of sparks while working.
+const MINI = { w: 44, h: 40, p: 5.2 };
+function sidebarMascot(cx, cy, tau, t, a) {
+  const work = prog(tau, 1.6, 0.5) * (1 - prog(tau, 5.4, 0.45));
+  const dots = renderBean(MINI.w, MINI.h, heroPose(t));
+  const r = rng(3);
+  dots.forEach((d, i) => {
+    const hx = cx + (d.x - MINI.w / 2) * MINI.p, hy = cy + (d.y - MINI.h / 2) * MINI.p;
+    const R = 20 + r() * 95, ang = r() * 2 * PI + t * (2.6 + r() * 2.2) * (70 / (R + 20)) * 1.6;
+    const sx = cx + cos(ang) * R, sy = cy + sin(ang) * R * 0.55;
+    const k = ease(clamp(work * 1.15 - r() * 0.15));
+    const x = lerp(hx, sx, k), y = lerp(hy, sy, k);
+    ctx.fillStyle = rgb(mixc(d.col, [255, 236, 220], k * 0.25), a);
+    ctx.beginPath(); ctx.arc(x, y, MINI.p * 0.42, 0, 2 * PI); ctx.fill();
+  });
+  let cap = "✻ Ready";
+  if (tau >= 1.6 && tau < 5.5) {
+    const s = Math.floor(tau - 1.6) + 1;
+    cap = tau < 3.25 ? `✻ Thinking… ${s}s` : tau < 4.85 ? `✻ Editing… ${s}s` : `✻ Running tests… ${s}s`;
+  } else if (tau >= 5.5) cap = "✻ Done in 4s";
+  const w = [...cap].length * CW;
+  segs(cx - w / 2, cy + MINI.h * MINI.p / 2 + 30, [[cap, tau >= 1.6 && tau < 5.5 ? C.accent : C.muted]], a);
+}
+
+function drawTerminal(t) {
+  const appear = ease(prog(t, T_FLY + 0.75, 0.75)), vanish = ease(prog(t, T_TD, 0.55));
+  const a = appear * (1 - vanish);
+  if (a <= 0) return;
+  const tau = t - T_UI;
+  const s = camScale(t);
+  ctx.save();
+  ctx.translate(W / 2, H / 2); ctx.scale(s, s); ctx.translate(-W / 2, -H / 2);
+  ctx.textBaseline = "alphabetic";
+
+  // Window, with a soft warm glow under it.
+  ctx.save();
+  ctx.shadowColor = `rgba(218,119,86,${0.18 * a})`; ctx.shadowBlur = 90; ctx.shadowOffsetY = 20;
+  ctx.fillStyle = rgb(hex(C.panel), a * 0.97); roundRect(ctx, TR.x, TR.y, TR.w, TR.h, 18); ctx.fill();
+  ctx.restore();
+  const bg = ctx.createLinearGradient(TR.x, TR.y, TR.x + TR.w, TR.y + TR.h);
+  bg.addColorStop(0, rgb(A_RGB, 0.55 * a)); bg.addColorStop(0.5, rgb(hex(C.subtle), a)); bg.addColorStop(1, rgb(S_RGB, 0.55 * a));
+  ctx.strokeStyle = bg; ctx.lineWidth = 1.5; roundRect(ctx, TR.x, TR.y, TR.w, TR.h, 18); ctx.stroke();
+
+  // Title bar.
+  ["#ff5f57", "#febc2e", "#28c840"].forEach((c, i) => { drawDot(ctx, TR.x + 26 + i * 22, TR.y + 22, 6.5, mixc(hex(c), hex(C.panel), 0.25), a); });
+  ctx.font = `400 15px ${MONO}`; ctx.fillStyle = rgb(hex(C.muted), a); ctx.textAlign = "center";
+  ctx.fillText("claudewitz — ~/code/api", TR.x + TR.w / 2, TR.y + 27); ctx.textAlign = "left";
+  ctx.fillStyle = rgb(hex(C.subtle), a * 0.7); ctx.fillRect(TR.x, TR.y + 44, TR.w, 1);
+
+  const SBW = 410, sbx = TR.x + TR.w - SBW;
+  const chatX = TR.x + 34, chatW = sbx - chatX - 30;
+  const top = TR.y + 44;
+  ctx.fillStyle = rgb(hex(C.subtle), a * 0.7); ctx.fillRect(sbx, top, 1, TR.h - 44);
+
+  // Input box and status line along the bottom of the chat.
+  const ibY = TR.y + TR.h - 118, ibH = 56;
+  const sent = tau >= 1.6;
+  ctx.strokeStyle = rgb(sent && tau < 5.5 ? hex(C.subtle) : A_RGB, a * 0.9); ctx.lineWidth = 1.5;
+  roundRect(ctx, chatX - 6, ibY, chatW + 12, ibH, 10); ctx.stroke();
+  const iy = ibY + 36;
+  const promptTxt = !sent ? typed(PROMPT, 0.15, 30, tau) : "";
+  let end = segs(chatX + 10, iy, [["› ", C.accent, 800], [promptTxt, C.text]], a);
+  if (!sent && promptTxt.length === 0) segs(end, iy, [["Ask Claude to build, fix or explain…", C.subtle]], a);
+  if (tau > 5.95) {
+    const sug = typed("add a test for the 429 path", 5.95, 50, tau);
+    end = segs(end, iy, [[sug, C.subtle]], a);
+    if (sug.length > 0) segs(chatX + chatW - 15 * CW, iy, [["→ to accept", C.subtle]], a);
+  }
+  if ((!sent || tau > 5.9) && ((t * 2.2) % 1) < 0.6 || (!sent && promptTxt.length < PROMPT.length && promptTxt.length > 0)) {
+    ctx.fillStyle = rgb(hex(C.text), a * 0.85); ctx.fillRect(sent ? chatX + 10 + 2 * CW : end + 1, iy - 17, 10, 22);
+  }
+  const sty = TR.y + TR.h - 34;
+  segs(chatX, sty, [["◆ ", C.second], ["opus", C.text, 600], [" · high  ", C.muted], ["⏵⏵ accept edits", C.warn]], a);
+  const ctxPct = Math.round(lerp(4, 31, ease(prog(tau, 1.6, 4.2))));
+  const rs = `ctx ${ctxPct}%  ·  5h ${Math.round(lerp(18, 24, prog(tau, 1.6, 4)))}%`;
+  segs(chatX + chatW - [...rs].length * CW, sty, [[rs, C.muted]], a);
+
+  // Transcript, clipped above the input, scrolling as it grows.
+  ctx.save();
+  ctx.beginPath(); ctx.rect(TR.x + 1, top + 1, sbx - TR.x - 2, ibY - top - 14); ctx.clip();
+  const rows = ROWS.filter(r => tau >= r[0]);
+  const contentTop = top + 134, viewBottom = ibY - 26;
+  // Scroll eases toward keeping the newest row in view.
+  let scroll = 0;
+  for (let i = 0; i < ROWS.length; i++) {
+    const over = contentTop + (i + 1) * LH - viewBottom;
+    if (over > 0) scroll = max(scroll, over * ease(prog(tau, ROWS[i][0], 0.3)));
+  }
+  const headY = top + 34 - scroll;
+  miniWordmark(chatX + 2, headY, 3.1, a);
+  segs(chatX + WORD.cols * WSCALE * 3.1 + 22, headY + 14, [["v0.4.2", C.text, 600]], a);
+  segs(chatX + WORD.cols * WSCALE * 3.1 + 22, headY + 42, [["Claude Code 2.1 · Max plan", C.muted]], a);
+  rows.forEach((r, i) => {
+    if (!r[1]) return;
+    const k = ease(prog(tau, r[0], 0.22));
+    const y = contentTop + (i + 1) * LH - scroll + (1 - k) * 8;
+    r[1](chatX, y, tau, a * k);
+  });
+  ctx.restore();
+
+  // Toast: the turn finished.
+  const tk = easeOut(prog(tau, 5.65, 0.45));
+  if (tk > 0) {
+    const tw = 330, th = 70, tx = sbx - tw - 24 + (1 - tk) * 60, ty = top + 22;
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 30;
+    ctx.fillStyle = rgb([34, 30, 27], a * tk); roundRect(ctx, tx, ty, tw, th, 10); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = rgb(hex(C.ok), a * tk); ctx.fillRect(tx, ty + 10, 3, th - 20);
+    segs(tx + 18, ty + 30, [["✓ ", C.ok, 800], ["Turn finished", C.text, 600]], a * tk);
+    segs(tx + 18, ty + 56, [["4.0s · 3 tools · ", C.muted], ["+3", C.ok], [" ", C.muted], ["-1", C.err]], a * tk);
+  }
+
+  // Sidebar.
+  const sx = sbx + 30, sw = SBW - 60;
+  let y = top + 44;
+  segs(sx, y, [[tau < 2 ? "New session" : "Add rate limiting", C.text, 800]], a); y += 28;
+  segs(sx, y, [["~/code/api", C.muted]], a); y += 24;
+  segs(sx, y, [["opus · high · Max", C.muted]], a); y += 48;
+  meter(sx, y, sw, "Context", lerp(4, 31, ease(prog(tau, 1.6, 4.2))), null, a); y += 46;
+  meter(sx, y, sw, "5-hour", lerp(18, 24, prog(tau, 1.6, 4)), null, a); y += 46;
+  meter(sx, y, sw, "Weekly", lerp(6, 7, prog(tau, 1.6, 4)), null, a); y += 56;
+  segs(sx, y, [["Todos", C.second, 800]], a); y += 30;
+  const todos = [["Read the router", 3.6], ["Add rate-limit middleware", 4.8], ["Run the tests", 5.35]];
+  todos.forEach(([txt, done], i) => {
+    const k = ease(prog(tau, 2.0 + i * 0.1, 0.25));
+    if (k <= 0) return;
+    const cur = !todos.slice(0, i).some(([, d]) => tau < d) && tau < done;
+    const mark = tau >= done ? ["✓ ", C.ok] : cur ? ["◐ ", C.accent] : ["○ ", C.muted];
+    segs(sx + (1 - k) * 10, y, [mark, [txt, tau >= done ? C.muted : cur ? C.text : C.muted, cur ? 600 : 400]], a * k);
+    if (tau >= done) { ctx.fillStyle = rgb(hex(C.muted), a * 0.8); ctx.fillRect(sx + 2 * CW, y - 6, [...txt].length * CW * ease(prog(tau, done, 0.3)), 1.5); }
+    y += 27;
+  });
+  if (tau < 2) y += 81;
+  y += 24;
+  segs(sx, y, [["Git", C.second, 800]], a); y += 30;
+  segs(sx, y, [["⎇ ", C.accent], ["feat/rate-limit", C.text], ["  ↑1", C.ok]], a); y += 27;
+  const changed = tau >= 4.1;
+  segs(sx, y, changed ? [["~1", C.warn], ["  +0  ", C.muted], ["a1f9c02", C.subtle]] : [["clean  ", C.muted], ["a1f9c02", C.subtle]], a); y += 44;
+  segs(sx, y, [["Changes", C.second, 800]], a); y += 30;
+  if (changed) {
+    const k = ease(prog(tau, 4.1, 0.3));
+    segs(sx, y, [["M ", C.warn], ["api/middleware.go ", C.text], ["+3 ", C.ok], ["-1 ", C.err], ["✻", C.accent]], a * k);
+  } else segs(sx, y, [["no changes", C.subtle]], a);
+
+  sidebarMascot(sbx + SBW / 2, TR.y + TR.h - 175, tau, t, a);
+  ctx.restore();
+}
+
+// Flash and shockwave as the sparks land.
+function drawFlash(t) {
+  const k = prog(t, T_GE - 0.08, 0.9);
+  if (k <= 0 || k >= 1) return;
+  const f = (1 - k) ** 2.2;
+  const g = gx.createRadialGradient(BEAN_C[0], BEAN_C[1], 0, BEAN_C[0], BEAN_C[1], 520);
+  g.addColorStop(0, `rgba(255,236,222,${0.55 * f})`); g.addColorStop(0.4, `rgba(218,119,86,${0.18 * f})`); g.addColorStop(1, "rgba(218,119,86,0)");
+  gx.fillStyle = g; gx.fillRect(0, 0, W, H);
+  const rr = 60 + easeOut(k) * 1100;
+  gx.strokeStyle = `rgba(180,151,255,${0.5 * (1 - k)})`; gx.lineWidth = 3 + 10 * (1 - k);
+  gx.beginPath(); gx.arc(BEAN_C[0], BEAN_C[1], rr, 0, 2 * PI); gx.stroke();
+}
+
+function renderFrame(t) {
+  t = ((t % DUR) + DUR) % DUR;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1; ctx.filter = "none"; ctx.globalCompositeOperation = "source-over";
+  background(t);
+  drawTerminal(t);
+
+  gx.clearRect(0, 0, W, H);
+  if (t < T_DIS || t >= T_GE) drawLockup(t, 1);
+  drawParticles(t);
+  drawFlash(t);
+  // Bloom: the glow layer blurred and added, then drawn crisp on top.
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.filter = "blur(18px)"; ctx.globalAlpha = 0.45; ctx.drawImage(glow, 0, 0);
+  ctx.filter = "blur(5px)"; ctx.globalAlpha = 0.35; ctx.drawImage(glow, 0, 0);
+  ctx.restore();
+  ctx.drawImage(glow, 0, 0);
+  drawTagline(t);
+}
+
+window.HERO = { W, H, FPS, DUR };
+window.ready = (async () => {
+  await Promise.all([400, 600, 800].map(w => document.fonts.load(`${w} ${FS}px "JBM"`)));
+  ctx.font = `400 ${FS}px ${MONO}`; CW = ctx.measureText("M").width;
+  buildParticles();
+  window.renderFrame = renderFrame;
+  return true;
+})();
+
+// Live preview unless ?render: plays in real time (frame rate permitting),
+// ?t=7.5 holds a single frame.
+const qs = new URLSearchParams(location.search);
+if (qs.has("render")) document.body.classList.add("render");
+else window.ready.then(() => {
+  if (qs.has("t")) return renderFrame(+qs.get("t"));
+  const t0 = performance.now();
+  const tick = () => { renderFrame((performance.now() - t0) / 1000); requestAnimationFrame(tick); };
+  tick();
+});
+</script>
+</body>
+</html>
