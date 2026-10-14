@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"fmt"
+	"image"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -61,5 +62,32 @@ func TestWriteLogo(t *testing.T) {
 			t.Fatal(err)
 		}
 		write(fmt.Sprintf("icon-%d.png", size), buf.Bytes())
+	}
+	write("icon-c.svg", []byte(cIconSVG()))
+	for _, size := range []int{1024, 512, 256, 128, 64, 32, 16} {
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, cIconPNG(size)); err != nil {
+			t.Fatal(err)
+		}
+		write(fmt.Sprintf("icon-c-%d.png", size), buf.Bytes())
+	}
+}
+
+func TestLetterIcon(t *testing.T) {
+	if svg := cIconSVG(); strings.Count(svg, "<rect") != 3*len(cIconRects()) || !strings.Contains(svg, strings.ToLower(cIconBase)) {
+		t.Errorf("letter icon SVG: %d rects, base colour present %v", strings.Count(svg, "<rect"), strings.Contains(svg, strings.ToLower(cIconBase)))
+	}
+	for _, size := range []int{16, 256} {
+		img := cIconPNG(size).(*image.NRGBA)
+		if img.Bounds().Dx() != size {
+			t.Fatalf("icon is %dpx, want %d", img.Bounds().Dx(), size)
+		}
+		if img.NRGBAAt(0, 0).A != 0 || img.NRGBAAt(size-1, size-1).A != 0 {
+			t.Errorf("%dpx letter icon corners aren't transparent", size)
+		}
+		// The stem, a little in from the left at mid-height, is solid.
+		if c := img.NRGBAAt(size/4, size/2); c.A < 200 {
+			t.Errorf("%dpx letter icon stem is empty: %+v", size, c)
+		}
 	}
 }
