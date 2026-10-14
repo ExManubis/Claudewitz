@@ -173,7 +173,16 @@ func (m *Model) handleChatKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		c.selectEdge(true)
 		m.follow = true
 		m.refresh()
-	case " ", "enter":
+	case "enter":
+		// An edit's diff opens in the panel; anything else expands.
+		if c.selectable(c.sel) {
+			if e := c.entries[c.sel]; e.kind == kindTool && isDiffTool(e.toolName) {
+				m.openDiffView(e)
+				return nil, true
+			}
+		}
+		return m.toggleSelected(), true
+	case " ":
 		return m.toggleSelected(), true
 	case "d", "u", "f", "b", "pgdown", "pgup":
 		// Page the view and carry the selection along.

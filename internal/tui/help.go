@@ -42,6 +42,8 @@ func (m Model) helpPairs() [][2]string {
 		return [][2]string{{"↑↓", "move"}, {"enter", "resume"}, {"tab", "scope"}, {"esc", "close"}}
 	case m.question != nil || m.plan != nil:
 		return m.interactionHelp()
+	case m.diffView != nil:
+		return [][2]string{{"j/k", "scroll"}, {"d/u", "page"}, {"t", "diff layout"}, {"esc", "close"}}
 	case m.editPanel != nil && len(m.pending) > 0:
 		return [][2]string{{"y", "allow"}, {"a", "for session"}, {"n", "deny"}, {"ctrl+c", "deny & stop"}, {"t", "diff layout"}, {"j/k", "scroll"}}
 	case len(m.pending) > 0:
@@ -69,7 +71,7 @@ func (m Model) helpPairs() [][2]string {
 	}
 	out = append(out, focus, [2]string{"shift+tab", "mode"}, commands)
 	if m.chatFocus {
-		out = append(out, [2]string{"↑↓", "select"}, [2]string{"space", "expand/collapse"}, [2]string{"d/u", "page"}, [2]string{"y", "copy"})
+		out = append(out, [2]string{"↑↓", "select"}, [2]string{"space", "expand/collapse"}, [2]string{"enter", "open diff"}, [2]string{"d/u", "page"}, [2]string{"y", "copy"})
 	}
 	return append(out, [2]string{"ctrl+g", "more"})
 }
@@ -109,7 +111,8 @@ var helpSections = []struct {
 	}},
 	{"Transcript (tab)", [][2]string{
 		{"j/k ↑↓", "select message"},
-		{"space/enter", "expand / collapse"},
+		{"space", "expand / collapse"},
+		{"enter", "open an edit's diff"},
 		{"y", "copy message"},
 		{"d/u f/b", "half / full page"},
 		{"g/G", "top / bottom"},

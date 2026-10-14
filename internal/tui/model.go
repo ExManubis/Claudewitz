@@ -114,6 +114,7 @@ type Model struct {
 	question    *questionState // AskUserQuestion at the head of pending
 	plan        *planState     // ExitPlanMode at the head of pending
 	editPanel   *editPanel     // Edit, MultiEdit or Write at the head of pending
+	diffView    *editPanel     // a transcript edit's diff, opened read-only
 }
 
 const inputPlaceholder = "Ask Claude anything…  / for commands · @ to mention files"
@@ -393,7 +394,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.changes != nil {
 			cmds = append(cmds, m.handleChangesMouse(msg))
-		} else if m.editPanel != nil && len(m.pending) > 0 && !overlaid {
+		} else if (m.diffView != nil || m.editPanel != nil && len(m.pending) > 0) && !overlaid {
 			cmds = append(cmds, m.handlePanelMouse(msg))
 		} else if path != "" {
 			cmds = append(cmds, m.openChanges(path))
@@ -417,6 +418,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.changes != nil {
 			return m, m.handleChangesKey(msg)
+		}
+		if m.diffView != nil {
+			return m, m.handleDiffViewKey(msg)
 		}
 		if m.themePick != nil {
 			return m, m.handleThemePickerKey(msg)
@@ -733,6 +737,7 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 			return nil
 		}
 		m.pending = append(m.pending, p)
+		m.diffView = nil // the request needs the panel
 		if len(m.pending) == 1 {
 			m.startInteraction()
 		}
@@ -1338,7 +1343,7 @@ func (m *Model) restart(o claude.Options) tea.Cmd {
 	m.chat.reset(m.track)
 	m.chat.cwd = opts.CWD
 	m.pending = nil
-	m.question, m.plan, m.editPanel = nil, nil, nil
+	m.question, m.plan, m.editPanel, m.diffView = nil, nil, nil, nil
 	m.queued = nil
 	m.setSuggestion("")
 	m.attachments = nil
@@ -1490,7 +1495,7 @@ func (m Model) View() string {
 		screen = center(screen, m.picker.view(m.width, h), m.width, h)
 	case m.changes != nil:
 		screen = overlay(screen, m.changesView(), 0, 0)
-	case m.editPanel != nil && len(m.pending) > 0:
+	case m.diffView != nil || m.editPanel != nil && len(m.pending) > 0:
 		x, y := m.panelPos()
 		screen = overlay(screen, m.panelView(x, y), x, y)
 	}

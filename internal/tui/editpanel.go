@@ -20,9 +20,18 @@ import (
 // to Claude Code's permission mode: in accept-edits mode edits go through
 // without asking.
 
-// editPanel is the state of an open edit-permission panel.
+// The same panel, read-only, shows the diff of an edit already in the
+// transcript: enter on it in the focused chat.
+
+// editPanel is the state of an open edit panel: a permission request, or a
+// diff from the transcript (readOnly).
 type editPanel struct {
-	req    *claude.PermissionRequest
+	tool     string
+	input    json.RawMessage
+	agentID  string
+	readOnly bool
+	status   string // read-only: "applied", "not applied", …
+
 	lines  []diffLine
 	note   string // under the file name: "new file", "3 edits", …
 	scroll int
@@ -74,7 +83,44 @@ func lineOf(content, s string) int {
 // newEditPanel opens the panel for a request.
 func newEditPanel(p *claude.PermissionRequest) *editPanel {
 	lines, note := editDiff(p.ToolName, p.Input, true)
-	return &editPanel{req: p, lines: lines, note: note}
+	return &editPanel{tool: p.ToolName, input: p.Input, agentID: p.AgentID, lines: lines, note: note}
+}
+
+// panel is the open panel: a transcript diff over a permission request.
+func (m Model) panel() *editPanel {
+	if m.diffView != nil {
+		return m.diffView
+	}
+	return m.editPanel
+}
+
+// openDiffView shows a transcript entry's diff in the panel.
+func (m *Model) openDiffView(e *entry) {
+	lines, note := editDiff(e.toolName, e.toolInput, false)
+	if e.diff != nil {
+		lines = e.diff
+	}
+	status := "applied"
+	switch e.toolStatus {
+	case toolPending:
+		status = "waiting for approval"
+	case toolFailed:
+		status = "not applied"
+	}
+	m.diffView = &editPanel{tool: e.toolName, input: e.toolInput, readOnly: true, status: status, lines: lines, note: note}
+}
+
+func (m *Model) handleDiffViewKey(k tea.KeyMsg) tea.Cmd {
+	switch k.String() {
+	case "esc", "q", "enter", "ctrl+c":
+		m.diffView = nil
+		m.refresh()
+		return nil
+	case "left", "right", "tab", "shift+tab", "h", "l", " ":
+		return nil // no buttons
+	}
+	cmd, _ := m.handlePanelKey(k)
+	return cmd
 }
 
 // editDiff works out the diff an Edit, MultiEdit or Write makes, with a
@@ -145,9 +191,12 @@ func (m Model) panelLayout() (boxW, boxH, innerW, bodyH int) {
 	boxW = max(40, min(m.width-4, max(80, m.width*9/10)))
 	innerW = boxW - 4 // border and padding
 	// border 2, title + blank, details + blank, blank + buttons, blank + hints
-	fixed := 2 + 2 + len(m.panelDetails(innerW)) + 1 + 2 + 2
+	fixed := 2 + 2 + len(m.panelDetails(innerW)) + 1 + 2
+	if !m.panel().readOnly {
+		fixed += 2 // the buttons
+	}
 	room := max(3, m.height-1-panelBelow-fixed)
-	bodyH = max(3, min(room, len(m.editPanel.panelRows(innerW))))
+	bodyH = max(3, min(room, len(m.panel().panelRows(innerW))))
 	return boxW, bodyH + fixed, innerW, bodyH
 }
 
@@ -156,20 +205,19 @@ const panelBelow = 4
 
 // panelDetails are the label/value rows under the title.
 func (m Model) panelDetails(w int) []string {
-	p := m.pending[0]
-	ep := m.editPanel
+	ep := m.panel()
 	label := func(k, v string) string {
 		return mutedStyle.Render(fmt.Sprintf("%-5s ", k)) + textStyle.Render(truncateLeft(v, max(10, w-6)))
 	}
-	rows := []string{label("Tool", p.ToolName)}
-	if p.AgentID != "" {
+	rows := []string{label("Tool", ep.tool)}
+	if ep.agentID != "" {
 		for _, a := range m.track.agents {
-			if a.taskID == p.AgentID {
+			if a.taskID == ep.agentID {
 				rows = append(rows, mutedStyle.Render("Agent ")+agentStyle.Render(truncate(a.kind+": "+a.desc, w-6)))
 			}
 		}
 	}
-	file := label("File", relPath(filePathOf(p.Input), m.cwd()))
+	file := label("File", relPath(filePathOf(ep.input), m.cwd()))
 	if ep.note != "" {
 		file += mutedStyle.Render("  " + ep.note)
 	}
@@ -181,7 +229,7 @@ func (m Model) panelDetails(w int) []string {
 // panelRows renders the request's diff, cached per width and layout.
 func (ep *editPanel) panelRows(width int) []string {
 	if ep.rows == nil || ep.rowsW != width || ep.rowsMode != diffMode {
-		ep.rows = strings.Split(renderDiff(ep.lines, filePathOf(ep.req.Input), width, 0), "\n")
+		ep.rows = strings.Split(renderDiff(ep.lines, filePathOf(ep.input), width, 0), "\n")
 		ep.rowsW, ep.rowsMode = width, diffMode
 	}
 	return ep.rows
@@ -189,14 +237,14 @@ func (ep *editPanel) panelRows(width int) []string {
 
 func (m *Model) scrollPanel(d int) {
 	_, _, innerW, bodyH := m.panelLayout()
-	ep := m.editPanel
+	ep := m.panel()
 	ep.scroll = max(0, min(ep.scroll+d, len(ep.panelRows(innerW))-bodyH))
 }
 
 // handlePanelKey drives the edit panel. Answers go through the same keys
 // as the compact prompt; it reports false for keys it leaves to it.
 func (m *Model) handlePanelKey(k tea.KeyMsg) (tea.Cmd, bool) {
-	ep := m.editPanel
+	ep := m.panel()
 	_, _, _, bodyH := m.panelLayout()
 	switch k.String() {
 	case "left", "shift+tab", "h":
@@ -229,13 +277,13 @@ func (m *Model) handlePanelKey(k tea.KeyMsg) (tea.Cmd, bool) {
 }
 
 func (m *Model) handlePanelMouse(msg tea.MouseMsg) tea.Cmd {
-	ep := m.editPanel
+	ep := m.panel()
 	switch {
 	case msg.Button == tea.MouseButtonWheelUp:
 		m.scrollPanel(-3)
 	case msg.Button == tea.MouseButtonWheelDown:
 		m.scrollPanel(3)
-	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && msg.Y == ep.buttonsY:
+	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && !ep.readOnly && msg.Y == ep.buttonsY:
 		for i, x := range ep.buttonsX {
 			if msg.X >= x[0] && msg.X < x[1] {
 				ep.focus = i
@@ -264,12 +312,17 @@ func panelButton(b editButton, focused bool) string {
 // the buttons can be found again for clicks.
 func (m Model) panelView(x, y int) string {
 	th := currentTheme()
-	ep := m.editPanel
+	ep := m.panel()
 	boxW, boxH, innerW, bodyH := m.panelLayout()
 
-	head := lipgloss.NewStyle().Foreground(th.accent).Bold(true).Render("Permission Required")
-	if n := len(m.pending) - 1; n > 0 {
-		head += mutedStyle.Render(fmt.Sprintf("  +%d more", n))
+	var head string
+	if ep.readOnly {
+		head = lipgloss.NewStyle().Foreground(th.accent).Bold(true).Render(ep.tool) + mutedStyle.Render(" · "+ep.status)
+	} else {
+		head = lipgloss.NewStyle().Foreground(th.accent).Bold(true).Render("Permission Required")
+		if n := len(m.pending) - 1; n > 0 {
+			head += mutedStyle.Render(fmt.Sprintf("  +%d more", n))
+		}
 	}
 	head += " " + stripes(max(0, innerW-lipgloss.Width(head)-1), th.accent, th.subtle)
 
@@ -303,6 +356,9 @@ func (m Model) panelView(x, y int) string {
 		layout = "unified view"
 	}
 	hints := [][2]string{{"←→", "choose"}, {"enter", "confirm"}, {"t", layout}, {"j/k", "scroll"}}
+	if ep.readOnly {
+		hints = [][2]string{{"esc", "close"}, {"t", layout}, {"j/k", "scroll"}}
+	}
 	if len(rows) > bodyH {
 		hints = append(hints, [2]string{"", fmt.Sprintf("%d%%", 100*min(len(rows), from+bodyH)/len(rows))})
 	}
@@ -315,7 +371,10 @@ func (m Model) panelView(x, y int) string {
 	content = append(content, details...)
 	content = append(content, "")
 	content = append(content, body...)
-	content = append(content, "", strings.Repeat(" ", pad)+row, "", strings.Join(hl, mutedStyle.Render(" · ")))
+	if !ep.readOnly {
+		content = append(content, "", strings.Repeat(" ", pad)+row)
+	}
+	content = append(content, "", strings.Join(hl, mutedStyle.Render(" · ")))
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(th.accent).Padding(0, 1).Width(boxW - 2).Height(boxH - 2)
 	return box.Render(strings.Join(content, "\n"))
 }

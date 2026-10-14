@@ -137,3 +137,34 @@ func mustRead(t *testing.T, p string) string {
 	}
 	return string(b)
 }
+
+func TestEnterOpensAnEditsDiffReadOnly(t *testing.T) {
+	m, path := panelModel(t, 120, 40)
+	m.pending, m.editPanel = nil, nil
+	m.layout()
+	in, _ := json.Marshal(map[string]any{"file_path": path, "old_string": "line 30\n", "new_string": "line thirty\n"})
+	m.applyBlocks("assistant", []claude.ContentBlock{{Type: "tool_use", ID: "e1", Name: "Edit", Input: in}}, true)
+	m.chat.byToolID["e1"].toolStatus = toolOK
+	m.refresh()
+
+	for _, k := range []tea.KeyMsg{{Type: tea.KeyTab}, {Type: tea.KeyEnter}} {
+		next, _ := m.Update(k)
+		m = next.(Model)
+	}
+	if m.diffView == nil {
+		t.Fatal("enter on an edit should open its diff")
+	}
+	v := ansi.Strip(m.View())
+	for _, want := range []string{"Edit · applied", "@@ -30,1 +30,1 @@", "30 + line thirty", "esc close"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("missing %q in:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "Yes, allow") {
+		t.Error("a read-only diff has no buttons")
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m = next.(Model); m.diffView != nil || !m.chatFocus {
+		t.Fatalf("esc should close the diff and stay in the transcript (open %v, focus %v)", m.diffView != nil, m.chatFocus)
+	}
+}
