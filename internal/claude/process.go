@@ -381,12 +381,15 @@ var stopGrace = 3 * time.Second
 
 // Stop shuts the CLI down for good: it interrupts the current turn, closes
 // stdin and kills the process if it hasn't exited within stopGrace. Events
-// after Stop are discarded, so the caller may stop reading them.
+// after Stop are discarded, so the caller may stop reading them. It doesn't
+// block: a CLI that has stopped reading stdin can't hold up the caller.
 func (p *Process) Stop() {
 	p.stopOnce.Do(func() {
 		close(p.done)
-		_ = p.Interrupt()
-		_ = p.Close()
+		go func() {
+			_ = p.Interrupt()
+			_ = p.Close()
+		}()
 		go func() {
 			select {
 			case <-p.exited:

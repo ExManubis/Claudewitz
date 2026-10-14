@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,5 +69,30 @@ func TestOverlongLineReported(t *testing.T) {
 	}
 	if !sawErr {
 		t.Error("overlong line was not reported")
+	}
+}
+
+// Stop returns at once even when the CLI has stopped reading stdin and
+// the pipe is full, and the CLI is still killed.
+func TestStopDoesNotBlockOnFullStdin(t *testing.T) {
+	defer func(d time.Duration) { stopGrace = d }(stopGrace)
+	stopGrace = 200 * time.Millisecond
+	p, err := Start(context.Background(), Options{Binary: fakeCLI(t, "exec sleep 60\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = p.Send(strings.Repeat("x", 1<<20)) }() // fills the pipe, holds the write lock
+	time.Sleep(100 * time.Millisecond)
+	returned := make(chan struct{})
+	go func() { p.Stop(); close(returned) }()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("Stop blocked on stdin")
+	}
+	select {
+	case <-p.exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stopped process never exited")
 	}
 }
