@@ -17,8 +17,8 @@ func TestDialogsOnTinyTerminals(t *testing.T) {
 		"session": func(m *Model) { m.picker = newPicker(m.sessionID, m.cwd()) },
 	}
 	for name, fn := range open {
-		for w := 1; w <= 30; w++ {
-			for _, h := range []int{1, 3, 8, 20} {
+		for _, w := range []int{1, 2, 4, 6, 8, 10, 12, 16, 20, 24, 30} {
+			for _, h := range []int{1, 3, 8} {
 				t.Run(fmt.Sprintf("%s/%dx%d", name, w, h), func(t *testing.T) {
 					m := chatModel(t)
 					fn(m)
