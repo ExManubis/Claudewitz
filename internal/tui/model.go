@@ -46,6 +46,8 @@ type Model struct {
 
 	attachments []attachment // images for the next message
 	focused     bool         // terminal focus, when the terminal reports it
+	lastInput   time.Time    // last key, click or focus, for pausing the idle bop
+	gitPolls    int          // poll ticks so far, for reading less often while idle
 
 	sparks       *sparkField // working indicator at the foot of the sidebar
 	sparkTicking bool
@@ -171,6 +173,7 @@ func New(ctx context.Context, opts claude.Options, cfg config.Config) Model {
 		hist:        newHistory(opts.CWD),
 		sparks:      newSparkField(sidebarWidth-3, sparkMinRows),
 		focused:     true,
+		lastInput:   time.Now(),
 		alwaysAllow: map[string]bool{},
 		cfg:         cfg,
 	}
@@ -246,6 +249,10 @@ func loadTranscript(cwd, id string) tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	nm := next.(Model)
+	switch msg.(type) {
+	case tea.KeyMsg, tea.MouseMsg, tea.FocusMsg:
+		nm.lastInput = time.Now()
+	}
 	// The area under the chat grows and shrinks (the activity line, pills,
 	// attachments); resize the chat to match, or the screen overflows the
 	// terminal and everything scrolls up a line.
@@ -344,13 +351,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.FocusMsg:
+		// Catch up on changes made while away (polling slows when idle).
+		wasIdle := m.idle()
 		m.focused = true
+		if wasIdle {
+			return m, m.refreshGit()
+		}
 
 	case tea.BlurMsg:
 		m.focused = false
 
 	case gitPollMsg:
-		return m, tea.Batch(m.refreshGit(), gitPoll())
+		return m, m.onGitPoll()
 
 	case sessionsLoadedMsg:
 		if m.picker != nil && m.picker.all == msg.all {

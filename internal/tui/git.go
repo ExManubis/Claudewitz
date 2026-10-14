@@ -15,6 +15,9 @@ import (
 
 const (
 	gitPollEvery = 4 * time.Second
+	// gitIdleEvery is how many polls to skip between reads while idle
+	// (unfocused, or no input for a while): every ~30s instead of 4s.
+	gitIdleEvery = 8
 	gitMaxFiles  = 12
 )
 
@@ -27,6 +30,16 @@ type gitPollMsg struct{}
 
 func gitPoll() tea.Cmd {
 	return tea.Tick(gitPollEvery, func(time.Time) tea.Msg { return gitPollMsg{} })
+}
+
+// onGitPoll reads the repository on every poll while you're around, and
+// only now and then while idle, since a large repo makes each read costly.
+func (m *Model) onGitPoll() tea.Cmd {
+	m.gitPolls++
+	if m.idle() && !m.busy && m.gitPolls%gitIdleEvery != 0 {
+		return gitPoll()
+	}
+	return tea.Batch(m.refreshGit(), gitPoll())
 }
 
 // refreshGit reads the repository state in the background, unless a read

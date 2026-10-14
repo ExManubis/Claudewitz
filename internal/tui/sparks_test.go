@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -144,5 +145,22 @@ func TestBusyKeepsScreenHeight(t *testing.T) {
 	m = next.(Model)
 	if h := height(); h != 44 {
 		t.Errorf("busy screen is %d lines, want 44", h)
+	}
+}
+
+// The idle bop stops after a while without input, even when the terminal
+// never reports losing focus, and starts again on the next key.
+func TestIdleBopStopsWithoutInput(t *testing.T) {
+	m := chatModel(t)
+	m.width, m.height = 140, 40 // room for the sidebar and its sparks
+	m.layout()
+	m.lastInput = time.Now().Add(-2 * idleBop)
+	m.syncSparks()
+	if !m.sparks.paused || m.sparks.animating() {
+		t.Fatal("bop should hold still after idleBop without input")
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if nm := next.(Model); nm.sparks.paused {
+		t.Fatal("a key should restart the bop")
 	}
 }
