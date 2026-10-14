@@ -107,7 +107,7 @@ const previewCode = "func parse(k Kind) (*Node, error) {\n\treturn nil, errEmpty
 const previewNew = "func parse(k Kind) (*Node, error) {\n\treturn &Node{Kind: k}, nil // 42\n}"
 
 func (p *themePicker) view(width int) string {
-	w := min(width-4, 76)
+	w := dialogWidth(width, 76)
 	inner := w - 6
 	cur := currentTheme()
 	lines := []string{gradientText("Theme", true), ""}

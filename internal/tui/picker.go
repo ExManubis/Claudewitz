@@ -111,7 +111,7 @@ func (p *picker) move(d, visible int) {
 func pickerRows(height int) int { return max(1, (height-14)/2) }
 
 func (p *picker) view(width, height int) string {
-	w := min(width-4, 110)
+	w := dialogWidth(width, 110)
 	inner := w - 6
 	scope := "this project"
 	if p.all {
