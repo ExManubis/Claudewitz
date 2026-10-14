@@ -132,9 +132,11 @@ func (p *Process) readLoop(r io.Reader) {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		// A line too long for the buffer, or a read error: report it, and
-		// keep draining so the CLI isn't left blocked on a full pipe.
+		// A line too long for the buffer, or a read error: the stream can't
+		// be followed from here, so end the session rather than hang. Drain
+		// stdout so the CLI isn't left blocked on a full pipe as it dies.
 		p.emit(Event{Err: fmt.Errorf("reading from claude: %w", err)})
+		_ = p.cmd.Process.Kill()
 		_, _ = io.Copy(io.Discard, r)
 	}
 	err := p.cmd.Wait()

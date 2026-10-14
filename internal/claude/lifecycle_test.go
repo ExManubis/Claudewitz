@@ -45,10 +45,10 @@ exec sleep 60
 	}
 }
 
-// A line longer than the scanner allows is reported, and the process is
-// still waited for rather than left blocked on its stdout.
+// A line longer than the scanner allows is reported, and the session ends
+// even though the CLI would carry on running.
 func TestOverlongLineReported(t *testing.T) {
-	bin := fakeCLI(t, `head -c 70000000 /dev/zero | tr '\0' 'x'; echo`)
+	bin := fakeCLI(t, `head -c 70000000 /dev/zero | tr '\0' 'x'; echo; exec sleep 60`)
 	p, err := Start(context.Background(), Options{Binary: bin})
 	if err != nil {
 		t.Fatal(err)
