@@ -191,10 +191,14 @@ type startedMsg struct {
 func startCmd(ctx context.Context, opts claude.Options) tea.Cmd {
 	return func() tea.Msg {
 		p, err := claude.Start(ctx, opts)
-		if err == nil {
-			err = p.Initialize()
+		if err != nil {
+			return startedMsg{nil, err}
 		}
-		return startedMsg{p, err}
+		if err := p.Initialize(); err != nil {
+			p.Stop()
+			return startedMsg{nil, err}
+		}
+		return startedMsg{p, nil}
 	}
 }
 
@@ -602,7 +606,7 @@ func (m *Model) interrupt() {
 
 func (m *Model) quit() tea.Cmd {
 	if m.proc != nil {
-		_ = m.proc.Close()
+		m.proc.Stop()
 	}
 	return tea.Quit
 }
@@ -1337,7 +1341,7 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 
 func (m *Model) restart(o claude.Options) tea.Cmd {
 	if m.proc != nil {
-		_ = m.proc.Close()
+		m.proc.Stop()
 		m.proc = nil
 	}
 	opts := m.opts

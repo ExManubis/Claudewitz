@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Options configures how the CLI is launched.
@@ -57,6 +58,11 @@ type Process struct {
 	events chan Event
 	mu     sync.Mutex
 	stderr *tailBuffer
+	// done is closed by Stop; after that, events are drained and discarded
+	// instead of blocking on a channel nobody reads.
+	done     chan struct{}
+	stopOnce sync.Once
+	exited   chan struct{} // closed once the CLI has been waited for
 }
 
 // Start launches the CLI and begins streaming events.
@@ -103,7 +109,8 @@ func Start(ctx context.Context, opts Options) (*Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Process{cmd: cmd, stdin: stdin, events: make(chan Event, 256), stderr: &tailBuffer{max: 8192}}
+	p := &Process{cmd: cmd, stdin: stdin, events: make(chan Event, 256), stderr: &tailBuffer{max: 8192},
+		done: make(chan struct{}), exited: make(chan struct{})}
 	cmd.Stderr = p.stderr
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("starting %s: %w", bin, err)
@@ -120,18 +127,33 @@ func (p *Process) readLoop(r io.Reader) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
 	for sc.Scan() {
-		line := sc.Bytes()
-		if ev, ok := parseLine(line); ok {
-			p.events <- ev
+		if ev, ok := parseLine(sc.Bytes()); ok {
+			p.emit(ev)
 		}
 	}
+	if err := sc.Err(); err != nil {
+		// A line too long for the buffer, or a read error: report it, and
+		// keep draining so the CLI isn't left blocked on a full pipe.
+		p.emit(Event{Err: fmt.Errorf("reading from claude: %w", err)})
+		_, _ = io.Copy(io.Discard, r)
+	}
 	err := p.cmd.Wait()
+	close(p.exited)
 	if err != nil {
 		if tail := p.stderr.String(); tail != "" {
 			err = fmt.Errorf("%w: %s", err, tail)
 		}
 	}
-	p.events <- Event{Exited: true, Err: err}
+	p.emit(Event{Exited: true, Err: err})
+}
+
+// emit delivers ev unless the process has been stopped, in which case
+// nobody is reading and the event is dropped.
+func (p *Process) emit(ev Event) {
+	select {
+	case p.events <- ev:
+	case <-p.done:
+	}
 }
 
 func parseLine(line []byte) (Event, bool) {
@@ -352,6 +374,27 @@ func (p *Process) SetEffort(level string) error {
 // Close ends stdin, which lets the CLI exit cleanly.
 func (p *Process) Close() error {
 	return p.stdin.Close()
+}
+
+// stopGrace is how long Stop waits for the CLI to exit before killing it.
+var stopGrace = 3 * time.Second
+
+// Stop shuts the CLI down for good: it interrupts the current turn, closes
+// stdin and kills the process if it hasn't exited within stopGrace. Events
+// after Stop are discarded, so the caller may stop reading them.
+func (p *Process) Stop() {
+	p.stopOnce.Do(func() {
+		close(p.done)
+		_ = p.Interrupt()
+		_ = p.Close()
+		go func() {
+			select {
+			case <-p.exited:
+			case <-time.After(stopGrace):
+				_ = p.cmd.Process.Kill()
+			}
+		}()
+	})
 }
 
 // sessionVars identify the Claude Code session that launched us. If
