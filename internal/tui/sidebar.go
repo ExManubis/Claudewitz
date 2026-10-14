@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 )
@@ -324,23 +325,19 @@ func truncate(s string, w int) string {
 	if w <= 1 {
 		return ""
 	}
-	if lipgloss.Width(s) <= w {
-		return s
-	}
-	r := []rune(s)
-	for len(r) > 0 && lipgloss.Width(string(r)) > w-1 {
-		r = r[:len(r)-1]
-	}
-	return string(r) + "…"
+	return ansi.Truncate(s, w, "…")
 }
 
 // truncateLeft keeps the end of a path-like string.
 func truncateLeft(s string, w int) string {
-	r := []rune(s)
-	if len(r) <= w {
+	n := ansi.StringWidth(s)
+	if n <= w {
 		return s
 	}
-	return "…" + string(r[len(r)-w+1:])
+	if w <= 1 {
+		return ""
+	}
+	return "…" + ansi.TruncateLeft(s, n-w+1, "")
 }
 
 // sidebarView renders the right-hand panel.
