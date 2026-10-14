@@ -9,238 +9,65 @@
 
 A [Crush](https://github.com/charmbracelet/crush)-style terminal UI for **Claude Code**.
 
-Instead of calling the Anthropic API directly (which bills per token), claudewitz drives the
-`claude` CLI you already have installed. That means it runs on whatever you are logged in
-with, including a Claude Pro/Max subscription, and you keep Claude Code's tools, MCP servers,
-skills, hooks, `CLAUDE.md` and session history.
+claudewitz runs on top of the `claude` CLI you already have, so it uses your existing login
+(including a Pro/Max subscription, with no per-token API billing) and keeps all of Claude Code's
+tools, MCP servers, skills, hooks, `CLAUDE.md` and session history.
 
-<img width="3014" height="2086" alt="CleanShot 2026-10-13 at 23 58 32@2x" src="https://github.com/user-attachments/assets/0d6c251d-8b3f-44e3-bb2f-358428644386" />
-
-
-```
-┌──────────────────────────── claudewitz (Go + Bubble Tea) ─────────────────────────────┐
-│ chat viewport · input · permission dialogs · status bar (model, mode, ctx, 5h/7d usage) │
-└──────────────┬──────────────────────────────────────────────────────▲───────────────────┘
-   stdin: user messages, permission answers,             stdout: stream_event deltas,
-   control requests (interrupt, set_model,               assistant/user messages, result,
-   set_permission_mode)                                  rate_limit_event, can_use_tool
-┌──────────────▼──────────────────────────────────────────────────────┴───────────────────┐
-│ claude -p --input-format stream-json --output-format stream-json                        │
-│        --include-partial-messages --permission-prompt-tool stdio                        │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Requirements
-
-- Go 1.24+
-- Claude Code CLI on your `PATH`, logged in (`npm i -g @anthropic-ai/claude-code`, then run `claude` once)
-
-## Install
-
-**Homebrew** (macOS and Linux):
-
-```sh
-brew install exmanubis/tap/claudewitz
-```
-
-**Prebuilt binaries** for macOS, Linux and Windows (Intel and ARM) are on the
-[releases page](https://github.com/ExManubis/Claudewitz/releases): download the archive for your
-platform, unpack it and put `claudewitz` somewhere on your `PATH`, e.g. `/usr/local/bin` or
-`~/.local/bin`.
-
-**With Go:**
-
-```sh
-go install github.com/exmanubis/claudewitz@latest
-```
-
-Or from a clone: `make install` (and `make uninstall`). Either way the `claudewitz` command lands
-in Go's bin folder, `~/go/bin` unless you've set `GOBIN`. If that folder isn't on your `PATH` yet
-(`make install` tells you), add it to your shell profile (`~/.zshrc`, `~/.bashrc`):
-
-```sh
-export PATH="$HOME/go/bin:$PATH"
-```
-
-`claudewitz -version` shows what you're running. To update: `brew upgrade claudewitz`, a newer
-release archive, or `go install …@latest` again.
-
-## Run
-
-```sh
-claudewitz                      # in the project you want to work on
-claudewitz -model opus -effort high -mode acceptEdits
-claudewitz -continue            # pick up the latest session in this directory
-claudewitz -resume <session-id>
-claudewitz -- --add-dir ../lib  # anything after -- goes straight to claude
-```
-
-From a clone without installing, `go run .` takes the same flags.
-
-## Configuration
-
-Settings live in `~/.config/claudewitz/config.json` on every platform (`$XDG_CONFIG_HOME/claudewitz/`
-if that's set, or `$CLAUDEWITZ_CONFIG` to point at a file of your own), with prompt history in
-`history.jsonl` beside it. Older versions kept these in `~/Library/Application Support/claudewitz/`
-on macOS; they're moved over automatically the first time you start a new version.
+<img width="3014" height="2086" alt="claudewitz screenshot" src="https://github.com/user-attachments/assets/0d6c251d-8b3f-44e3-bb2f-358428644386" />
 
 ## Features
 
-**Chat**
-- Streaming responses with Markdown rendering, plus thinking blocks. Streamed text is revealed at
-  a steady pace that speeds up as it falls behind, so replies flow instead of arriving in bursts
-- Images inline: ones you attach, and ones tools return (Read on a screenshot, browser tools),
-  drawn in colour with half blocks; `space` on a selected message or `ctrl+o` shows them larger
-- Tool calls inline with status and collapsible output (`ctrl+o`)
-- Edits and writes shown as syntax-highlighted diffs with line numbers, side by side (old on the
-  left, new on the right) when there's room for it. `/diff auto|split|unified` picks the layout,
-  saved in the config; `t` in a permission prompt flips it
-- Interrupt with `esc`
-- Messages sent while Claude is working are queued: a pill above the input shows them until Claude
-  picks them up, then they join the transcript at the point Claude actually reads them
+- **Streaming chat** with Markdown, thinking blocks, inline images and collapsible tool calls
+- **Readable diffs**: edits show as syntax-highlighted diffs, side by side when there's room
+- **Permission and plan dialogs**: review an edit's full diff before you allow it, answer
+  Claude's questions and approve plans
+- **Sidebar** with context and subscription usage, todos, live sub-agents, git status and
+  changed files
+- **Changes viewer** (`ctrl+s`) for browsing every file changed in the working tree
+- **Sessions**: resume any past session (`ctrl+r`), with prompt history across sessions
+- **Model and effort picker** (`ctrl+t`), plus autocompletion for `/` commands and `@` files
+- **Desktop notifications** when Claude needs you or finishes a turn, and they work over SSH too
+- **Themes**: claude, charm, flexoki, catppuccin, tokyonight, gruvbox, dracula, nord and mono,
+  each in light and dark (`/theme`)
 
-**Transcript navigation** (`tab` to focus the chat, `tab`/`esc` to go back)
-- `j`/`k` or arrows select messages and tool calls; `g`/`G` jump to the top or bottom; `d`/`u`
-  and `f`/`b` page the view and carry the selection
-- `space` expands or collapses just the selected item (`ctrl+o` still toggles them all); `enter`
-  does the same, except on an Edit, MultiEdit or Write, where it opens the whole diff in the
-  centred panel, read-only (`j`/`k` scroll, `t` layout, `esc` closes)
-- `y` copies the selected item's source (Markdown, command and output, file contents) via OSC 52
-- Click an entry to select it, click again to expand it; start typing to return to the input
-- Drag across the transcript to select text; releasing copies it (OSC 52). Dragging past the top
-  or bottom edge scrolls; any key clears the highlight
-- A scrollbar shows on the right of the chat when it overflows; drag the thumb or click the track
+## Install
 
-**Prompt**
-- `↑`/`↓` on an empty input recalls earlier prompts for this project, including ones from past
-  sessions; kept in `history.jsonl` next to the config
-- After each turn Claude Code predicts your next prompt and shows it in the empty input: `→`
-  takes it to edit, `enter` sends it as-is
-- `ctrl+x` (or `/edit`) opens the prompt in `$VISUAL`/`$EDITOR` for long prompts
-- Images: `ctrl+v` pastes one from the clipboard (pngpaste/osascript on macOS, wl-paste/xclip
-  on Linux), dragging image files into the terminal attaches them, and `ctrl+f` or `/image path`
-  picks one with completion. They show as chips above the input (`⌫` on an empty prompt removes
-  the last); PNG, JPEG, GIF and WebP, with large images scaled to 1568px and re-encoded
-- Status pills above the input: queued messages, todo progress with the current task, and running
-  agents when the sidebar is hidden
-
-**Desktop notifications**: when a permission prompt, question or plan is waiting, or a turn
-finishes, while the terminal isn't focused. Sent through the terminal with escape codes
-(OSC 9/99/777, tmux passthrough), so they work over SSH too, or as just the bell.
-`/notifications auto|osc|bell|off`, saved in the config. Needs a terminal that reports focus
-
-**Icons**: [Nerd Font](https://www.nerdfonts.com) icons by default for git branches, image
-attachments, permission modes, status pills and toasts. Without a Nerd Font they show as boxes;
-`/icons unicode` switches to plain Unicode symbols (`/icons nerd` switches back), saved in the
-config.
-
-**Sidebar** (`ctrl+b`, auto-hidden below 100 columns)
-- When it's hidden, a one-line header shows the model, branch and directory instead. Below 100
-  columns `ctrl+b` opens the sidebar as a drawer over the chat (`ctrl+b` or a click closes it)
-- Session title, directory, model and account type
-- Context size and subscription usage meters (5-hour and weekly, with time to reset)
-- Todo list (from `TodoWrite` / `TaskCreate` / `TaskUpdate`)
-- Live sub-agent activity: type, task, tool count, tokens, elapsed time and their latest
-  tool calls, also mirrored under the `Agent` call in the chat
-- Git: branch, ahead/behind upstream, staged/changed/new counts and the last commit
-- Changes: the working tree's changed files with status letters and +/- counts, ✻ marking
-  files Claude edited this session (outside a repository: the files Claude edited). Click one to
-  open it in the changes viewer, in either case
-- The mascot, pinned to the bottom (about a quarter of the sidebar, hidden when it's under 20
-  rows): a 3D bean in headphones, ray-marched and dithered into Braille dots, bopping to a beat
-  with music notes drifting up. While Claude works it dissolves into a swirl of sparks (faster
-  while writing, running commands or with agents out); when the turn ends they gather back into
-  the bean with a flash. When a prompt waits for you it stops, faces you wide-eyed and its
-  headphones pulse amber. It holds still while the terminal isn't focused. The caption under it
-  shows the activity and elapsed time
-
-**Changes viewer** (`ctrl+s`, `/changes`, the palette, or a click on a file in the sidebar)
-- The changed files beside the selected one's diff against HEAD, staged and unstaged together,
-  with the same highlighted, side-by-side-when-wide diffs as the chat. New files show in full
-- `j`/`k`, `d`/`u`, `f`/`b`, `g`/`G` and the wheel scroll; `tab`/`shift+tab` (or `[`/`]`) switch
-  files; `t` flips split/unified; `e` opens the file in `$VISUAL`/`$EDITOR`; `esc` closes
-- Follows the sidebar's git polling, so the diff updates while Claude works
-- Outside a git repository it lists the files Claude edited this session instead (click one under
-  Modified files in the sidebar), each with the diffs of those edits
-- It's the same centred panel as edit approvals and transcript diffs: every diff in claudewitz
-  opens in one place and looks the same
-
-**Sessions** (`ctrl+r` or `/resume`)
-- Browse sessions for this project or all projects (`tab`), filter as you type
-- Resuming replays the transcript and switches to the session's directory
-
-**Autocompletion**
-- `/` commands, including every command, skill and plugin Claude Code reports
-- Arguments for `/model` (from the CLI's model list), `/mode` and `/theme`
-- `@` file mentions, fuzzy-matched against `git ls-files` (or a directory walk)
-
-**Permissions**
-- Allow once, always allow a tool for the session, deny, or deny and stop
-- Edit, MultiEdit and Write requests open a centred panel with the whole diff: placed at the
-  file's real line numbers with a header per hunk, and a Write over an existing file diffs
-  against it. Scroll with `j`/`k`, `d`/`u` or the wheel, `t` switches between side-by-side and
-  unified, and answer with the buttons (`←→` and `enter`, or a click) or `y`/`a`/`n`/`ctrl+c`.
-  Whether Claude asks at all follows its permission mode: in accept-edits mode edits just happen
-- Other requests show above the input; sub-agent requests name the agent asking
-- Permission modes: `shift+tab` cycles default → accept edits → plan
-
-**Questions and plan approval**
-- When Claude asks questions (`AskUserQuestion`), a dialog shows each question with its options:
-  single or multiple choice, number keys to pick, "Other…" for a free-text answer, tabs and a
-  review step for several questions. Answers go back to Claude and show in the transcript
-- When Claude finishes a plan in plan mode (`ExitPlanMode`), the plan renders as Markdown in the
-  chat and you choose: approve and auto-accept edits, approve and review each edit, or keep
-  planning. Feedback is sent as a normal message from you, so Claude treats it as your request
-
-**Model picker** (`ctrl+t`, `/model`, or the palette)
-- Every model the CLI offers, with descriptions and the resolved model id
-- Effort level per model (low → max) with a meter; applied to the running session, and kept
-  for `/new` and resumes. Also `/effort <level>` and `-effort` on the command line
-
-**Toasts**: notifications slide in at the top right and fade out, for model, effort, mode and
-theme changes, resumed and new sessions, background agents finishing, long turns finishing,
-rate limits, usage crossing 80% and 90% of the 5-hour or weekly window, branch switches and new
-commits (including ones made outside claudewitz), and Claude Code exiting
-
-**Themes** (`/theme` or the palette opens the picker)
-- claude (default), charm, flexoki, catppuccin, tokyonight, gruvbox, dracula, nord, mono,
-  each with light and dark variants and matching syntax highlighting
-- The picker previews each theme live across the whole UI as you move through it; enter saves,
-  esc puts everything back. ←→ forces the dark or light variant when detection gets it wrong
-- Saved to `~/.config/claudewitz/config.json`; `-theme name` overrides it for one run
-
-## How it talks to Claude Code
-
-- Starts `claude -p` in stream-json mode with `--permission-prompt-tool stdio` and
-  `--forward-subagent-text`
-- Sends an `initialize` control request on startup to get commands, models and account info
-- Switches model with `set_model` and effort with `apply_flag_settings` (`effortLevel`), mid-session
-- Answers `AskUserQuestion` by allowing it with `updatedInput.answers`; approves plans with a
-  `setMode` permission update for accept-edits, and follows the CLI's own mode changes
-- Renders `stream_event` deltas live and takes tool calls and results from complete messages
-- Follows sub-agents through `task_started` / `task_progress` / `task_updated` /
-  `task_notification` events and messages tagged with `parent_tool_use_id`
-- Reads history from `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`
-- Reads git state with `git status --porcelain=v2` and `git diff --numstat` after file-changing
-  tools, after each turn and every 4s, with `GIT_OPTIONAL_LOCKS=0` so it never holds the index lock
-- Removes `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` from the child's environment so that running
-  claudewitz inside Claude Code doesn't pin every child to the parent session
-
-## Roadmap ideas
-
-- Drill into a sub-agent's full transcript
-- Multiple concurrent sessions in tabs
-- Persisted per-project "always allow" rules
-
-## Releasing
-
-Push a version tag and the release workflow does the rest: GoReleaser builds the binaries,
-publishes a GitHub release with checksums and updates the cask in
-[ExManubis/homebrew-tap](https://github.com/ExManubis/homebrew-tap).
+You need the [Claude Code CLI](https://github.com/anthropics/claude-code) installed and
+logged in (`npm i -g @anthropic-ai/claude-code`, then run `claude` once).
 
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
+brew install exmanubis/tap/claudewitz                # macOS and Linux
+go install github.com/exmanubis/claudewitz@latest     # with Go 1.24+
 ```
 
-It needs a `HOMEBREW_TAP_GITHUB_TOKEN` repository secret that can push to the tap. Dry run locally
-with `goreleaser release --snapshot --clean`.
+Or download a prebuilt binary for macOS, Linux or Windows from the
+[releases page](https://github.com/ExManubis/Claudewitz/releases) and put it on your `PATH`.
+
+## Usage
+
+Run it in the project you want to work on:
+
+```sh
+claudewitz
+claudewitz -continue                 # pick up the latest session here
+claudewitz -resume <session-id>
+claudewitz -model opus -effort high -mode acceptEdits
+claudewitz -- --add-dir ../lib       # anything after -- goes straight to claude
+```
+
+`esc` interrupts Claude, `tab` moves focus to the transcript, `shift+tab` cycles permission
+modes and `ctrl+b` toggles the sidebar.
+
+**Icons look like boxes?** claudewitz uses [Nerd Font](https://www.nerdfonts.com) icons by
+default. Install a Nerd Font or run `/icons unicode`.
+
+## Configuration
+
+Settings are saved to `~/.config/claudewitz/config.json`, or to `$XDG_CONFIG_HOME/claudewitz/` if
+that is set. Set `$CLAUDEWITZ_CONFIG` to use a different file. Most settings, like the theme,
+diff layout and notifications, are changed from inside the app.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for building from source, how claudewitz talks to Claude
+Code, and releasing.
