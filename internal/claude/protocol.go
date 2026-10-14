@@ -9,6 +9,8 @@ package claude
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/exmanubis/claudewitz/internal/safetext"
 )
 
 // Envelope is the common shape of every line the CLI writes to stdout.
@@ -42,6 +44,21 @@ type ContentBlock struct {
 	Content   json.RawMessage `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
 	Source    *ImageSource    `json:"source,omitempty"` // image blocks
+}
+
+// UnmarshalJSON makes the block's text and tool input safe to display
+// (see safetext). Blocks are only ever displayed: what goes back to the
+// CLI, such as a permission request's input, is kept as sent.
+func (b *ContentBlock) UnmarshalJSON(data []byte) error {
+	type alias ContentBlock
+	if err := json.Unmarshal(data, (*alias)(b)); err != nil {
+		return err
+	}
+	b.Text, b.Thinking = safetext.Clean(b.Text), safetext.Clean(b.Thinking)
+	if len(b.Input) > 0 {
+		b.Input = safetext.JSON(b.Input)
+	}
+	return nil
 }
 
 // ImageSource is the payload of an image block.
@@ -85,7 +102,7 @@ func (m *Message) UnmarshalJSON(b []byte) error {
 	}
 	var s string
 	if json.Unmarshal(raw.Content, &s) == nil {
-		m.Content = []ContentBlock{{Type: "text", Text: s}}
+		m.Content = []ContentBlock{{Type: "text", Text: safetext.Clean(s)}}
 		return nil
 	}
 	return json.Unmarshal(raw.Content, &m.Content)

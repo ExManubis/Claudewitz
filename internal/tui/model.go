@@ -1229,7 +1229,9 @@ type queuedMsg struct {
 func (m *Model) takeQueued(replay string) {
 	kept := m.queued[:0]
 	for _, q := range m.queued {
-		if strings.Contains(replay, q.text) { // image-only messages have no text to match
+		// The replay is cleaned for display (see claude.ContentBlock), so
+		// match against the cleaned text. Image-only messages have no text.
+		if strings.Contains(replay, safetext.Clean(q.text)) {
 			m.chat.add(&entry{kind: kindUser, text: q.text, images: q.images, pics: q.pics})
 		} else {
 			kept = append(kept, q)
@@ -1648,7 +1650,7 @@ func (m Model) prettyInput(tool string, raw json.RawMessage, width int) string {
 	rel := relPath(fp, m.cwd())
 	switch tool {
 	case "Bash":
-		return lipgloss.NewStyle().Width(width).Render(statusKey.Render("$ ") + textStyle.Render(str(in, "command")))
+		return lipgloss.NewStyle().Width(width).Render(statusKey.Render("$ ") + textStyle.Render(safetext.Clean(str(in, "command"))))
 	case "Edit":
 		return textStyle.Render(rel) + "\n" + renderDiff(computeDiff(str(in, "old_string"), str(in, "new_string")), fp, width, 14)
 	case "MultiEdit":
@@ -1665,7 +1667,7 @@ func (m Model) prettyInput(tool string, raw json.RawMessage, width int) string {
 	case "Write":
 		return textStyle.Render(rel) + "\n" + renderDiff(addedLines(str(in, "content")), fp, width, 12)
 	case "WebFetch":
-		return textStyle.Render(str(in, "url"))
+		return textStyle.Render(safetext.Line(str(in, "url")))
 	}
 	b, _ := json.MarshalIndent(in, "", "  ")
 	return mutedStyle.Render(clipText(string(b), width, 12))

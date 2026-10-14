@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/exmanubis/claudewitz/internal/safetext"
 )
 
 // Options configures how the CLI is launched.
@@ -174,6 +176,7 @@ func parseLine(line []byte) (Event, bool) {
 		case "task_started", "task_progress", "task_updated", "task_notification":
 			var e TaskEvent
 			if json.Unmarshal(line, &e) == nil {
+				e.Description, e.Summary = safetext.Clean(e.Description), safetext.Clean(e.Summary)
 				return Event{Task: &e}, true
 			}
 		case "status":
@@ -206,11 +209,14 @@ func parseLine(line []byte) (Event, bool) {
 	case "stream_event":
 		var e StreamEvent
 		if json.Unmarshal(line, &e) == nil {
+			d := &e.Event.Delta
+			d.Text, d.Thinking = safetext.Clean(d.Text), safetext.Clean(d.Thinking)
 			return Event{Stream: &e}, true
 		}
 	case "result":
 		var e ResultEvent
 		if json.Unmarshal(line, &e) == nil {
+			e.Result = safetext.Clean(e.Result)
 			return Event{Result: &e}, true
 		}
 	case "prompt_suggestion":
@@ -218,7 +224,7 @@ func parseLine(line []byte) (Event, bool) {
 			Suggestion string `json:"suggestion"`
 		}
 		if json.Unmarshal(line, &ps) == nil && strings.TrimSpace(ps.Suggestion) != "" {
-			return Event{Suggestion: ps.Suggestion}, true
+			return Event{Suggestion: safetext.Clean(ps.Suggestion)}, true
 		}
 	case "rate_limit_event":
 		var e RateLimitEvent
@@ -259,6 +265,9 @@ func parseLine(line []byte) (Event, bool) {
 			var pr PermissionRequest
 			if json.Unmarshal(cr.Request, &pr) == nil {
 				pr.RequestID = cr.RequestID
+				// Display-only fields; Input goes back to the CLI as sent.
+				pr.Description, pr.DisplayName = safetext.Clean(pr.Description), safetext.Line(pr.DisplayName)
+				pr.BlockedPath = safetext.Line(pr.BlockedPath)
 				return Event{Permission: &pr}, true
 			}
 		}

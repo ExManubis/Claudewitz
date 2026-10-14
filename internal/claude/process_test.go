@@ -118,3 +118,17 @@ func TestResultContextWindow(t *testing.T) {
 		}
 	}
 }
+
+// Text and tool input from the CLI are cleaned for display, but a
+// permission request's input, which goes back to the CLI, is kept as sent.
+func TestParseCleansDisplayTextOnly(t *testing.T) {
+	ev, _ := parseLine([]byte(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi\u001b]0;x\u0007"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls\u001b[8m"}}]}}`))
+	blocks := ev.Message.Message.Content
+	if blocks[0].Text != "hi␛]0;x" || strings.Contains(string(blocks[1].Input), `\u001b`) {
+		t.Errorf("assistant message not cleaned: %q %s", blocks[0].Text, blocks[1].Input)
+	}
+	ev, _ = parseLine([]byte(`{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls\u001b[8m"},"description":"d\u001b[8m"}}`))
+	if string(ev.Permission.Input) != `{"command":"ls\u001b[8m"}` || ev.Permission.Description != "d␛[8m" {
+		t.Errorf("permission request: input %s, description %q", ev.Permission.Input, ev.Permission.Description)
+	}
+}

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,4 +126,32 @@ func TestNoNotificationWhileFocused(t *testing.T) {
 	if m.desktopNotify("x", "y") != nil {
 		t.Fatal("off means off")
 	}
+}
+
+// A queued message with control characters (a pasted \r) still matches
+// its replay, which arrives cleaned.
+func TestQueuedMessageWithControlCharsJoins(t *testing.T) {
+	t.Setenv("CLAUDEWITZ_CONFIG", filepath.Join(t.TempDir(), "config.json"))
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m.width, m.height = 120, 40
+	m.queued = []queuedMsg{{text: "line one\r\nline two"}}
+	ev, ok := parseReplay(t, "line one\r\nline two")
+	if !ok {
+		t.Fatal("replay didn't parse")
+	}
+	m.takeQueued(ev)
+	if len(m.queued) != 0 {
+		t.Fatalf("queued message stuck: %q", m.queued[0].text)
+	}
+}
+
+// parseReplay decodes a user message the way the CLI echoes it back.
+func parseReplay(t *testing.T, text string) (string, bool) {
+	t.Helper()
+	b, _ := json.Marshal(map[string]any{"role": "user", "content": text})
+	var msg claude.Message
+	if err := json.Unmarshal(b, &msg); err != nil {
+		return "", false
+	}
+	return msg.Text(), true
 }

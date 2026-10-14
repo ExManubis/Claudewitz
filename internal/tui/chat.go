@@ -11,6 +11,8 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/exmanubis/claudewitz/internal/safetext"
 )
 
 type entryKind int
@@ -722,8 +724,13 @@ func summarizeInput(tool string, raw json.RawMessage, max int) string {
 	return s
 }
 
-// toolResultText flattens a tool_result content field to text.
+// toolResultText flattens a tool_result content field to text that is
+// safe to display.
 func toolResultText(raw json.RawMessage) string {
+	return safetext.Clean(rawResultText(raw))
+}
+
+func rawResultText(raw json.RawMessage) string {
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
 		return s

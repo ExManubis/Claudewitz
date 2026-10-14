@@ -292,7 +292,7 @@ func load(path string, sidechain bool) ([]Message, error) {
 			if strings.HasPrefix(strings.TrimSpace(s), "<") {
 				continue
 			}
-			blocks = []claude.ContentBlock{{Type: "text", Text: s}}
+			blocks = []claude.ContentBlock{{Type: "text", Text: safetext.Clean(s)}}
 		} else if json.Unmarshal(m.Content, &blocks) != nil {
 			continue
 		}
