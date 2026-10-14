@@ -172,10 +172,16 @@ func (m *Model) actions() []action {
 		}
 		add("Icons", mode, iconModeDesc[mode], cur, func(m *Model) tea.Cmd { return m.setIcons(mode) })
 	}
+	for _, mode := range diffModes {
+		mode := mode
+		cur := ""
+		if mode == diffMode {
+			cur = "current"
+		}
+		add("Diffs", mode, diffModeDesc[mode], cur, func(m *Model) tea.Cmd { return m.setDiffMode(mode) })
+	}
 	add("View", "Toggle sidebar", "", "ctrl+b", func(m *Model) tea.Cmd {
-		m.sidebarOn = !m.sidebarOn
-		m.layout()
-		return nil
+		return m.toggleSidebar()
 	})
 	add("View", "Expand tool output", "show full tool results and diffs", "ctrl+o", func(m *Model) tea.Cmd {
 		m.chat.expanded = !m.chat.expanded

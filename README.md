@@ -89,7 +89,9 @@ on macOS; they're moved over automatically the first time you start a new versio
 **Chat**
 - Streaming responses with Markdown rendering, plus thinking blocks
 - Tool calls inline with status and collapsible output (`ctrl+o`)
-- Edits and writes shown as syntax-highlighted diffs with line numbers
+- Edits and writes shown as syntax-highlighted diffs with line numbers, side by side (old on the
+  left, new on the right) when there's room for it. `/diff auto|split|unified` picks the layout,
+  saved in the config; `t` in a permission prompt flips it
 - Interrupt with `esc`
 - Messages sent while Claude is working are queued: a pill above the input shows them until Claude
   picks them up, then they join the transcript at the point Claude actually reads them
@@ -128,6 +130,8 @@ attachments, permission modes, status pills and toasts. Without a Nerd Font they
 config.
 
 **Sidebar** (`ctrl+b`, auto-hidden below 100 columns)
+- When it's hidden, a one-line header shows the model, branch and directory instead. Below 100
+  columns `ctrl+b` opens the sidebar as a drawer over the chat (`ctrl+b` or a click closes it)
 - Session title, directory, model and account type
 - Context size and subscription usage meters (5-hour and weekly, with time to reset)
 - Todo list (from `TodoWrite` / `TaskCreate` / `TaskUpdate`)
@@ -155,7 +159,8 @@ config.
 
 **Permissions**
 - Allow once, always allow a tool for the session, deny, or deny and stop
-- Edit/Write requests preview the diff; sub-agent requests name the agent asking
+- Edit/Write requests preview the diff (`t` switches between side-by-side and unified); sub-agent
+  requests name the agent asking
 - Permission modes: `shift+tab` cycles default → accept edits → plan
 
 **Questions and plan approval**

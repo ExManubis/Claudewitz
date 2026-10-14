@@ -41,7 +41,11 @@ func (m Model) helpPairs() [][2]string {
 	case m.question != nil || m.plan != nil:
 		return m.interactionHelp()
 	case len(m.pending) > 0:
-		return [][2]string{{"y", "allow"}, {"a", "always"}, {"n", "deny"}, {"ctrl+c", "deny & stop"}}
+		pairs := [][2]string{{"y", "allow"}, {"a", "always"}, {"n", "deny"}, {"ctrl+c", "deny & stop"}}
+		if isDiffTool(m.pending[0].ToolName) {
+			pairs = append(pairs, [2]string{"t", "diff layout"})
+		}
+		return pairs
 	case m.comp.active:
 		return [][2]string{{"↑↓", "select"}, {"tab", "accept"}, {"esc", "dismiss"}}
 	}

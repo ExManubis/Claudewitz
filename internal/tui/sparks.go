@@ -514,7 +514,7 @@ func (m Model) sparkTarget() (sparkMode, float64) {
 
 // syncSparks updates the field's mode and starts its tick loop if needed.
 func (m *Model) syncSparks() tea.Cmd {
-	if m.sparks == nil || !m.showSidebar() || sparkRows(m.height-1) == 0 {
+	if m.sparks == nil || !m.sidebarVisible() || sparkRows(m.height-1) == 0 {
 		return nil
 	}
 	mode, _ := m.sparkTarget()
@@ -540,7 +540,7 @@ func (m *Model) onSparkTick(msg sparkTickMsg) tea.Cmd {
 	dt := math.Min(0.1, now.Sub(m.sparkLast).Seconds())
 	m.sparkLast = now
 	m.sparks.step(energy, dt)
-	if !m.sparks.animating() || !m.showSidebar() {
+	if !m.sparks.animating() || !m.sidebarVisible() {
 		m.sparkTicking = false
 		return nil
 	}

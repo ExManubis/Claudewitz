@@ -20,6 +20,9 @@ type Config struct {
 	Notifications string `json:"notifications,omitempty"`
 	// Icons is "nerd" (default, needs a Nerd Font) or "unicode".
 	Icons string `json:"icons,omitempty"`
+	// Diff lays out edit diffs: "auto" (default, side by side when wide
+	// enough), "split" or "unified".
+	Diff string `json:"diff,omitempty"`
 }
 
 // HistoryPath is where claudewitz keeps prompt history, next to the config.
