@@ -55,12 +55,13 @@ func (f *fakeSession) Detach() error {
 }
 
 type fakeDaemon struct {
-	mu       sync.Mutex
-	list     []daemon.SessionSummary
-	overview chan daemon.Frame
-	attached []string
-	started  []claude.Options
-	procs    map[string]*fakeSession
+	mu        sync.Mutex
+	list      []daemon.SessionSummary
+	overview  chan daemon.Frame
+	attached  []string
+	started   []claude.Options
+	procs     map[string]*fakeSession
+	attachErr error // returned (and cleared) by the next Attach
 }
 
 func newFakeDaemon(list ...daemon.SessionSummary) *fakeDaemon {
@@ -81,6 +82,10 @@ func (d *fakeDaemon) Attach(_ context.Context, id string) (claude.Session, error
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.attached = append(d.attached, id)
+	if err := d.attachErr; err != nil {
+		d.attachErr = nil
+		return nil, err
+	}
 	p := newFakeSession()
 	d.procs[id] = p
 	return p, nil

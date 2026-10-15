@@ -289,6 +289,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.chat.error("could not start claude: %v", msg.err)
 				m.refresh()
 			})
+			if msg.id != "" && v.id == msg.id {
+				// A failed attach: forget the id so focusing it again retries.
+				v.id = ""
+				if v != m.sessionView {
+					m.removeView(v)
+				}
+			}
 			return m, nil
 		}
 		v.proc = msg.proc

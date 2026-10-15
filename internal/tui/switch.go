@@ -31,6 +31,16 @@ func attachCmd(d Daemon, v *sessionView, id string) tea.Cmd {
 // focusSession shows the session with daemon id id, attaching to it the
 // first time: its history from the transcript, then its live events.
 func (m *Model) focusSession(id string) tea.Cmd {
+	prev := m.sessionView
+	cmd := m.focusSessionView(id)
+	// A view whose attach failed is dead once it loses focus.
+	if prev != m.sessionView && prev.id == "" && prev.proc == nil && m.daemon != nil {
+		m.removeView(prev)
+	}
+	return cmd
+}
+
+func (m *Model) focusSessionView(id string) tea.Cmd {
 	if v := m.viewByID(id); v != nil {
 		delete(m.done, id)
 		return m.focus(v)

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -96,5 +97,19 @@ func TestPickLaunch(t *testing.T) {
 	}
 	if id := pickLaunch([]daemon.SessionSummary{sum("s_3", "/x/else", daemon.StateIdle)}, "/x/here"); id != "" {
 		t.Fatalf("launch picked %q in another folder", id)
+	}
+}
+
+// A failed attach leaves nothing behind, so focusing the session again retries.
+func TestFocusSessionRetriesAfterFailedAttach(t *testing.T) {
+	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle), sum("s_2", "/x/b", daemon.StateIdle))
+	m := daemonModel(t, d)
+	d.attachErr = errors.New("gone")
+
+	m = run(t, m, m.focusSession("s_2"))
+	m = run(t, m, m.focusSession("s_1"))
+	m = run(t, m, m.focusSession("s_2"))
+	if len(d.attached) != 2 || m.sessionView.id != "s_2" || m.proc == nil {
+		t.Fatalf("attached %v, focused %q, proc %v", d.attached, m.sessionView.id, m.proc)
 	}
 }
