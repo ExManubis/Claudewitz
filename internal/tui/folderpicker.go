@@ -135,8 +135,10 @@ func completeDir(input string) string {
 	return filepath.Join(parent, common)
 }
 
+// openFolders opens the folder picker with the focused session's folder
+// first and selected, so enter starts a session right there.
 func (m *Model) openFolders() tea.Cmd {
-	var live []string
+	live := []string{m.opts.CWD}
 	for _, s := range m.live {
 		if s.CWD != "" {
 			live = append(live, s.CWD)

@@ -150,14 +150,14 @@ func TestQuitDetachesEverySession(t *testing.T) {
 	}
 }
 
-// /new in a daemon session detaches from it (it keeps running in the
+// /clear in a daemon session detaches from it (it keeps running in the
 // panel) and starts a fresh one.
 func TestNewDetachesTheDaemonSession(t *testing.T) {
 	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle), sum("s_2", "/x/b", daemon.StateIdle))
 	m := daemonModel(t, d)
 	p := newFakeSession()
 	m.proc = p
-	cmd, _ := m.slash("/new")
+	cmd, _ := m.slash("/clear")
 	m = run(t, m, cmd)
 	if p.stopped || !p.detached {
 		t.Fatalf("old proc stopped %v detached %v", p.stopped, p.detached)

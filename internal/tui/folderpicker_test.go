@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -76,5 +77,30 @@ func TestCompleteDirTrailingSlash(t *testing.T) {
 	os.Mkdir(filepath.Join(two, "beta"), 0o755)
 	if got := completeDir(two + "/"); got != two+"/" {
 		t.Fatalf("no common prefix: %q", got)
+	}
+}
+
+// With the daemon, /new and the palette's one "New session…" open the
+// picker on the focused session's folder, so enter starts one right there.
+func TestNewOpensPickerOnCurrentFolder(t *testing.T) {
+	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle), sum("s_2", "/x/b", daemon.StateIdle))
+	m := daemonModel(t, d)
+	m.opts.CWD = "/x/b"
+	m.slash("/new")
+	if m.folders == nil || m.folders.choice() != "/x/b" {
+		t.Fatalf("picker %v", m.folders)
+	}
+	news := 0
+	for _, a := range m.actions() {
+		if strings.HasPrefix(a.label, "New session") {
+			news++
+		}
+	}
+	if news != 1 {
+		t.Fatalf("%d New session entries", news)
+	}
+	m = run(t, m, m.handleFoldersKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	if len(d.started) != 1 || d.started[0].CWD != "/x/b" {
+		t.Fatalf("started %+v", d.started)
 	}
 }
