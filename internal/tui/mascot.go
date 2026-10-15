@@ -2,10 +2,10 @@ package tui
 
 import "math"
 
-// The sidebar mascot: a bean in headphones, bopping to a beat. It's a small
-// 3D scene of signed distance functions, ray-marched once per frame of the
-// loop whenever the indicator changes size, then dithered into Braille dots
-// at draw time so it follows the theme.
+// The sidebar mascot: tty, a robot with a monitor for a head, bopping to a
+// beat. It's a small 3D scene of signed distance functions, ray-marched
+// once per frame of the loop whenever the indicator changes size, then
+// dithered into Braille dots at draw time so it follows the theme.
 
 type vec3 struct{ x, y, z float64 }
 
@@ -35,11 +35,12 @@ func (a vec3) rotX(r float64) vec3 {
 const (
 	matNone int8 = iota - 1
 	matBody
-	matDark
-	matEye
-	matPink  // cheeks and ear cups
-	matPhone // headband and boots
-	matGold  // music notes
+	matDark   // the screen: drawn as no dots, a black CRT
+	matEye    // unused by tty, kept so the material set stays stable
+	matPink   // unused by tty, kept so the material set stays stable
+	matPhone  // antenna stalk and feet
+	matGold   // antenna light
+	matPrompt // what's on the screen
 	matCount
 )
 
@@ -50,17 +51,10 @@ func sdEllipsoid(p, c, r vec3) float64 {
 	return (q.length() - 1) * math.Min(r.x, math.Min(r.y, r.z))
 }
 
-// sdTorusZ is a ring lying in the xy plane.
-func sdTorusZ(p, c vec3, big, small float64) float64 {
-	q := p.sub(c)
-	return math.Hypot(math.Hypot(q.x, q.y)-big, q.z) - small
-}
-
-// sdCylX is a capped cylinder along the x axis.
-func sdCylX(p, c vec3, r, h float64) float64 {
-	q := p.sub(c)
-	dx, dy := math.Hypot(q.y, q.z)-r, math.Abs(q.x)-h
-	return math.Min(math.Max(dx, dy), 0) + math.Hypot(math.Max(dx, 0), math.Max(dy, 0))
+// sdRoundBox is a box with half-extents b and corners rounded by r.
+func sdRoundBox(p, c, b vec3, r float64) float64 {
+	q := p.sub(c).abs().sub(b).add(vec3{r, r, r})
+	return q.maxc(0).length() + math.Min(math.Max(q.x, math.Max(q.y, q.z)), 0) - r
 }
 
 func sdCapsule(p, a, b vec3, r float64) float64 {
@@ -69,80 +63,100 @@ func sdCapsule(p, a, b vec3, r float64) float64 {
 	return pa.sub(ba.mul(h)).length() - r
 }
 
-// beanPose is everything that changes between frames.
-type beanPose struct {
+// mascotFace is what tty's screen shows.
+type mascotFace int
+
+const (
+	facePrompt mascotFace = iota // > and the cursor
+	faceAsk                      // a steady ?, waiting for you
+)
+
+// mascotPose is everything that changes between frames.
+type mascotPose struct {
 	yaw, pitch float64
 	bop        float64 // head tilt, radians, pivoting at the feet
-	eyeOpen    float64 // 1 open, ~0 closed, >1 wide
-	happy      bool    // ^ ^ eyes
-	notes      []float64
+	face       mascotFace
+	cursor     bool // the prompt's cursor is lit
+	led        bool // the antenna light is on
 }
 
-var beanPivot = vec3{0, 1.2, 0}
+var mascotPivot = vec3{0, 1.15, 0}
 
-// sdf returns the distance to the bean and the material of the nearest part.
-func (ps *beanPose) sdf(p vec3) (float64, int8) {
+// screenZ is the screen's front, where the glyphs sit.
+const screenZ = 0.6
+
+// sdf returns the distance to tty and the material of the nearest part: a
+// monitor for a head, its screen a black CRT with a green prompt, on a small
+// boxy body. y points down.
+func (ps *mascotPose) sdf(p vec3) (float64, int8) {
 	d, m := math.Inf(1), matNone
 	add := func(dd float64, mm int8) {
 		if dd < d {
 			d, m = dd, mm
 		}
 	}
-	// Music notes drift up beside the head, outside the bop.
-	for _, t := range ps.notes {
-		c := vec3{1.15 + 0.15*math.Sin(t*6), 0.5 - t*1.6, 0.2}
-		add(sdEllipsoid(p, c, vec3{0.09, 0.07, 0.06}), matGold)
-		add(sdCapsule(p, c.add(vec3{0.07, 0, 0}), c.add(vec3{0.07, -0.25, 0}), 0.02), matGold)
-	}
-	q := p.sub(beanPivot).rotZ(ps.bop).add(beanPivot)
+	q := p.sub(mascotPivot).rotZ(ps.bop).add(mascotPivot)
 
-	add(sdEllipsoid(q, vec3{0, 0.12, 0}, vec3{0.88, 1, 0.78}), matBody)
-	for _, s := range [2]float64{-1, 1} {
-		add(sdEllipsoid(q, vec3{s * 0.38, 1.1, 0.18}, vec3{0.2, 0.14, 0.27}), matPhone) // boots
-		add(sdSphere(q, vec3{s * 0.9, 0.35, 0}, 0.14), matBody)                         // arms
-		add(sdCylX(q, vec3{s * 0.92, 0, 0}, 0.26, 0.1), matPink)                        // ear cups
-		add(sdEllipsoid(q, vec3{s * 0.62, 0.25, 0.68}, vec3{0.15, 0.08, 0.1}), matPink) // cheeks
+	// Monitor head, the screen set into its front.
+	add(sdRoundBox(q, vec3{0, -0.2, 0}, vec3{0.88, 0.58, 0.55}, 0.14), matBody)
+	add(sdRoundBox(q, vec3{0, -0.2, 0.52}, vec3{0.7, 0.42, 0.07}, 0.07), matDark)
+	// Antenna and its light.
+	add(sdCapsule(q, vec3{0, -0.78, 0}, vec3{0, -1.02, 0}, 0.035), matPhone)
+	if ps.led {
+		add(sdSphere(q, vec3{0, -1.1, 0}, 0.1), matGold)
+	} else {
+		add(sdSphere(q, vec3{0, -1.1, 0}, 0.08), matPhone)
 	}
-	// Headband: the top half of a ring around the head.
-	add(math.Max(sdTorusZ(q, vec3{0, -0.05, 0}, 1, 0.06), q.y), matPhone)
-
-	// Face: big eyes (or happy arcs) and a small smile.
-	const fz, ey = 0.74, -0.05
+	// Neck, body, arms and feet.
+	add(sdCapsule(q, vec3{0, 0.38, 0}, vec3{0, 0.48, 0}, 0.13), matBody)
+	add(sdRoundBox(q, vec3{0, 0.7, 0}, vec3{0.55, 0.24, 0.4}, 0.12), matBody)
 	for _, s := range [2]float64{-1, 1} {
-		if ps.happy {
-			for i := 0; i < 5; i++ {
-				a := -1.1 + 2.2*float64(i)/4
-				add(sdSphere(q, vec3{s*0.34 + math.Sin(a)*0.13, ey + 0.06 - math.Cos(a)*0.12, fz - 0.02}, 0.04), matEye)
-			}
-		} else {
-			add(sdEllipsoid(q, vec3{s * 0.34, ey, fz - 0.06}, vec3{0.16, math.Max(0.025, 0.23*ps.eyeOpen), 0.1}), matEye)
+		add(sdSphere(q, vec3{s * 0.7, 0.64, 0}, 0.14), matBody)
+		add(sdEllipsoid(q, vec3{s * 0.3, 1.05, 0.1}, vec3{0.2, 0.11, 0.26}), matPhone)
+	}
+
+	// The screen.
+	stroke := func(pts ...[2]float64) {
+		for i := 0; i+1 < len(pts); i++ {
+			a, b := pts[i], pts[i+1]
+			add(sdCapsule(q, vec3{a[0], a[1], screenZ}, vec3{b[0], b[1], screenZ}, 0.045), matPrompt)
 		}
 	}
-	for i := 0; i < 5; i++ {
-		a := -0.8 + 1.6*float64(i)/4
-		add(sdSphere(q, vec3{math.Sin(a) * 0.14, ey + 0.34 - math.Cos(a)*0.06, fz - 0.01}, 0.04), matEye)
+	switch ps.face {
+	case faceAsk:
+		stroke([2]float64{-0.13, -0.38}, [2]float64{-0.05, -0.46}, [2]float64{0.08, -0.45},
+			[2]float64{0.14, -0.36}, [2]float64{0.1, -0.27}, [2]float64{0, -0.2}, [2]float64{0, -0.1})
+		add(sdSphere(q, vec3{0, 0.02, screenZ}, 0.05), matPrompt)
+	default:
+		// Big and bold, so the prompt keeps its shape at sidebar size.
+		const r = 0.07
+		add(sdCapsule(q, vec3{-0.5, -0.44, screenZ}, vec3{-0.2, -0.2, screenZ}, r), matPrompt)
+		add(sdCapsule(q, vec3{-0.2, -0.2, screenZ}, vec3{-0.5, 0.04, screenZ}, r), matPrompt)
+		if ps.cursor {
+			add(sdRoundBox(q, vec3{0.08, -0.2, screenZ}, vec3{0.11, 0.2, 0.03}, 0.02), matPrompt)
+		}
 	}
 	return d, m
 }
 
 // The scene's vertical extent, for framing.
-const beanTop, beanBottom = -1.25, 1.32
+const mascotTop, mascotBottom = -1.25, 1.2
 
-// beanFrame is one rendered frame: per dot, how lit it is and what it is.
-type beanFrame struct {
+// mascotFrame is one rendered frame: per dot, how lit it is and what it is.
+type mascotFrame struct {
 	inten []float32
 	mat   []int8
 }
 
-// renderBean ray-marches the scene into a w×h dot grid.
-func renderBean(w, h int, ps beanPose) beanFrame {
-	f := beanFrame{inten: make([]float32, w*h), mat: make([]int8, w*h)}
+// renderMascot ray-marches the scene into a w×h dot grid.
+func renderMascot(w, h int, ps mascotPose) mascotFrame {
+	f := mascotFrame{inten: make([]float32, w*h), mat: make([]int8, w*h)}
 	depth := make([]float64, w*h)
 	normals := make([]vec3, w*h)
-	view := (beanBottom - beanTop) * 1.06
-	cy0 := (beanTop + beanBottom) / 2
+	view := (mascotBottom - mascotTop) * 1.06
+	cy0 := (mascotTop + mascotBottom) / 2
 	const cam = 7.0
-	// The camera orbits the bean: rotate rays by the inverse pose.
+	// The camera orbits tty: rotate rays by the inverse pose.
 	rot := func(v vec3) vec3 { return v.rotX(ps.pitch).rotY(ps.yaw) }
 	ro := rot(vec3{0, 0, cam})
 	light := rot(vec3{-0.45, -0.55, 0.75}.norm())
@@ -190,7 +204,7 @@ func renderBean(w, h int, ps beanPose) beanFrame {
 			switch f.mat[i] {
 			case matDark:
 				in = 0
-			case matEye, matPink:
+			case matEye, matPink, matPrompt:
 				in = 1
 			case matGold, matPhone:
 				in = 0.45 + 0.55*lam
@@ -223,35 +237,30 @@ func renderBean(w, h int, ps beanPose) beanFrame {
 	return f
 }
 
-// beanLoop is the number of frames in one idle loop: two seconds, four bops.
+// mascotLoop is the number of frames in one idle loop: two seconds, four bops.
 const (
-	beanLoop = 32
-	beanFPS  = 16
+	mascotLoop = 32
+	mascotFPS  = 16
 )
 
-// beanIdlePose is frame i of the bopping loop.
-func beanIdlePose(i int) beanPose {
-	ph := float64(i) / beanLoop * 2 * math.Pi
-	beat := math.Sin(ph * 4)
-	ps := beanPose{yaw: 0.6 * math.Sin(ph), pitch: -0.15, bop: 0.12 * beat, eyeOpen: 1, happy: beat > 0.6}
-	if i%16 == 10 { // a blink each second, off the beat
-		ps.eyeOpen = 0.12
-	}
-	for k := 0; k < 2; k++ {
-		ps.notes = append(ps.notes, math.Mod(float64(i)/beanLoop*2+float64(k)*0.5, 1))
-	}
-	return ps
+// mascotIdlePose is frame i of the idle loop: bopping and turning, the cursor
+// and the antenna light blinking. The prompt stays put; a ^ ^ flash on the
+// beat read as the prompt glitching at this size.
+func mascotIdlePose(i int) mascotPose {
+	ph := float64(i) / mascotLoop * 2 * math.Pi
+	return mascotPose{yaw: 0.6 * math.Sin(ph), pitch: -0.15, bop: 0.1 * math.Sin(ph*4),
+		cursor: (i/4)%2 == 0, led: (i/8)%2 == 0}
 }
 
-// beanWaitPose faces you, still and wide-eyed.
-func beanWaitPose() beanPose {
-	return beanPose{pitch: -0.15, eyeOpen: 1.25}
+// mascotWaitPose faces you, still, asking.
+func mascotWaitPose() mascotPose {
+	return mascotPose{pitch: -0.15, face: faceAsk, led: true}
 }
 
 // bayer4 thresholds ordered dithering, so shading becomes dot density.
 var bayer4 = [4][4]float32{{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}}
 
-func dotOn(f *beanFrame, w, x, y int) bool {
+func dotOn(f *mascotFrame, w, x, y int) bool {
 	i := y*w + x
 	return f.mat[i] != matNone && f.inten[i] > (bayer4[y%4][x%4]/16+1.0/32)*0.92
 }

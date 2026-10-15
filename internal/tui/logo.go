@@ -10,17 +10,17 @@ import (
 	colorful "github.com/lucasb-eyer/go-colorful"
 )
 
-// The claudewitz logo, for the README: the headphone bean next to the
+// The claudewitz logo, for the README: tty, the monitor-headed robot, next to the
 // CLAUDEWITZ wordmark, drawn as a dot matrix. The app itself keeps the
-// plain wordmark, since the bean already lives in the sidebar.
+// plain wordmark, since tty already lives in the sidebar.
 
-// logoPose is the bean as it appears in the logo: turned a little so it
-// reads as 3D, eyes wide open, no notes.
-func logoPose() beanPose {
-	return beanPose{yaw: 0.38, pitch: -0.15, eyeOpen: 1.1}
+// logoPose is tty as it appears in the logo: turned a little so it reads
+// as 3D, its prompt and antenna lit.
+func logoPose() mascotPose {
+	return mascotPose{yaw: 0.38, pitch: -0.15, cursor: true, led: true}
 }
 
-// logoSVG draws the lockup as a dot matrix: the bean dithered from a larger
+// logoSVG draws the lockup as a dot matrix: tty dithered from a larger
 // render, the wordmark's block letters as solid dots in the accent → second
 // gradient, and a tagline. dark picks the theme variant; the background is
 // left transparent.
@@ -41,11 +41,12 @@ func logoSVG(th theme, dark bool) string {
 		bg = pick(th.bg)
 	}
 	matCol := map[int8]colorful.Color{
-		matBody:  pick(th.accent),
-		matPhone: pick(th.second),
-		matPink:  pick(th.err).BlendLab(pick(th.text), 0.4),
-		matEye:   pick(th.text),
-		matGold:  pick(th.warn),
+		matBody:   pick(th.accent),
+		matPhone:  pick(th.second),
+		matPink:   pick(th.err).BlendLab(pick(th.text), 0.4),
+		matEye:    pick(th.text),
+		matGold:   pick(th.warn),
+		matPrompt: pick(th.ok),
 	}
 	const pitch, r = 6.0, 2.3
 	var dots strings.Builder
@@ -53,9 +54,9 @@ func logoSVG(th theme, dark bool) string {
 		fmt.Fprintf(&dots, `<circle cx="%.1f" cy="%.1f" r="%.1f" fill="%s"/>`+"\n", x, y, r, c.Clamped().Hex())
 	}
 
-	// The bean: 64 dots tall.
+	// tty: 64 dots tall.
 	const bw, bh = 72, 64
-	fr := renderBean(bw, bh, logoPose())
+	fr := renderMascot(bw, bh, logoPose())
 	for y := 0; y < bh; y++ {
 		for x := 0; x < bw; x++ {
 			if !dotOn(&fr, bw, x, y) {
@@ -121,8 +122,8 @@ func logoSVG(th theme, dark bool) string {
 
 // iconPose faces a little more forward than the logo, so the face reads at
 // small sizes.
-func iconPose() beanPose {
-	return beanPose{yaw: 0.3, pitch: -0.12, eyeOpen: 1.1}
+func iconPose() mascotPose {
+	return mascotPose{yaw: 0.3, pitch: -0.12, cursor: true, led: true}
 }
 
 // iconPalette resolves the dark variant of a theme's colours for the icon.
@@ -147,11 +148,12 @@ func newIconPalette(th theme) iconPalette {
 		bg:   bg,
 		edge: bg.BlendLab(hex(th.second), 0.35),
 		mat: map[int8]colorful.Color{
-			matBody:  hex(th.accent),
-			matPhone: hex(th.second),
-			matPink:  hex(th.err).BlendLab(hex(th.text), 0.4),
-			matEye:   hex(th.text),
-			matGold:  hex(th.warn),
+			matBody:   hex(th.accent),
+			matPhone:  hex(th.second),
+			matPink:   hex(th.err).BlendLab(hex(th.text), 0.4),
+			matEye:    hex(th.text),
+			matGold:   hex(th.warn),
+			matPrompt: hex(th.ok),
 		},
 	}
 }
@@ -159,17 +161,17 @@ func newIconPalette(th theme) iconPalette {
 // Icon geometry, as fractions of its size.
 const (
 	iconRadius = 0.225 // corner radius of the rounded square
-	iconInset  = 0.1   // margin around the bean
-	iconDots   = 44    // dot grid across the bean, for the dotted style
+	iconInset  = 0.1   // margin around tty
+	iconDots   = 44    // dot grid across tty, for the dotted style
 )
 
-// iconSVG draws the icon: the dotted bean on a rounded dark square.
+// iconSVG draws the icon: dotted tty on a rounded dark square.
 func iconSVG(th theme) string {
 	pal := newIconPalette(th)
 	const size = 512.0
 	inner := size * (1 - 2*iconInset)
 	pitch := inner / iconDots
-	fr := renderBean(iconDots, iconDots, iconPose())
+	fr := renderMascot(iconDots, iconDots, iconPose())
 	var b strings.Builder
 	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %[1]g %[1]g" width="%[1]g" height="%[1]g">
 <title>claudewitz</title>
@@ -191,7 +193,7 @@ func iconSVG(th theme) string {
 }
 
 // iconPNG rasterises the icon at a pixel size. From 256px up it's dotted
-// like the SVG; below that dots would turn to speckle, so the bean is drawn
+// like the SVG; below that dots would turn to speckle, so tty is drawn
 // as solid shaded pixels instead.
 func iconPNG(th theme, size int) image.Image {
 	pal := newIconPalette(th)
@@ -225,7 +227,7 @@ func iconPNG(th theme, size int) image.Image {
 	off := s * inset
 	if size >= 256 {
 		pitch := inner / iconDots
-		fr := renderBean(iconDots, iconDots, iconPose())
+		fr := renderMascot(iconDots, iconDots, iconPose())
 		for y := 0; y < iconDots; y++ {
 			for x := 0; x < iconDots; x++ {
 				if !dotOn(&fr, iconDots, x, y) {
@@ -239,7 +241,7 @@ func iconPNG(th theme, size int) image.Image {
 		return img
 	}
 	n := int(math.Round(inner))
-	fr := renderBean(n, n, iconPose())
+	fr := renderMascot(n, n, iconPose())
 	o := int(math.Round(off))
 	for y := 0; y < n; y++ {
 		for x := 0; x < n; x++ {

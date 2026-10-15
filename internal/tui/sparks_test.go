@@ -39,7 +39,7 @@ func TestSparkFieldView(t *testing.T) {
 		}
 	}
 	if lit == 0 {
-		t.Error("idle bean renders no dots")
+		t.Error("idle tty renders no dots")
 	}
 	f.resize(20, 5)
 	if n := len(strings.Split(f.view(), "\n")); n != 5 {
@@ -58,7 +58,7 @@ func TestSparkModes(t *testing.T) {
 		t.Error("a paused idle field should be still")
 	}
 	f.paused = false
-	for i := 0; i < beanLoop; i++ {
+	for i := 0; i < mascotLoop; i++ {
 		f.step(0, dt)
 	}
 	if f.pending() {
@@ -79,7 +79,7 @@ func TestSparkModes(t *testing.T) {
 		}
 	}
 	if moved < len(f.sparks)/2 {
-		t.Errorf("only %d of %d sparks left the bean while working", moved, len(f.sparks))
+		t.Errorf("only %d of %d sparks left tty while working", moved, len(f.sparks))
 	}
 
 	// The model's "not busy" request gathers, then settles with a flash.
@@ -104,13 +104,13 @@ func TestSparkModes(t *testing.T) {
 		t.Fatalf("mode = %v, want waiting", f.mode)
 	}
 	if !strings.ContainsFunc(ansi.Strip(f.view()), func(r rune) bool { return r > 0x2800 && r <= 0x28ff }) {
-		t.Error("waiting bean renders no dots")
+		t.Error("waiting tty renders no dots")
 	}
 }
 
-func BenchmarkRenderBean(b *testing.B) {
+func BenchmarkRenderMascot(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		renderBean(70, 40, beanIdlePose(i%beanLoop))
+		renderMascot(70, 40, mascotIdlePose(i%mascotLoop))
 	}
 }
 
