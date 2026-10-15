@@ -79,6 +79,26 @@ func (m *Model) actions() []action {
 	add("Session", "Resume session…", "browse saved sessions", "ctrl+r", func(m *Model) tea.Cmd {
 		return m.openPicker()
 	})
+	if m.daemon != nil {
+		add("Sessions", "Next session that needs you", "", "ctrl+]", func(m *Model) tea.Cmd {
+			cmd, _ := m.handleSessionKey(tea.KeyMsg{Type: tea.KeyCtrlCloseBracket})
+			return cmd
+		})
+		add("Sessions", "Kill session", "end the focused session", "ctrl+q", func(m *Model) tea.Cmd { return m.openKill() })
+		labels := folderLabels(m.live)
+		for i, r := range m.rows() {
+			id, keyHint := r.ID, ""
+			if i < 9 {
+				keyHint = fmt.Sprintf("alt+%d", i+1)
+			}
+			add("Sessions", "Switch to "+labels[id], rowTitle(r), keyHint, func(m *Model) tea.Cmd { return m.focusSession(id) })
+		}
+		add("Sessions", "Toggle sessions panel", "", "alt+s", func(m *Model) tea.Cmd {
+			m.panelOn = !m.panelOn
+			m.resize()
+			return nil
+		})
+	}
 	add("Session", "Copy session id", m.sessionID, "", func(m *Model) tea.Cmd {
 		if m.sessionID == "" {
 			return nil

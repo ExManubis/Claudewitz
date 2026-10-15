@@ -69,6 +69,7 @@ type Model struct {
 	limitWarned  map[string]int // usage window -> highest % already warned about
 
 	showHelp  bool
+	kill      *killState
 	quitAsk   bool   // asking whether to leave a daemon session running
 	notice    string // shown in the chat at startup
 	spin      spinner.Model
@@ -477,6 +478,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHelp = false
 			}
 			return m, nil
+		}
+		if m.kill != nil {
+			return m, m.handleKillKey(msg)
 		}
 		if m.changes != nil {
 			return m, m.handleChangesKey(msg)
@@ -1588,6 +1592,9 @@ func (m Model) View() string {
 		screen = lipgloss.JoinHorizontal(lipgloss.Top, m.sessionsView(m.termH), screen)
 	case sessionsTabs:
 		screen = lipgloss.JoinVertical(lipgloss.Left, m.tabsView(m.termW), screen)
+	}
+	if m.kill != nil {
+		screen = center(screen, m.killView(), m.termW, m.termH-1)
 	}
 	// Strip any control sequence that slipped in with file contents, tool
 	// output or the like; only colours and text attributes get through.

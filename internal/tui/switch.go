@@ -125,6 +125,8 @@ func (m *Model) handleSessionKey(k tea.KeyMsg) (tea.Cmd, bool) {
 			return m.focusSession(rows[n-1].ID), true
 		}
 		return nil, true
+	case s == "ctrl+q":
+		return m.openKill(), true
 	case s == "ctrl+]":
 		if id := m.nextNeedsYou(); id != "" {
 			return m.focusSession(id), true
