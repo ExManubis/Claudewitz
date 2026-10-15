@@ -40,6 +40,18 @@ func (h Hub) Kill(ctx context.Context, id string) error {
 	return h.C.Call(ctx, "session.stop", daemon.SessionParams{Session: id}, nil)
 }
 
+// PairCode makes a single-use pairing code for the iPhone app, as `claudewitz pair` does.
+func (h Hub) PairCode(ctx context.Context) (daemon.PairCodeResult, error) {
+	var code daemon.PairCodeResult
+	err := h.C.Call(ctx, "pair.code", struct{}{}, &code)
+	return code, err
+}
+
+// EnableRemote turns on the remote listener, as `claudewitz daemon remote on` does.
+func (h Hub) EnableRemote(ctx context.Context) error {
+	return h.C.Call(ctx, "remote.set", daemon.RemoteSetParams{Enabled: true}, nil)
+}
+
 // Overview delivers session.updated, session.closed and account.updated.
 func (h Hub) Overview() <-chan daemon.Frame { return h.C.Overview() }
 

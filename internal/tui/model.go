@@ -82,6 +82,7 @@ type Model struct {
 	showHelp    bool
 	kill        *killState
 	alwaysOnAsk *alwaysOnState
+	pair        *pairState // the "Pair an iPhone" dialog
 	folders     *folderPicker
 	notice      string // shown in the chat at startup
 	spin        spinner.Model
@@ -286,6 +287,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.alwaysOnDone(msg)
 		m.refresh()
 		return m, cmd
+
+	case pairCodeMsg:
+		m.gotPairCode(msg)
+		return m, nil
 
 	case daemonStatusMsg:
 		m.chat.info("%s", string(msg))
@@ -527,6 +532,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.alwaysOnAsk != nil {
 			return m, m.handleAlwaysOnKey(msg)
+		}
+		if m.pair != nil {
+			return m, m.handlePairKey(msg)
 		}
 		if m.folders != nil {
 			return m, m.handleFoldersKey(msg)
@@ -1497,6 +1505,12 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		m.chat.info("session %s\ncwd %s", m.sessionID, m.cwd())
 	case "/daemon":
 		return m.daemonStatus(), true
+	case "/pair":
+		if m.daemon == nil {
+			m.chat.info("Pairing needs the daemon: start claudewitz without -no-daemon")
+			return nil, true
+		}
+		return m.openPair(), true
 	default:
 		return nil, false
 	}
@@ -1667,6 +1681,9 @@ func (m Model) View() string {
 	}
 	if m.alwaysOnAsk != nil {
 		screen = center(screen, m.alwaysOnView(), m.termW, m.termH-1)
+	}
+	if m.pair != nil {
+		screen = center(screen, m.pairView(), m.termW, m.termH-1)
 	}
 	if m.folders != nil {
 		screen = center(screen, m.folders.view(m.termW, m.termH), m.termW, m.termH-1)

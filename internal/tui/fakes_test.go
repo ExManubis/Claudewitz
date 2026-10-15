@@ -65,6 +65,8 @@ type fakeDaemon struct {
 	attachErr error // returned (and cleared) by the next Attach
 	strict    bool  // Attach rejects ids not in list, as the daemon does
 	done      chan struct{}
+	remoteOff bool // PairCode fails until EnableRemote
+	enabled   int  // EnableRemote calls
 }
 
 func newFakeDaemon(list ...daemon.SessionSummary) *fakeDaemon {
@@ -108,6 +110,23 @@ func (d *fakeDaemon) List(context.Context) ([]daemon.SessionSummary, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return slices.Clone(d.list), nil
+}
+
+func (d *fakeDaemon) PairCode(context.Context) (daemon.PairCodeResult, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.remoteOff {
+		return daemon.PairCodeResult{}, fmt.Errorf("remote access is off; turn it on with `claudewitz daemon remote on`")
+	}
+	return daemon.PairCodeResult{Host: "100.64.0.1", Port: 7745, Code: "ABCDEFGHJKLM", ExpiresAt: time.Now().Add(5 * time.Minute)}, nil
+}
+
+func (d *fakeDaemon) EnableRemote(context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.enabled++
+	d.remoteOff = false
+	return nil
 }
 
 func (d *fakeDaemon) Overview() <-chan daemon.Frame { return d.overview }
