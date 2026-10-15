@@ -17,6 +17,7 @@ import (
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
+	"github.com/exmanubis/claudewitz/internal/daemon"
 	"github.com/exmanubis/claudewitz/internal/safetext"
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
@@ -31,6 +32,12 @@ type Model struct {
 	views  []*sessionView        // every opened session, the focused one included
 	spaces map[string]*workspace // by folder
 	base   claude.Options        // flags every new session starts from
+
+	daemon    Daemon                  // nil without the claudewitz daemon
+	live      []daemon.SessionSummary // every live session, in start order
+	done      map[string]bool         // turn ended while not focused
+	since     map[string]time.Time    // when each session entered its state
+	lastState map[string]rowState
 
 	ctx   context.Context
 	start Starter
@@ -113,6 +120,9 @@ func New(ctx context.Context, opts claude.Options, cfg config.Config, start Star
 		workspace:   ws,
 		views:       []*sessionView{v},
 		spaces:      map[string]*workspace{ws.dir: ws},
+		done:        map[string]bool{},
+		since:       map[string]time.Time{},
+		lastState:   map[string]rowState{},
 		base:        opts,
 		ctx:         ctx,
 		comp:        &completer{},
@@ -144,6 +154,9 @@ func (m Model) Init() tea.Cmd {
 	}
 	if m.opts.Resume != "" || m.opts.Continue {
 		cmds = append(cmds, loadTranscript(m.sessionView, m.opts.CWD, m.opts.Resume))
+	}
+	if m.daemon != nil {
+		cmds = append(cmds, listCmd(m.daemon), waitOverview(m.daemon.Overview()))
 	}
 	return tea.Batch(cmds...)
 }
@@ -239,6 +252,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case noticeMsg:
 		m.chat.info("%s", string(msg))
 		m.refresh()
+
+	case overviewListMsg:
+		if msg.err == nil {
+			m.live = msg.list
+			for _, s := range m.live {
+				m.noteState(s)
+			}
+		}
+
+	case overviewMsg:
+		cmds = append(cmds, m.applyOverview(daemon.Frame(msg)), waitOverview(m.daemon.Overview()))
 
 	case startedMsg:
 		v := msg.view

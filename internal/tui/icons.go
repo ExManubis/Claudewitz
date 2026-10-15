@@ -9,12 +9,13 @@ import (
 // iconSet is every symbolic glyph that has a Nerd Font version. Layout
 // characters (borders, bars, ellipses, key hints) stay plain Unicode.
 type iconSet struct {
-	branch, image, search               string
-	modeEdits, modePlan, modeBypass     string
-	queued, todos, agents, reset        string
-	ahead, behind                       string
-	conflict, staged, changed, clean    string
-	toastSuccess, toastWarn, toastError string
+	branch, image, search                                             string
+	modeEdits, modePlan, modeBypass                                   string
+	queued, todos, agents, reset                                      string
+	ahead, behind                                                     string
+	conflict, staged, changed, clean                                  string
+	toastSuccess, toastWarn, toastError                               string
+	sessWaiting, sessError, sessWorking, sessDone, sessIdle, worktree string
 }
 
 // nerdIcons are Nerd Font codicons (plus Octicons arrows); they need a
@@ -39,6 +40,12 @@ var nerdIcons = iconSet{
 	toastSuccess: "\ueba4", // nf-cod-pass
 	toastWarn:    "\uea6c", // nf-cod-warning
 	toastError:   "\uea87", // nf-cod-error
+	sessWaiting:  "◌",
+	sessError:    "✗",
+	sessWorking:  "▶",
+	sessDone:     "✓",
+	sessIdle:     "○",
+	worktree:     "⎇",
 }
 
 // unicodeIcons work in any font.
@@ -62,6 +69,12 @@ var unicodeIcons = iconSet{
 	toastSuccess: "✓",
 	toastWarn:    "▲",
 	toastError:   "✗",
+	sessWaiting:  "◌",
+	sessError:    "✗",
+	sessWorking:  "▶",
+	sessDone:     "✓",
+	sessIdle:     "○",
+	worktree:     "⎇",
 }
 
 var iconModes = []string{"nerd", "unicode"}

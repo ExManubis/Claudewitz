@@ -1,9 +1,17 @@
 package tui
 
 import (
+	"context"
+	"fmt"
+	"slices"
 	"sync"
+	"testing"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
+	"github.com/exmanubis/claudewitz/internal/daemon"
 )
 
 // fakeSession is a claude.Session the tests feed events into by hand.
@@ -44,4 +52,77 @@ func (f *fakeSession) Detach() error {
 	defer f.mu.Unlock()
 	f.detached = true
 	return nil
+}
+
+type fakeDaemon struct {
+	mu       sync.Mutex
+	list     []daemon.SessionSummary
+	overview chan daemon.Frame
+	attached []string
+	started  []claude.Options
+	procs    map[string]*fakeSession
+}
+
+func newFakeDaemon(list ...daemon.SessionSummary) *fakeDaemon {
+	return &fakeDaemon{list: list, overview: make(chan daemon.Frame, 16), procs: map[string]*fakeSession{}}
+}
+
+func (d *fakeDaemon) Start(_ context.Context, opts claude.Options) (claude.Session, string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.started = append(d.started, opts)
+	id := fmt.Sprintf("s_new%d", len(d.started))
+	p := newFakeSession()
+	d.procs[id] = p
+	return p, id, nil
+}
+
+func (d *fakeDaemon) Attach(_ context.Context, id string) (claude.Session, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.attached = append(d.attached, id)
+	p := newFakeSession()
+	d.procs[id] = p
+	return p, nil
+}
+
+func (d *fakeDaemon) List(context.Context) ([]daemon.SessionSummary, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.list), nil
+}
+
+func (d *fakeDaemon) Overview() <-chan daemon.Frame { return d.overview }
+
+// run feeds cmd's messages (and those they lead to) through m, without
+// blocking on commands that wait for events.
+func run(t *testing.T, m Model, cmd tea.Cmd) Model {
+	t.Helper()
+	queue := []tea.Cmd{cmd}
+	for steps := 0; len(queue) > 0 && steps < 50; steps++ {
+		c := queue[0]
+		queue = queue[1:]
+		if c == nil {
+			continue
+		}
+		done := make(chan tea.Msg, 1)
+		go func() { done <- c() }()
+		var msg tea.Msg
+		select {
+		case msg = <-done:
+		case <-time.After(50 * time.Millisecond):
+			continue // waits on events or ticks; not part of this step
+		}
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			queue = append(queue, batch...)
+			continue
+		}
+		if msg == nil {
+			continue
+		}
+		next, c2 := m.Update(msg)
+		m = next.(Model)
+		queue = append(queue, c2)
+	}
+	return m
 }
