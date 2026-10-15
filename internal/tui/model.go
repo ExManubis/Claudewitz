@@ -137,27 +137,29 @@ func (m Model) WithNotice(msg string) Model {
 type noticeMsg string
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, m.startCmd(m.opts), indexFiles(m.opts.CWD), m.refreshGit(), gitPoll(), loadHistory(m.opts.CWD)}
+	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, m.startCmd(m.sessionView, m.opts), indexFiles(m.opts.CWD), m.refreshGit(), gitPoll(), loadHistory(m.opts.CWD)}
 	if m.notice != "" {
 		notice := m.notice
 		cmds = append(cmds, func() tea.Msg { return noticeMsg(notice) })
 	}
 	if m.opts.Resume != "" || m.opts.Continue {
-		cmds = append(cmds, loadTranscript(m.opts.CWD, m.opts.Resume))
+		cmds = append(cmds, loadTranscript(m.sessionView, m.opts.CWD, m.opts.Resume))
 	}
 	return tea.Batch(cmds...)
 }
 
 type startedMsg struct {
+	view *sessionView
 	proc claude.Session
+	id   string // the daemon's session id, when started there
 	err  error
 }
 
-func (m *Model) startCmd(opts claude.Options) tea.Cmd {
+func (m *Model) startCmd(v *sessionView, opts claude.Options) tea.Cmd {
 	ctx, start := m.ctx, m.start
 	return func() tea.Msg {
 		p, err := start(ctx, opts)
-		return startedMsg{p, err}
+		return startedMsg{view: v, proc: p, err: err}
 	}
 }
 
@@ -179,6 +181,7 @@ func waitEvent(p claude.Session) tea.Cmd {
 }
 
 type transcriptMsg struct {
+	view      *sessionView
 	info      sessions.Info
 	msgs      []sessions.Message
 	subagents map[string][]sessions.Message // by the Agent call's tool_use_id
@@ -187,15 +190,15 @@ type transcriptMsg struct {
 
 // loadTranscript reads a session from disk for replay. An empty id means the
 // most recent session in cwd.
-func loadTranscript(cwd, id string) tea.Cmd {
+func loadTranscript(v *sessionView, cwd, id string) tea.Cmd {
 	return func() tea.Msg {
 		path, ok := sessions.Find(sessions.ProjectDir(cwd), id)
 		if !ok {
-			return transcriptMsg{err: fmt.Errorf("no saved session found")}
+			return transcriptMsg{view: v, err: fmt.Errorf("no saved session found")}
 		}
 		info, _ := sessions.Read(path)
 		msgs, err := sessions.Load(path)
-		return transcriptMsg{info: info, msgs: msgs, subagents: sessions.Subagents(path), err: err}
+		return transcriptMsg{view: v, info: info, msgs: msgs, subagents: sessions.Subagents(path), err: err}
 	}
 }
 
@@ -238,17 +241,33 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 
 	case startedMsg:
+		v := msg.view
 		if msg.err != nil {
-			m.chat.error("could not start claude: %v", msg.err)
-			m.refresh()
+			m.inView(v, func() {
+				m.chat.error("could not start claude: %v", msg.err)
+				m.refresh()
+			})
 			return m, nil
 		}
-		m.proc = msg.proc
-		cmds = append(cmds, waitEvent(m.proc))
+		v.proc = msg.proc
+		if msg.id != "" {
+			v.id = msg.id
+		}
+		cmds = append(cmds, waitEvent(v.proc))
 
 	case procEvent:
-		if msg.proc != m.proc {
+		v := m.viewFor(msg.proc)
+		if v == nil {
 			return m, nil // stale process
+		}
+		if v != m.sessionView {
+			var cmd tea.Cmd
+			m.inView(v, func() { cmd = m.handleEvent(msg.ev) })
+			cmds = append(cmds, cmd)
+			if v.proc != nil && !msg.ev.Exited {
+				cmds = append(cmds, waitEvent(v.proc))
+			}
+			break
 		}
 		cmds = append(cmds, m.handleEvent(msg.ev))
 		if touchesTree(msg.ev) {
@@ -263,15 +282,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 
 	case transcriptMsg:
-		if msg.err != nil {
-			m.chat.error("could not load transcript: %v", msg.err)
-		} else {
-			m.replay(msg)
-		}
-		m.refresh()
+		m.inView(msg.view, func() {
+			if msg.err != nil {
+				m.chat.error("could not load transcript: %v", msg.err)
+			} else {
+				m.replay(msg)
+			}
+			m.refresh()
+		})
 
 	case filesIndexedMsg:
-		m.files = msg
+		if ws, ok := m.spaces[msg.dir]; ok {
+			ws.files = msg.files
+		}
 
 	case gitStatusMsg:
 		cmd := m.applyGit(msg)
@@ -287,8 +310,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshGit()
 
 	case historyLoadedMsg:
-		if msg.project == m.hist.project {
-			m.hist.items = dedupeKeepLast(append(msg.items, m.hist.items...))
+		if ws, ok := m.spaces[msg.project]; ok {
+			ws.hist.items = dedupeKeepLast(append(msg.items, ws.hist.items...))
 		}
 
 	case editorDoneMsg:
@@ -1303,7 +1326,7 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		if arg == "" {
 			return m.openPicker(), true
 		}
-		return tea.Batch(m.restart(claude.Options{Resume: arg}), loadTranscript(m.opts.CWD, arg)), true
+		return tea.Batch(m.restart(claude.Options{Resume: arg}), loadTranscript(m.sessionView, m.opts.CWD, arg)), true
 	case "/model":
 		if arg == "" {
 			m.openModelPicker()
@@ -1394,7 +1417,7 @@ func (m *Model) restart(o claude.Options) tea.Cmd {
 	m.alwaysAllow = map[string]bool{}
 	m.init = nil
 	m.refresh()
-	return m.startCmd(opts)
+	return m.startCmd(m.sessionView, opts)
 }
 
 func (m *Model) cwd() string {
