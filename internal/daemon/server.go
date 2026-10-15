@@ -99,7 +99,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		s.remoteMu.Unlock()
 	}()
 
+	s.mu.RLock()
 	tick := time.NewTicker(idleCheck(s.IdleTimeout))
+	s.mu.RUnlock()
 	defer tick.Stop()
 	for {
 		select {
@@ -110,8 +112,8 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 			return nil
 		case <-tick.C:
 			s.retryRemote()
-			if s.idle() {
-				s.logf("idle for %s, exiting", s.IdleTimeout)
+			if d, idle := s.idle(); idle {
+				s.logf("idle for %s, exiting", d)
 				hs.Close()
 				return nil
 			}
@@ -126,15 +128,38 @@ func idleCheck(d time.Duration) time.Duration {
 	return d / 4
 }
 
-func (s *Server) idle() bool {
+// idle reports whether the daemon has idled out, and after how long.
+func (s *Server) idle() (time.Duration, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.conns) > 0 || len(s.sessions) > 0 {
 		s.idleFrom = time.Now()
-		return false
+		return 0, false
 	}
-	return s.IdleTimeout > 0 && time.Since(s.idleFrom) >= s.IdleTimeout
+	return s.IdleTimeout, s.IdleTimeout > 0 && time.Since(s.idleFrom) >= s.IdleTimeout
 }
+
+// setIdle changes the idle timeout of a running daemon (daemon.setIdle).
+// The idle clock is not reset, but a daemon only idles with no clients, so
+// the caller's connection already holds it up.
+func (s *Server) setIdle(p IdleParams) (any, error) {
+	if p.Seconds < 0 {
+		return nil, &Error{CodeBadRequest, "seconds must not be negative"}
+	}
+	d := time.Duration(p.Seconds) * time.Second
+	s.mu.Lock()
+	s.IdleTimeout = d
+	s.mu.Unlock()
+	if d == 0 {
+		s.logf("idle timeout off")
+	} else {
+		s.logf("idle timeout %s", d)
+	}
+	return struct{}{}, nil
+}
+
+// ErrInUse is Listen's error when another daemon answers on the socket.
+var ErrInUse = errors.New("a daemon is already listening")
 
 // Listen opens the local unix socket at path, readable by this user only.
 // A socket left behind by a daemon that died is removed; one that answers
@@ -154,7 +179,7 @@ func Listen(path string) (net.Listener, error) {
 	if _, err := os.Lstat(path); err == nil {
 		if c, err := net.DialTimeout("unix", path, time.Second); err == nil {
 			c.Close()
-			return nil, fmt.Errorf("a daemon is already listening on %s", path)
+			return nil, fmt.Errorf("%w on %s", ErrInUse, path)
 		}
 		_ = os.Remove(path)
 	}
@@ -363,6 +388,16 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 			return nil, err
 		}
 		return s.stopDaemon(p)
+
+	case "daemon.setIdle":
+		if err := localOnly(); err != nil {
+			return nil, err
+		}
+		var p IdleParams
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		return s.setIdle(p)
 
 	case "devices.revoke":
 		if err := localOnly(); err != nil {

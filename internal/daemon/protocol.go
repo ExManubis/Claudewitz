@@ -338,6 +338,14 @@ type StopParams struct {
 	Force bool `json:"force"`
 }
 
+// IdleParams sets how long the daemon stays up with no clients and no live
+// sessions (daemon.setIdle); 0 never idles out. The always-on daemon runs
+// with 0, and is handed back to the usual timeout when it is no longer
+// kept running but still has sessions.
+type IdleParams struct {
+	Seconds int `json:"seconds"`
+}
+
 type RevokeParams struct {
 	Device string `json:"device"` // id or name
 }
@@ -360,4 +368,5 @@ type StatusResult struct {
 	Clients       int              `json:"clients"`
 	Sessions      []SessionSummary `json:"sessions"`
 	Devices       []DeviceInfo     `json:"devices"`
+	IdleSeconds   int              `json:"idleSeconds"` // 0: never idles out
 }

@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,5 +39,22 @@ func TestListenIsPrivate(t *testing.T) {
 	}
 	if _, err := Listen(filepath.Join(link, "s2")); err == nil {
 		t.Error("listened in a symlinked folder")
+	}
+}
+
+func TestListenInUse(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "cwl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "s")
+	ln, err := Listen(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if _, err := Listen(sock); !errors.Is(err, ErrInUse) {
+		t.Fatalf("second Listen: %v, want ErrInUse", err)
 	}
 }

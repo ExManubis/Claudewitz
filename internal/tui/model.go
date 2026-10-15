@@ -34,6 +34,7 @@ type Model struct {
 	base   claude.Options        // flags every new session starts from
 
 	daemon    Daemon                  // nil without the claudewitz daemon
+	alwaysOn  AlwaysOn                // keeping the daemon running at login; nil without the daemon
 	live      []daemon.SessionSummary // every live session, in start order
 	done      map[string]bool         // turn ended while not focused
 	since     map[string]time.Time    // when each session entered its state
@@ -70,24 +71,25 @@ type Model struct {
 	toastTicking bool
 	limitWarned  map[string]int // usage window -> highest % already warned about
 
-	showHelp  bool
-	kill      *killState
-	folders   *folderPicker
-	notice    string // shown in the chat at startup
-	spin      spinner.Model
-	width     int // what the chat gets
-	height    int
-	termW     int // the terminal
-	termH     int
-	panelOn   bool
-	panelMode sessionsMode // last applied
-	ready     bool
-	sidebarOn bool
-	drawer    bool // sidebar open over the chat, below sidebarMinWidth
-	ticks     int
-	animFrame int
-	animID    int // generation of the running shimmer tick loop
-	animating bool
+	showHelp    bool
+	kill        *killState
+	alwaysOnAsk *alwaysOnState
+	folders     *folderPicker
+	notice      string // shown in the chat at startup
+	spin        spinner.Model
+	width       int // what the chat gets
+	height      int
+	termW       int // the terminal
+	termH       int
+	panelOn     bool
+	panelMode   sessionsMode // last applied
+	ready       bool
+	sidebarOn   bool
+	drawer      bool // sidebar open over the chat, below sidebarMinWidth
+	ticks       int
+	animFrame   int
+	animID      int // generation of the running shimmer tick loop
+	animating   bool
 
 	revealTicking bool // the streamed-text reveal loop is running
 	revealID      int
@@ -269,6 +271,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.folders.setRecent(msg)
 		}
 	case noticeMsg:
+		m.chat.info("%s", string(msg))
+		m.refresh()
+
+	case alwaysOnDoneMsg:
+		cmd := m.alwaysOnDone(msg)
+		m.refresh()
+		return m, cmd
+
+	case daemonStatusMsg:
 		m.chat.info("%s", string(msg))
 		m.refresh()
 
@@ -505,6 +516,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.kill != nil {
 			return m, m.handleKillKey(msg)
+		}
+		if m.alwaysOnAsk != nil {
+			return m, m.handleAlwaysOnKey(msg)
 		}
 		if m.folders != nil {
 			return m, m.handleFoldersKey(msg)
@@ -1469,6 +1483,8 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		return m.openChanges(arg), true
 	case "/session":
 		m.chat.info("session %s\ncwd %s", m.sessionID, m.cwd())
+	case "/daemon":
+		return m.daemonStatus(), true
 	default:
 		return nil, false
 	}
@@ -1609,6 +1625,9 @@ func (m Model) View() string {
 	}
 	if m.kill != nil {
 		screen = center(screen, m.killView(), m.termW, m.termH-1)
+	}
+	if m.alwaysOnAsk != nil {
+		screen = center(screen, m.alwaysOnView(), m.termW, m.termH-1)
 	}
 	if m.folders != nil {
 		screen = center(screen, m.folders.view(m.termW, m.termH), m.termW, m.termH-1)
@@ -1938,6 +1957,7 @@ const helpText = `commands
   /icons [set]        icon set: nerd (Nerd Font) or unicode
   /diff [layout]      diffs: auto, split (side by side) or unified
   /session            show session id and cwd
+  /daemon             daemon status, and whether it keeps running
   /quit               exit
   other /commands are passed through to Claude Code
   ctrl+p opens the command palette, ctrl+g shows all shortcuts

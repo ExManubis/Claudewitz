@@ -494,6 +494,7 @@ func (s *Server) status() (StatusResult, error) {
 			st.Clients++
 		}
 	}
+	st.IdleSeconds = int(s.IdleTimeout / time.Second)
 	s.mu.RUnlock()
 	return st, nil
 }

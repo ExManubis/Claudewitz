@@ -16,6 +16,7 @@ import (
 
 	"github.com/exmanubis/claudewitz/internal/daemon"
 	"github.com/exmanubis/claudewitz/internal/daemon/client"
+	"github.com/exmanubis/claudewitz/internal/daemon/launchd"
 )
 
 // The `claudewitz daemon status|remote`, `pair` and `devices` commands.
@@ -115,6 +116,7 @@ func runDaemonRemote(args []string) {
 		return
 	}
 	fmt.Printf("Remote access is on: listening on %s:%d (Tailscale only).\nPair a phone with `claudewitz pair`.\n", st.Host, st.Port)
+	suggestInstall()
 }
 
 // runDaemonStatus is `claudewitz daemon status`.
@@ -123,6 +125,7 @@ func runDaemonStatus() {
 	c := dialRunning(ctx)
 	if c == nil {
 		fmt.Printf("%-10s%s\n", "daemon", "not running ("+daemon.SocketPath()+")")
+		fmt.Printf("%-10s%s\n", "mode", launchd.New().Mode(nil))
 		cfg, _ := daemon.LoadConfig(daemon.ConfigPath())
 		if cfg.Remote.Enabled {
 			fmt.Printf("%-10s%s\n", "remote", "on (listens when the daemon starts)")
@@ -146,6 +149,7 @@ func runDaemonStatus() {
 
 	w := tabwriter.NewWriter(os.Stdout, 10, 0, 0, ' ', 0)
 	fmt.Fprintf(w, "daemon\trunning, pid %d, version %s, up %s\n", st.PID, st.DaemonVersion, ago(st.StartedAt))
+	fmt.Fprintf(w, "mode\t%s\n", launchd.New().Mode(&st))
 	for _, l := range st.Listeners {
 		fmt.Fprintf(w, "%s\t%s\n", l.Kind, l.Address)
 	}
@@ -235,6 +239,7 @@ func runPair(args []string) {
 	fmt.Printf("\nScan this with the claudewitz app on your iPhone (over Tailscale).\n")
 	fmt.Printf("Host %s, port %d, code %s; it works once and expires at %s.\n",
 		code.Host, code.Port, code.Code, code.ExpiresAt.Local().Format("15:04"))
+	suggestInstall()
 }
 
 // runDevices is `claudewitz devices [revoke <name|id>]`.

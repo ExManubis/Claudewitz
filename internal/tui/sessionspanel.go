@@ -242,6 +242,6 @@ func (m *Model) sessionsMouse(msg *tea.MouseMsg) (id string, handled bool) {
 // modalOpen is true while a dialog, picker or viewer is over the chat; a
 // click on a session row then doesn't switch sessions under it.
 func (m Model) modalOpen() bool {
-	return m.kill != nil || m.folders != nil || m.picker != nil || m.palette != nil ||
+	return m.kill != nil || m.alwaysOnAsk != nil || m.folders != nil || m.picker != nil || m.palette != nil ||
 		m.modelPick != nil || m.themePick != nil || m.showHelp || m.changes != nil
 }

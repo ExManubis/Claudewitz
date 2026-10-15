@@ -100,6 +100,7 @@ func (m *Model) actions() []action {
 			return nil
 		})
 	}
+	m.alwaysOnActions(add)
 	add("Session", "Copy session id", m.sessionID, "", func(m *Model) tea.Cmd {
 		if m.sessionID == "" {
 			return nil

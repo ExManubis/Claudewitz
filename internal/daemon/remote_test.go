@@ -516,3 +516,21 @@ func eventually(t *testing.T, what string, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestSetIdle(t *testing.T) {
+	h := startRemoteDaemon(t, "")
+	local := h.local(t)
+	var st StatusResult
+	local.ok("daemon.status", struct{}{}, &st)
+	if st.IdleSeconds != 0 {
+		t.Fatalf("idleSeconds %d, want 0", st.IdleSeconds)
+	}
+	local.ok("daemon.setIdle", IdleParams{Seconds: 600}, nil)
+	local.ok("daemon.status", struct{}{}, &st)
+	if st.IdleSeconds != 600 {
+		t.Fatalf("idleSeconds %d after setIdle, want 600", st.IdleSeconds)
+	}
+	if code := local.fails("daemon.setIdle", IdleParams{Seconds: -1}); code != CodeBadRequest {
+		t.Fatalf("negative setIdle: %q", code)
+	}
+}
