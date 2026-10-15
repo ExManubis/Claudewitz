@@ -15,7 +15,9 @@ import (
 const (
 	panelWidth   = 40  // the sessions panel, border included
 	panelMinTerm = 140 // narrower terminals get the tab strip
-	panelTop     = 2   // rows above the first session row: header, blank
+	panelTop     = 2   // rows above the first session box: header, blank
+	boxHeight    = 4   // a session box: border, title, folder, border
+	panelFooter  = 3   // rows below the boxes: "+n more" (or blank), blank, hint
 )
 
 type sessionsMode int
@@ -93,43 +95,16 @@ func (m Model) sessionsView(height int) string {
 		count = warnStyle.Render(fmt.Sprintf("▲ %d need you", n))
 	}
 	lines := []string{spread(head, count, inner), ""}
-	for _, s := range m.rows() {
-		st := stateOf(s, m.done[s.ID])
-		glyph, gs := m.rowGlyph(st)
-		focused := s.ID == m.sessionView.id
-		titleStyle := textStyle
-		switch st {
-		case stWaiting:
-			titleStyle = warnStyle.Bold(true)
-		case stError:
-			titleStyle = errStyle
-		case stIdle:
-			titleStyle = mutedStyle
-		}
-		if focused {
-			titleStyle = titleStyle.Bold(true)
-		}
-		barColor := th.subtle
-		switch {
-		case focused:
-			barColor = th.accent
-		case st == stWaiting:
-			barColor = th.warn
-		case st == stError:
-			barColor = th.err
-		}
-		bar := lipgloss.NewStyle().Foreground(barColor).Render("▎")
-		age := mutedStyle.Render(ageLabel(time.Since(m.since[s.ID])))
-		title := truncate(rowTitle(s), inner-6-lipgloss.Width(age))
-		l1 := spread(bar+" "+gs.Render(glyph)+" "+titleStyle.Render(title), age, inner)
-		l2 := bar + "   " + lipgloss.NewStyle().Foreground(th.second).Render(truncateLeft(folderPath(s), inner-4))
-		if focused {
-			bg := lipgloss.NewStyle().Background(th.selBg).Width(inner)
-			l1, l2 = bg.Render(l1), bg.Render(l2)
-		}
-		lines = append(lines, l1, l2)
+	rows := m.rows()
+	first, shown := m.boxWindow(len(rows), height)
+	for _, s := range rows[first : first+shown] {
+		lines = append(lines, strings.Split(m.sessionBox(s, inner), "\n")...)
 	}
-	lines = append(lines, "", mutedStyle.Render("ctrl+] next waiting · ctrl+q kill"))
+	hidden := ""
+	if n := len(rows) - shown; n > 0 {
+		hidden = mutedStyle.Render(fmt.Sprintf("+%d more · alt+↑↓", n))
+	}
+	lines = append(lines, hidden, "", mutedStyle.Render("ctrl+] next waiting · ctrl+q kill"))
 	for len(lines) < height {
 		lines = append(lines, "")
 	}
@@ -137,6 +112,57 @@ func (m Model) sessionsView(height int) string {
 	return lipgloss.NewStyle().Width(panelWidth-1).Height(height).
 		Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(th.subtle).
 		Render(body)
+}
+
+// sessionBox draws one session as a rounded box, width wide: glyph, title
+// and time in its state, then its folder. The focused box has the accent
+// border; the others the subtle one.
+func (m Model) sessionBox(s daemon.SessionSummary, width int) string {
+	th := currentTheme()
+	st := stateOf(s, m.done[s.ID])
+	glyph, gs := m.rowGlyph(st)
+	focused := s.ID == m.sessionView.id
+	titleStyle := textStyle
+	switch st {
+	case stWaiting:
+		titleStyle = warnStyle.Bold(true)
+	case stError:
+		titleStyle = errStyle
+	case stIdle:
+		titleStyle = mutedStyle
+	}
+	if focused {
+		titleStyle = titleStyle.Bold(true)
+	}
+	content := width - 4 // the box's borders and a space of padding each side
+	age := mutedStyle.Render(ageLabel(time.Since(m.since[s.ID])))
+	title := truncate(rowTitle(s), content-3-lipgloss.Width(age))
+	l1 := spread(gs.Render(glyph)+" "+titleStyle.Render(title), age, content)
+	l2 := "  " + lipgloss.NewStyle().Foreground(th.second).Render(truncateLeft(folderPath(s), content-2))
+	border := th.subtle
+	if focused {
+		border = th.accent
+	}
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).
+		Padding(0, 1).Width(width - 2).Render(l1 + "\n" + l2)
+}
+
+// boxWindow is which session boxes fit in a panel height rows tall: from
+// first, shown of them, scrolled just enough to keep the focused one in
+// view.
+func (m Model) boxWindow(n, height int) (first, shown int) {
+	fit := max(1, (height-panelTop-panelFooter)/boxHeight)
+	shown = min(n, fit)
+	at := -1
+	for i, s := range m.rows() {
+		if s.ID == m.sessionView.id {
+			at = i
+		}
+	}
+	if at >= shown {
+		first = at - shown + 1
+	}
+	return first, shown
 }
 
 // spread puts left and right at the two ends of a width-wide line.
@@ -209,9 +235,11 @@ func (m *Model) sessionsMouse(msg *tea.MouseMsg) (id string, handled bool) {
 	switch m.panelMode {
 	case sessionsPanel:
 		if msg.X < panelWidth && (click || wheel) {
-			row := (msg.Y - panelTop) / 2
-			if rows := m.rows(); click && msg.Y >= panelTop && row < len(rows) {
-				return rows[row].ID, true
+			rows := m.rows()
+			first, shown := m.boxWindow(len(rows), m.termH)
+			box := (msg.Y - panelTop) / boxHeight
+			if click && msg.Y >= panelTop && box < shown {
+				return rows[first+box].ID, true
 			}
 			return "", true
 		}
