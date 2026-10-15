@@ -29,11 +29,10 @@ iPhone app ────────▶│ one WebSocket protocol on both listene
 
 The daemon is part of the claudewitz binary (`claudewitz daemon`), not a separate install.
 
-For now the TUI uses the daemon only with `claudewitz -daemon`; without it the TUI spawns `claude`
-directly, as before. It becomes the default once the TUI can show and switch between the
-daemon's sessions.
+The TUI uses the daemon by default (`claudewitz -no-daemon` spawns `claude` directly) and shows
+every live session in its sessions panel.
 
-- **On demand.** Running `claudewitz -daemon` connects to `~/.claudewitz/daemon.sock`; if
+- **On demand (default).** Running `claudewitz` connects to `~/.claudewitz/daemon.sock`; if
   nothing answers it starts `claudewitz daemon` detached and connects. The daemon exits once
   it has had no clients and no live sessions for 10 min.
 - **Always on.** `claudewitz daemon install` writes a launchd LaunchAgent
@@ -285,7 +284,7 @@ Payloads carry session id, cwd name and a one-line summary; no code or transcrip
 1. Put an interface in front of `claude.Process` (`Events`, `Send`, `SendWithImages`, `Respond`,
    `Interrupt`, `Set*`, `Close`) and have `internal/tui` use only that.
 2. Add `internal/daemon` (server) and `internal/daemon/client`, whose session handle implements
-   the same interface over the socket. The TUI picks local or daemon at startup (`-daemon`).
+   the same interface over the socket. The TUI picks local or daemon at startup (`-no-daemon`).
 3. Move git polling into the daemon, per cwd, so the TUI and phone share one poller.
 4. Add the remote listener, pairing and APNs, then build the app against this doc.
 
