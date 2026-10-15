@@ -18,6 +18,7 @@ const (
 	toastSuccess
 	toastWarn
 	toastError
+	toastCheer // something shipped
 )
 
 const (
@@ -50,6 +51,8 @@ func (m *Model) notify(kind toastKind, title, body string) tea.Cmd {
 		ttl = 6 * time.Second
 	case toastError:
 		ttl = 8 * time.Second
+	case toastCheer:
+		ttl = 4500 * time.Millisecond
 	}
 	if m.toastFrom != "" {
 		title = m.toastFrom + " · " + title
@@ -94,6 +97,8 @@ func (k toastKind) style() (icon string, col lipgloss.AdaptiveColor) {
 		return icons.toastWarn, th.warn
 	case toastError:
 		return icons.toastError, th.err
+	case toastCheer:
+		return "✦", th.warn
 	}
 	return "✻", th.accent
 }

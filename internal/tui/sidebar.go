@@ -513,6 +513,29 @@ func (m Model) sidebarLines(height int) ([]string, map[int]string) {
 	return lines, files
 }
 
+// mascotAt reports whether a screen cell is on tty, at the foot of the
+// sidebar (docked or open as a drawer).
+func (m Model) mascotAt(x, y int) bool {
+	var top, height int
+	switch {
+	case m.showSidebar():
+		top, height = 0, m.height-1
+	case m.showDrawer():
+		if m.showHeader() {
+			top = 1
+		}
+		height = m.height - 1 - top
+	default:
+		return false
+	}
+	rows := sparkRows(height)
+	if rows == 0 || m.sparks == nil || x < m.width-sidebarWidth+1 {
+		return false
+	}
+	from := top + height - rows - 3
+	return y >= from && y < from+rows
+}
+
 // sidebarFileAt is the changed file shown at a screen cell in the sidebar,
 // docked or open as a drawer.
 func (m Model) sidebarFileAt(x, y int) (string, bool) {

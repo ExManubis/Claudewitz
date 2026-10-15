@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
@@ -40,6 +41,12 @@ type sessionView struct {
 	turnFrom   time.Time
 	lastTurn   time.Duration // how long the last turn took, for "Done in …"
 	lastTurnAt time.Time
+	cheer      string // what shipped last, for the caption under tty
+	cheerAt    time.Time
+	testsRed   bool      // the last test run failed: the next green one is news
+	cheers     []tea.Cmd // toasts for what shipped, sent with the event
+	quip       string    // what tty says when poked
+	quipAt     time.Time
 
 	init         *claude.InitEvent
 	initResp     *claude.InitializeResponse

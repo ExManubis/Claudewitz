@@ -61,7 +61,40 @@ type sparkField struct {
 	flash      float64   // seconds left of the "done" flash
 	paused     bool      // the terminal isn't focused: hold the bop
 	rng        *rand.Rand
+
+	// Celebrations: fireworks over whatever tty is doing, then a ✓ on its
+	// screen once it rests.
+	embers   []ember
+	fx       []float64 // embers' glow per dot
+	fxMat    []int8
+	launches []float64 // seconds until each queued rocket goes up
+	bloom    float64   // seconds left of the swirl's bloom
+	proud    mascotFrame
+	proudFor float64 // seconds left of the ✓, counted while tty rests
+
+	// A poke while resting: tty spins round once.
+	spinFor    float64
+	spinFrames []mascotFrame
 }
+
+const (
+	spinTime  = 1.1
+	spinSteps = 26
+)
+
+// ember is one spark of a firework: a rocket going up, or a star flung out
+// of its burst, falling as it fades.
+type ember struct {
+	x, y, vx, vy float64
+	life, ttl    float64
+	mat          int8
+	rocket       bool
+}
+
+const bloomTime = 1.4
+
+// proudTime is how long tty shows its ✓ after something ships.
+const proudTime = 4.0
 
 type sparkTickMsg struct{ id int }
 
@@ -84,6 +117,11 @@ func (f *sparkField) resize(cols, rows int) {
 	f.w, f.h = cols*2, rows*4
 	f.glow = make([]float64, f.w*f.h)
 	f.glowMat = make([]int8, f.w*f.h)
+	f.fx = make([]float64, f.w*f.h)
+	f.fxMat = make([]int8, f.w*f.h)
+	f.embers = f.embers[:0]
+	f.proud = mascotFrame{}
+	f.spinFrames = nil
 	f.frames = make([]mascotFrame, mascotLoop)
 	f.frames[0] = renderMascot(f.w, f.h, mascotIdlePose(0))
 	f.wait = mascotFrame{}
@@ -129,6 +167,25 @@ func (f *sparkField) pending() bool {
 
 // display is the frame to draw when tty is resting.
 func (f *sparkField) display() *mascotFrame {
+	if f.mode == sparkIdle && f.spinFor > 0 {
+		if f.spinFrames == nil {
+			f.spinFrames = make([]mascotFrame, spinSteps)
+		}
+		i := min(spinSteps-1, int((1-f.spinFor/spinTime)*spinSteps))
+		if f.spinFrames[i].mat == nil {
+			// Eased, so the turn winds up and settles.
+			k := float64(i+1) / spinSteps
+			k = k * k * (3 - 2*k)
+			f.spinFrames[i] = renderMascot(f.w, f.h, mascotPose{yaw: 2 * math.Pi * k, pitch: -0.15, cursor: true, led: i%4 < 2})
+		}
+		return &f.spinFrames[i]
+	}
+	if f.mode == sparkIdle && f.proudFor > 0 {
+		if f.proud.mat == nil {
+			f.proud = renderMascot(f.w, f.h, mascotPose{pitch: -0.15, face: faceCheck, led: true})
+		}
+		return &f.proud
+	}
 	if f.mode == sparkWaiting {
 		if f.wait.mat == nil {
 			f.wait = renderMascot(f.w, f.h, mascotWaitPose())
@@ -256,13 +313,126 @@ func (f *sparkField) animating() bool {
 	case sparkWorking, sparkGathering:
 		return true
 	}
-	return f.flash > 0 || !f.paused
+	return f.flash > 0 || !f.paused || f.celebrating() || f.proudFor > 0 || f.spinFor > 0
+}
+
+// poke is a click on tty: a spin when it rests, a bloom of the swirl while
+// it works. It reports whether tty reacted.
+func (f *sparkField) poke() bool {
+	switch f.mode {
+	case sparkIdle:
+		f.spinFor = spinTime
+	case sparkWorking:
+		f.bloom = bloomTime
+	default:
+		return false
+	}
+	return true
+}
+
+// celebrate sets off fireworks: one burst, or a volley for a big moment.
+func (f *sparkField) celebrate(big bool) {
+	f.launches = append(f.launches, 0)
+	if big {
+		f.launches = append(f.launches, 0.3, 0.55)
+	}
+	f.bloom = bloomTime
+	f.proudFor = proudTime
+}
+
+func (f *sparkField) celebrating() bool { return len(f.embers) > 0 || len(f.launches) > 0 }
+
+var emberMats = []int8{matGold, matPrompt, matPink, matPhone, matBody}
+
+// stepEmbers launches due rockets, bursts the ones at the top of their
+// climb, and moves every ember on.
+func (f *sparkField) stepEmbers(dt float64) {
+	if f.spinFor > 0 {
+		f.spinFor = math.Max(0, f.spinFor-dt)
+	}
+	if f.proudFor > 0 && f.mode == sparkIdle && f.spinFor == 0 {
+		f.proudFor = math.Max(0, f.proudFor-dt)
+	}
+	if f.bloom > 0 {
+		f.bloom = math.Max(0, f.bloom-dt)
+	}
+	if !f.celebrating() {
+		return
+	}
+	w, h := float64(f.w), float64(f.h)
+	due := f.launches[:0]
+	for _, l := range f.launches {
+		if l -= dt; l > 0 {
+			due = append(due, l)
+			continue
+		}
+		// Up from the bottom edge to a burst in the top half.
+		x := w * (0.15 + 0.7*f.rng.Float64())
+		top := h * (0.12 + 0.25*f.rng.Float64())
+		const climb = 0.4
+		f.embers = append(f.embers, ember{x: x, y: h - 1, vx: (f.rng.Float64() - 0.5) * w * 0.15, vy: -(h - top) / climb,
+			ttl: climb, mat: matGold, rocket: true})
+	}
+	f.launches = due
+	live := f.embers[:0]
+	var bursts []ember
+	for _, e := range f.embers {
+		e.life += dt
+		if e.life >= e.ttl {
+			if e.rocket {
+				bursts = append(bursts, e)
+			}
+			continue
+		}
+		if !e.rocket {
+			drag := math.Pow(0.2, dt)
+			e.vx *= drag
+			e.vy = e.vy*drag + h*0.9*dt // and gravity
+		}
+		e.x += e.vx * dt
+		e.y += e.vy * dt
+		live = append(live, e)
+	}
+	f.embers = live
+	for _, r := range bursts {
+		mat := emberMats[f.rng.Intn(len(emberMats))]
+		// Two rings, so the burst has depth.
+		for ring, n := range []int{28, 14} {
+			speed := h * (0.9 - 0.4*float64(ring))
+			for i := 0; i < n; i++ {
+				a := 2 * math.Pi * (float64(i) + f.rng.Float64()*0.3) / float64(n)
+				v := speed * (0.9 + 0.2*f.rng.Float64())
+				f.embers = append(f.embers, ember{x: r.x, y: r.y, vx: v * math.Cos(a) * 1.3, vy: v * math.Sin(a),
+					ttl: 0.8 + 0.5*f.rng.Float64(), mat: mat})
+			}
+		}
+	}
+	for i := range f.fx {
+		f.fx[i] *= 0.5
+	}
+	for _, e := range f.embers {
+		x, y := int(e.x), int(e.y)
+		if x >= 0 && x < f.w && y >= 0 && y < f.h {
+			f.fx[y*f.w+x] = 1 - 0.5*e.life/e.ttl
+			f.fxMat[y*f.w+x] = e.mat
+		}
+	}
+}
+
+// fxLit reports whether any ember glow is still on screen.
+func (f *sparkField) fxLit() bool {
+	for _, g := range f.fx {
+		if g > 0.15 {
+			return true
+		}
+	}
+	return false
 }
 
 // interval is the tick rate for the current mode: smooth for the swirl,
 // tty's own frame rate otherwise.
 func (f *sparkField) interval() time.Duration {
-	if f.mode == sparkWorking || f.mode == sparkGathering {
+	if f.mode == sparkWorking || f.mode == sparkGathering || f.celebrating() || f.spinFor > 0 {
 		return time.Second / sparkFPS
 	}
 	return time.Second / mascotFPS
@@ -272,6 +442,7 @@ func (f *sparkField) interval() time.Duration {
 // the swirl turns while working.
 func (f *sparkField) step(targetEnergy, dt float64) {
 	f.t += dt
+	f.stepEmbers(dt)
 	f.energy += (targetEnergy - f.energy) * 0.08
 	if f.flash > 0 {
 		f.flash = math.Max(0, f.flash-dt)
@@ -300,6 +471,9 @@ func (f *sparkField) step(targetEnergy, dt float64) {
 			// Each spark eases toward its moving spot on its orbit.
 			s.angle += s.speed * f.energy * dt * 2.2
 			r := s.radius * (1 + s.wobble*math.Sin(f.t*2.3*s.speed+s.phase))
+			if f.bloom > 0 {
+				r *= 1 + 0.3*math.Sin(math.Pi*(1-f.bloom/bloomTime))
+			}
 			tx, ty := cx+1.5*r*math.Cos(s.angle), cy+r*math.Sin(s.angle)
 			s.vx = (tx - s.x) * 0.18
 			s.vy = (ty - s.y) * 0.18
@@ -326,11 +500,15 @@ func (f *sparkField) step(targetEnergy, dt float64) {
 }
 
 func (f *sparkField) plot() {
-	for _, s := range f.sparks {
+	twinkle := int(f.t * 10)
+	for i, s := range f.sparks {
 		x, y := int(s.x), int(s.y)
 		if x >= 0 && x < f.w && y >= 0 && y < f.h {
 			f.glow[y*f.w+x] = 1
 			f.glowMat[y*f.w+x] = s.mat
+			if f.bloom > 0 {
+				f.glowMat[y*f.w+x] = emberMats[(i+twinkle)%len(emberMats)]
+			}
 		}
 	}
 }
@@ -453,6 +631,9 @@ func (f *sparkField) view() string {
 		}
 		return c
 	})
+	if f.celebrating() || f.fxLit() {
+		return f.composite(th, st)
+	}
 	if f.mode == sparkIdle || f.mode == sparkWaiting {
 		return drawMascot(f.display(), f.w, f.cols, f.rows, st)
 	}
@@ -481,6 +662,75 @@ func (f *sparkField) view() string {
 				continue
 			}
 			b.WriteString(st[dominant(weight)][shadeIndex(peak)].Render(string(0x2800 + bits)))
+		}
+	}
+	return b.String()
+}
+
+// composite draws tty or the swirl with fireworks over it. Where an ember
+// glows brightly its colour wins the cell.
+func (f *sparkField) composite(th theme, st *mascotStyleSet) string {
+	fxSt := mascotStyles(th, func(m int8, c ac) ac {
+		hx := resolve(c).BlendLab(resolve(th.text), 0.25).Clamped().Hex()
+		return ac{Light: hx, Dark: hx}
+	})
+	resting := f.mode == sparkIdle || f.mode == sparkWaiting
+	var fr *mascotFrame
+	if resting {
+		fr = f.display()
+	}
+	var b strings.Builder
+	for row := 0; row < f.rows; row++ {
+		if row > 0 {
+			b.WriteByte('\n')
+		}
+		for col := 0; col < f.cols; col++ {
+			var bits, fxBits rune
+			var weight, fxWeight [matCount]float64
+			lit, n, peak, fxPeak := 0.0, 0, 0.0, 0.0
+			for dy := 0; dy < 4; dy++ {
+				for dx := 0; dx < 2; dx++ {
+					x, y := col*2+dx, row*4+dy
+					i := y*f.w + x
+					if resting {
+						if m := fr.mat[i]; m >= 0 && m != matDark {
+							lit += float64(fr.inten[i])
+							n++
+							if m == matEye || m == matPink || m == matGold || m == matPrompt {
+								weight[m] += 3
+							} else {
+								weight[m]++
+							}
+							if dotOn(fr, f.w, x, y) {
+								bits |= brailleBits[dy][dx]
+							}
+						}
+					} else if g := f.glow[i]; g > 0.18 {
+						bits |= brailleBits[dy][dx]
+						weight[f.glowMat[i]] += g
+						peak = math.Max(peak, g)
+					}
+					if g := f.fx[i]; g > 0.15 {
+						fxBits |= brailleBits[dy][dx]
+						fxWeight[f.fxMat[i]] += g
+						fxPeak = math.Max(fxPeak, g)
+					}
+				}
+			}
+			if bits|fxBits == 0 {
+				b.WriteByte(' ')
+				continue
+			}
+			var style lipgloss.Style
+			switch {
+			case fxBits != 0 && (fxPeak >= 0.3 || bits == 0):
+				style = fxSt[dominant(fxWeight)][shadeIndex(0.4+0.6*fxPeak)]
+			case resting && n > 0:
+				style = st[dominant(weight)][shadeIndex(0.35+0.65*lit/float64(n))]
+			default:
+				style = st[dominant(weight)][shadeIndex(peak)]
+			}
+			b.WriteString(style.Render(string(0x2800 + (bits | fxBits))))
 		}
 	}
 	return b.String()
@@ -572,6 +822,10 @@ func (m Model) sparkCaption(w int) string {
 	switch {
 	case len(m.pending) > 0:
 		s = warnStyle.Bold(true).Render("Waiting for you")
+	case m.cheer != "" && time.Since(m.cheerAt) < time.Duration(proudTime*float64(time.Second)):
+		s = warnStyle.Bold(true).Render("✦ " + m.cheer)
+	case m.quip != "" && time.Since(m.quipAt) < 2*time.Second:
+		s = lipgloss.NewStyle().Foreground(currentTheme().second).Render(m.quip)
 	case m.busy:
 		label := firstNonEmpty(m.activity, "Working")
 		s = statusKey.Render(label) + mutedStyle.Render(" · "+shortSecs(time.Since(m.turnFrom)))
