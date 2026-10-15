@@ -76,6 +76,7 @@ type tally struct {
 	lastAt  time.Time // last activity in the open turn; zero between turns
 	lastMsg string    // assistant message whose usage was counted last
 	pending map[string]pendingTool
+	claimed [][16]byte // the message uuids this file counted, to forget with it
 }
 
 func newTally(side bool, session string) *tally {
@@ -86,19 +87,26 @@ func newTally(side bool, session string) *tally {
 	}
 }
 
-// refresh reads whatever was appended to the transcripts since last time.
+// refresh reads whatever was appended to the transcripts since last time,
+// and forgets files that were deleted or have aged past the horizon, so a
+// daemon that runs for weeks doesn't keep growing.
 func (s *Scanner) refresh() {
 	cutoff := s.now().Add(-Horizon)
 	main, _ := filepath.Glob(filepath.Join(s.root, "*", "*.jsonl"))
 	side, _ := filepath.Glob(filepath.Join(s.root, "*", "*", "subagents", "*.jsonl"))
+	current := map[string]bool{}
 	for i, path := range append(main, side...) {
 		st, err := os.Stat(path)
 		if err != nil || st.ModTime().Before(cutoff) {
 			continue
 		}
+		current[path] = true
 		t := s.files[path]
-		if t == nil || st.Size() < t.size {
-			// New, or rewritten from scratch.
+		if t != nil && st.Size() < t.size {
+			s.forget(path, t) // rewritten from scratch
+			t = nil
+		}
+		if t == nil {
 			sess := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 			isSide := i >= len(main)
 			if isSide {
@@ -112,6 +120,18 @@ func (s *Scanner) refresh() {
 		}
 		t.size = st.Size()
 	}
+	for path, t := range s.files {
+		if !current[path] {
+			s.forget(path, t)
+		}
+	}
+}
+
+func (s *Scanner) forget(path string, t *tally) {
+	for _, id := range t.claimed {
+		delete(s.seen, id)
+	}
+	delete(s.files, path)
 }
 
 func (s *Scanner) read(path string, t *tally) {
@@ -199,6 +219,7 @@ func (s *Scanner) line(t *tally, b []byte) {
 			return
 		}
 		s.seen[id] = struct{}{}
+		t.claimed = append(t.claimed, id)
 	}
 	if l.Type == "assistant" {
 		t.assistant(&l)

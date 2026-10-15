@@ -3,6 +3,7 @@ package recap
 import (
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,7 @@ func newTranscript(t *testing.T, root, project, session string) *transcript {
 func (tr *transcript) write(line map[string]any) {
 	tr.n++
 	if _, ok := line["uuid"]; !ok {
-		line["uuid"] = fmt.Sprintf("%08x-0000-0000-0000-%012x", len(tr.path), tr.n)
+		line["uuid"] = fmt.Sprintf("%08x-0000-0000-0000-%012x", crc32.ChecksumIEEE([]byte(tr.path)), tr.n)
 	}
 	line["cwd"] = tr.cwd
 	b, _ := json.Marshal(line)
@@ -254,5 +255,28 @@ func TestRecapCountsSubagentWorkButNotPrompts(t *testing.T) {
 	day := scannerAt(root, at(d, "23:00:00")).Recap(at(d, "12:00:00"), cph)
 	if day.Prompts != 1 || day.Commits != 1 || day.OutputTokens != 40 {
 		t.Fatalf("prompts %d commits %d tokens %d", day.Prompts, day.Commits, day.OutputTokens)
+	}
+}
+
+func TestRecapForgetsOldAndDeletedTranscripts(t *testing.T) {
+	root := t.TempDir()
+	d := "2026-10-15"
+	a := newTranscript(t, root, "app", "s1")
+	a.prompt(at(d, "09:00:00"), "one")
+	b := newTranscript(t, root, "app", "s2")
+	b.prompt(at(d, "10:00:00"), "two")
+	s := scannerAt(root, at(d, "23:00:00"))
+	if got := s.Recap(at(d, "12:00:00"), cph).Prompts; got != 2 || len(s.files) != 2 || len(s.seen) != 2 {
+		t.Fatalf("prompts %d, files %d, seen %d", got, len(s.files), len(s.seen))
+	}
+	// s1 ages past the horizon; s2 is deleted.
+	old := at(d, "23:00:00").Add(-Horizon - time.Hour)
+	if err := os.Chtimes(a.path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(b.path)
+	s.Recap(at(d, "12:00:00"), cph)
+	if len(s.files) != 0 || len(s.seen) != 0 {
+		t.Fatalf("still holding %d files and %d uuids", len(s.files), len(s.seen))
 	}
 }
