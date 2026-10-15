@@ -129,6 +129,9 @@ func completeDir(input string) string {
 			common = common[:len(common)-1]
 		}
 	}
+	if common == "" {
+		return input
+	}
 	return filepath.Join(parent, common)
 }
 

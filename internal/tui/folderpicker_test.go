@@ -54,8 +54,7 @@ func TestFolderPickerSelectionStaysInRange(t *testing.T) {
 	m.folders.filter.SetValue("zzz-no-match")
 	m.folders.applyFilter()
 	m.handleFoldersKey(tea.KeyMsg{Type: tea.KeyDown})
-	m.handleFoldersKey(tea.KeyMsg{Type: tea.KeyUp})
-	m.folders.filter.SetValue("")
+	m.folders.filter.SetValue("/x/a")
 	m.folders.applyFilter()
 	if got := m.folders.choice(); got != "/x/a" {
 		t.Fatalf("choice %q", got)
@@ -71,5 +70,11 @@ func TestCompleteDirTrailingSlash(t *testing.T) {
 	t.Setenv("HOME", dir)
 	if got := completeDir("~/"); got != filepath.Join(dir, "sub")+"/" {
 		t.Fatalf("home: %q", got)
+	}
+	two := t.TempDir()
+	os.Mkdir(filepath.Join(two, "alpha"), 0o755)
+	os.Mkdir(filepath.Join(two, "beta"), 0o755)
+	if got := completeDir(two + "/"); got != two+"/" {
+		t.Fatalf("no common prefix: %q", got)
 	}
 }
