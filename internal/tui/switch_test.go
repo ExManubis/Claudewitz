@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -111,5 +112,22 @@ func TestFocusSessionRetriesAfterFailedAttach(t *testing.T) {
 	m = run(t, m, m.focusSession("s_2"))
 	if len(d.attached) != 2 || m.sessionView.id != "s_2" || m.proc == nil {
 		t.Fatalf("attached %v, focused %q, proc %v", d.attached, m.sessionView.id, m.proc)
+	}
+}
+
+// Switching away while a view's fresh start is in flight keeps the view, so
+// the process that arrives afterwards still reaches it.
+func TestFocusAwayFromStartingViewKeepsIt(t *testing.T) {
+	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle), sum("s_2", "/x/b", daemon.StateIdle))
+	m := daemonModel(t, d)
+	starting := m.sessionView
+	starting.id = ""
+
+	m = run(t, m, m.focusSession("s_2"))
+	p := newFakeSession()
+	next, _ := m.Update(startedMsg{view: starting, proc: p, id: "s_new"})
+	m = next.(Model)
+	if m.viewFor(p) != starting || !slices.Contains(m.views, starting) || starting.id != "s_new" {
+		t.Fatalf("starting view lost: viewFor %v, views %d", m.viewFor(p), len(m.views))
 	}
 }

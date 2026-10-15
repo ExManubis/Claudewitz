@@ -33,8 +33,8 @@ func attachCmd(d Daemon, v *sessionView, id string) tea.Cmd {
 func (m *Model) focusSession(id string) tea.Cmd {
 	prev := m.sessionView
 	cmd := m.focusSessionView(id)
-	// A view whose attach failed is dead once it loses focus.
-	if prev != m.sessionView && prev.id == "" && prev.proc == nil && m.daemon != nil {
+	// A view whose attach failed is dead once it loses focus (not one still starting).
+	if prev != m.sessionView && prev.attachFailed {
 		m.removeView(prev)
 	}
 	return cmd

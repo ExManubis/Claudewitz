@@ -19,6 +19,8 @@ type sessionView struct {
 	opts claude.Options // how it was started (its folder, model, effort)
 	proc claude.Session
 
+	attachFailed bool // attaching to the daemon session failed; the view is dead
+
 	chat        *chat
 	track       *tracker
 	queued      []queuedMsg  // sent mid-turn; shown as a pill until the CLI takes them
