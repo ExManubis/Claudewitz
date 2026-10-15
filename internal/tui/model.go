@@ -12,13 +12,12 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
-	"github.com/exmanubis/claudewitz/internal/gitstatus"
+	"github.com/exmanubis/claudewitz/internal/daemon"
 	"github.com/exmanubis/claudewitz/internal/safetext"
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
@@ -27,13 +26,23 @@ var permissionModes = []string{"default", "acceptEdits", "plan"}
 
 // Model is the root Bubble Tea model.
 type Model struct {
-	opts  claude.Options
+	*sessionView // the focused session
+	*workspace   // the focused session's folder
+
+	views  []*sessionView        // every opened session, the focused one included
+	spaces map[string]*workspace // by folder
+	base   claude.Options        // flags every new session starts from
+
+	daemon    Daemon                  // nil without the claudewitz daemon
+	live      []daemon.SessionSummary // every live session, in start order
+	done      map[string]bool         // turn ended while not focused
+	since     map[string]time.Time    // when each session entered its state
+	lastState map[string]rowState
+	killed    map[string]bool // sessions just killed, so late pushes don't bring their rows back
+
 	ctx   context.Context
 	start Starter
-	proc  claude.Session
 
-	chat      *chat
-	track     *tracker
 	comp      *completer
 	picker    *picker
 	palette   *palette
@@ -42,57 +51,39 @@ type Model struct {
 	changes   *changesView // the changes viewer, when open
 	cfg       config.Config
 
-	hist   *history
-	queued []queuedMsg // sent mid-turn; shown as a pill until the CLI takes them
-
-	attachments []attachment // images for the next message
-	focused     bool         // terminal focus, when the terminal reports it
-	lastInput   time.Time    // last key, click or focus, for pausing the idle bop
-	gitPolls    int          // poll ticks so far, for reading less often while idle
+	focused   bool      // terminal focus, when the terminal reports it
+	lastInput time.Time // last key, click or focus, for pausing the idle bop
 
 	sparks       *sparkField // working indicator at the foot of the sidebar
 	sparkTicking bool
 	sparkID      int
 	sparkLast    time.Time
-	bottomH      int           // height of the input area at the last layout
-	lastTurn     time.Duration // how long the last turn took, for "Done in …"
-	lastTurnAt   time.Time
+	bottomH      int // height of the input area at the last layout
 
-	suggestion string // predicted next prompt, shown in the empty input
-
-	chatFocus   bool // keys drive the transcript instead of the input
-	textSel     *textSelection
-	mouseDown   bool   // left button held in the transcript
-	dragBar     bool   // dragging the scrollbar
-	chatContent string // last rendered transcript, for copying selections
-	scrollToSel bool   // bring the selected entry into view on next refresh
+	textSel   *textSelection
+	mouseDown bool // left button held in the transcript
+	dragBar   bool // dragging the scrollbar
 
 	toasts       []toast
+	toastFrom    string // the background session raising toasts, named in their titles
 	toastID      int
 	toastTicking bool
 	limitWarned  map[string]int // usage window -> highest % already warned about
 
-	git       gitstatus.Status
-	gitLoaded bool
-	gitBusy   bool
 	showHelp  bool
-	quitAsk   bool   // asking whether to leave a daemon session running
+	kill      *killState
+	folders   *folderPicker
 	notice    string // shown in the chat at startup
-	files     []string
-	vp        viewport.Model
-	input     textarea.Model
 	spin      spinner.Model
-	width     int
+	width     int // what the chat gets
 	height    int
+	termW     int // the terminal
+	termH     int
+	panelOn   bool
+	panelMode sessionsMode // last applied
 	ready     bool
-	follow    bool // keep viewport pinned to bottom
-	busy      bool
-	stopped   bool // user interrupted the current turn
 	sidebarOn bool
 	drawer    bool // sidebar open over the chat, below sidebarMinWidth
-	status    string
-	activity  string // what the live turn is doing, for the shimmer label
-	turnFrom  time.Time
 	ticks     int
 	animFrame int
 	animID    int // generation of the running shimmer tick loop
@@ -102,25 +93,7 @@ type Model struct {
 	revealID      int
 	revealLast    time.Time
 
-	// session state
-	init         *claude.InitEvent
-	initResp     *claude.InitializeResponse
-	sessionID    string
-	sessionTitle string
-	model        string
-	permMode     string
-	costUSD      float64
-	lastUsage    claude.Usage
-	ctxWindow    int
-	limits       map[string]claude.RateLimitWindow
-
-	// permissions
-	pending     []*claude.PermissionRequest
-	alwaysAllow map[string]bool
-	question    *questionState // AskUserQuestion at the head of pending
-	plan        *planState     // ExitPlanMode at the head of pending
-	editPanel   *editPanel     // Edit, MultiEdit or Write at the head of pending
-	diffView    *editPanel     // a transcript edit's diff, opened read-only
+	limits map[string]claude.RateLimitWindow // account-wide usage windows
 }
 
 const inputPlaceholder = "Ask Claude anything…  / for commands · @ to mention files"
@@ -146,46 +119,28 @@ func New(ctx context.Context, opts claude.Options, cfg config.Config, start Star
 	if opts.CWD == "" {
 		opts.CWD, _ = os.Getwd()
 	}
-	ta := textarea.New()
-	ta.Placeholder = inputPlaceholder
-	ta.ShowLineNumbers = false
-	ta.Prompt = ""
-	ta.CharLimit = 0
-	ta.SetHeight(3)
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.FocusedStyle.Placeholder = mutedStyle
-	ta.BlurredStyle.Placeholder = mutedStyle
-	ta.KeyMap.InsertNewline.SetKeys("ctrl+j", "alt+enter")
-	ta.Focus()
-
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(lipgloss.NewStyle().Foreground(currentTheme().accent)))
-
-	pm := opts.PermissionMode
-	if pm == "" {
-		pm = "default"
-	}
-	tr := newTracker()
-	c := newChat(tr)
-	c.cwd = opts.CWD
+	v := newSessionView(opts)
+	ws := newWorkspace(opts.CWD)
 	return Model{
-		opts:        opts,
+		sessionView: v,
+		workspace:   ws,
+		views:       []*sessionView{v},
+		spaces:      map[string]*workspace{ws.dir: ws},
+		done:        map[string]bool{},
+		since:       map[string]time.Time{},
+		lastState:   map[string]rowState{},
+		killed:      map[string]bool{},
+		base:        opts,
 		ctx:         ctx,
-		chat:        c,
-		track:       tr,
 		comp:        &completer{},
-		input:       ta,
 		spin:        sp,
-		follow:      true,
 		sidebarOn:   true,
-		permMode:    pm,
-		model:       opts.Model,
 		limits:      map[string]claude.RateLimitWindow{},
 		limitWarned: map[string]int{},
-		hist:        newHistory(opts.CWD),
 		sparks:      newSparkField(sidebarWidth-3, sparkMinRows),
 		focused:     true,
 		lastInput:   time.Now(),
-		alwaysAllow: map[string]bool{},
 		cfg:         cfg,
 		start:       start,
 	}
@@ -200,27 +155,42 @@ func (m Model) WithNotice(msg string) Model {
 type noticeMsg string
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, m.startCmd(m.opts), indexFiles(m.opts.CWD), m.refreshGit(), gitPoll(), loadHistory(m.opts.CWD)}
+	first := m.startCmd(m.sessionView, m.opts)
+	if m.daemon != nil && m.opts.Resume == "" && !m.opts.Continue {
+		first = launchListCmd(m.daemon) // lists the sessions, then attaches or starts
+	}
+	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, first, indexFiles(m.opts.CWD), m.refreshGit(), gitPoll(), loadHistory(m.opts.CWD)}
 	if m.notice != "" {
 		notice := m.notice
 		cmds = append(cmds, func() tea.Msg { return noticeMsg(notice) })
 	}
 	if m.opts.Resume != "" || m.opts.Continue {
-		cmds = append(cmds, loadTranscript(m.opts.CWD, m.opts.Resume))
+		cmds = append(cmds, loadTranscript(m.sessionView, m.opts.CWD, m.opts.Resume))
+	}
+	if m.daemon != nil {
+		if m.opts.Resume != "" || m.opts.Continue {
+			cmds = append(cmds, listCmd(m.daemon))
+		}
+		cmds = append(cmds, waitOverview(m.daemon.Overview()), waitDaemon(m.daemon))
 	}
 	return tea.Batch(cmds...)
 }
 
 type startedMsg struct {
+	view *sessionView
 	proc claude.Session
+	id   string // the daemon's session id, when started there
 	err  error
 }
 
-func (m *Model) startCmd(opts claude.Options) tea.Cmd {
+func (m *Model) startCmd(v *sessionView, opts claude.Options) tea.Cmd {
+	if m.daemon != nil {
+		return daemonStart(m.daemon, v, opts)
+	}
 	ctx, start := m.ctx, m.start
 	return func() tea.Msg {
 		p, err := start(ctx, opts)
-		return startedMsg{p, err}
+		return startedMsg{view: v, proc: p, err: err}
 	}
 }
 
@@ -242,23 +212,25 @@ func waitEvent(p claude.Session) tea.Cmd {
 }
 
 type transcriptMsg struct {
+	view      *sessionView
 	info      sessions.Info
 	msgs      []sessions.Message
 	subagents map[string][]sessions.Message // by the Agent call's tool_use_id
 	err       error
+	exitErr   string // shown after the history: why the session ended
 }
 
 // loadTranscript reads a session from disk for replay. An empty id means the
 // most recent session in cwd.
-func loadTranscript(cwd, id string) tea.Cmd {
+func loadTranscript(v *sessionView, cwd, id string) tea.Cmd {
 	return func() tea.Msg {
 		path, ok := sessions.Find(sessions.ProjectDir(cwd), id)
 		if !ok {
-			return transcriptMsg{err: fmt.Errorf("no saved session found")}
+			return transcriptMsg{view: v, err: fmt.Errorf("no saved session found")}
 		}
 		info, _ := sessions.Read(path)
 		msgs, err := sessions.Load(path)
-		return transcriptMsg{info: info, msgs: msgs, subagents: sessions.Subagents(path), err: err}
+		return transcriptMsg{view: v, info: info, msgs: msgs, subagents: sessions.Subagents(path), err: err}
 	}
 }
 
@@ -288,30 +260,90 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-		if m.width >= sidebarMinWidth {
-			m.drawer = false // docked (or hidden) from here on
-		}
-		m.layout()
+		m.termW, m.termH = msg.Width, msg.Height
 		m.ready = true
-		m.refresh()
+		m.resize()
 
+	case foldersLoadedMsg:
+		if m.folders != nil {
+			m.folders.setRecent(msg)
+		}
 	case noticeMsg:
 		m.chat.info("%s", string(msg))
 		m.refresh()
 
+	case overviewListMsg:
+		if msg.err == nil {
+			m.live = msg.list
+			for _, s := range m.live {
+				m.noteState(s)
+			}
+		}
+		if m.ready && m.sessionsMode() != m.panelMode {
+			m.resize()
+		}
+
+	case overviewMsg:
+		cmds = append(cmds, m.applyOverview(daemon.Frame(msg)), waitOverview(m.daemon.Overview()))
+		if m.ready && m.sessionsMode() != m.panelMode {
+			m.resize()
+		}
+
+	case daemonLostMsg:
+		// Every session went with the connection; one notice says so
+		// instead of each session's exit.
+		m.live = nil
+		m.done = map[string]bool{}
+		m.since = map[string]time.Time{}
+		m.lastState = map[string]rowState{}
+		m.killed = map[string]bool{}
+		m.chat.error("lost the claudewitz daemon — restart claudewitz")
+		if m.ready {
+			m.resize()
+		}
+		return m, m.notify(toastError, "Lost the claudewitz daemon", "restart claudewitz")
+
+	case launchListMsg:
+		return m, m.launch(msg)
 	case startedMsg:
+		v := msg.view
 		if msg.err != nil {
-			m.chat.error("could not start claude: %v", msg.err)
-			m.refresh()
+			m.inView(v, func() {
+				m.chat.error("could not start claude: %v", msg.err)
+				m.refresh()
+			})
+			if msg.id != "" && v.id == msg.id {
+				// A failed attach: forget the id so focusing it again retries.
+				v.id = ""
+				v.attachFailed = true
+				if v != m.sessionView {
+					m.removeView(v)
+				}
+			}
 			return m, nil
 		}
-		m.proc = msg.proc
-		cmds = append(cmds, waitEvent(m.proc))
+		v.proc = msg.proc
+		v.attachFailed = false
+		if msg.id != "" {
+			v.id = msg.id
+		}
+		cmds = append(cmds, waitEvent(v.proc))
 
 	case procEvent:
-		if msg.proc != m.proc {
+		v := m.viewFor(msg.proc)
+		if v == nil {
 			return m, nil // stale process
+		}
+		if v != m.sessionView {
+			var cmd tea.Cmd
+			m.toastFrom = m.viewLabel(v)
+			m.inView(v, func() { cmd = m.handleEvent(msg.ev) })
+			m.toastFrom = ""
+			cmds = append(cmds, cmd)
+			if v.proc != nil && !msg.ev.Exited {
+				cmds = append(cmds, waitEvent(v.proc))
+			}
+			break
 		}
 		cmds = append(cmds, m.handleEvent(msg.ev))
 		if touchesTree(msg.ev) {
@@ -326,15 +358,22 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 
 	case transcriptMsg:
-		if msg.err != nil {
-			m.chat.error("could not load transcript: %v", msg.err)
-		} else {
-			m.replay(msg)
-		}
-		m.refresh()
+		m.inView(msg.view, func() {
+			if msg.err != nil {
+				m.chat.error("could not load transcript: %v", msg.err)
+			} else {
+				m.replay(msg)
+			}
+			if msg.exitErr != "" {
+				m.chat.error("%s", msg.exitErr)
+			}
+			m.refresh()
+		})
 
 	case filesIndexedMsg:
-		m.files = msg
+		if ws, ok := m.spaces[msg.dir]; ok {
+			ws.files = msg.files
+		}
 
 	case gitStatusMsg:
 		cmd := m.applyGit(msg)
@@ -350,8 +389,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshGit()
 
 	case historyLoadedMsg:
-		if msg.project == m.hist.project {
-			m.hist.items = dedupeKeepLast(append(msg.items, m.hist.items...))
+		if ws, ok := m.spaces[msg.project]; ok {
+			ws.hist.items = dedupeKeepLast(append(msg.items, ws.hist.items...))
 		}
 
 	case editorDoneMsg:
@@ -429,6 +468,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, animTick(m.animID)
 
 	case tea.MouseMsg:
+		if id, handled := m.sessionsMouse(&msg); handled {
+			if id != "" && !m.modalOpen() {
+				return m, m.focusSession(id)
+			}
+			return m, nil
+		}
 		overlaid := m.picker != nil || m.palette != nil || m.modelPick != nil || m.themePick != nil || m.showHelp
 		var path string // a changed file clicked in the sidebar
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.changes == nil && !overlaid {
@@ -451,15 +496,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.mouseDown {
 			m.textSel = nil // any key clears a mouse selection
 		}
-		if m.quitAsk {
-			return m, m.handleQuitKey(msg)
-		}
 		if m.showHelp {
 			switch msg.String() {
 			case "esc", "ctrl+g", "q", "enter", "ctrl+c":
 				m.showHelp = false
 			}
 			return m, nil
+		}
+		if m.kill != nil {
+			return m, m.handleKillKey(msg)
+		}
+		if m.folders != nil {
+			return m, m.handleFoldersKey(msg)
 		}
 		if m.changes != nil {
 			return m, m.handleChangesKey(msg)
@@ -478,6 +526,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.picker != nil {
 			return m, m.handlePickerKey(msg)
+		}
+		if cmd, ok := m.handleSessionKey(msg); ok {
+			return m, cmd
 		}
 		if len(m.pending) > 0 {
 			return m, m.handlePermissionKey(msg)
@@ -646,50 +697,19 @@ func (m *Model) interrupt() {
 // by the daemon.
 type detacher interface{ Detach() error }
 
-// quit ends a local session. A daemon session may outlive the TUI, so
-// quitting asks whether to detach (the default) or stop it.
+// quit leaves: daemon sessions keep running (killing is ctrl+q); a session
+// run directly ends with the TUI.
 func (m *Model) quit() tea.Cmd {
-	if _, ok := m.proc.(detacher); ok {
-		m.quitAsk = true
-		m.input.Blur()
-		m.layout()
-		return nil
-	}
-	if m.proc != nil {
-		m.proc.Stop()
+	for _, v := range m.views {
+		switch p := v.proc.(type) {
+		case nil:
+		case detacher:
+			_ = p.Detach()
+		default:
+			p.Stop()
+		}
 	}
 	return tea.Quit
-}
-
-func (m *Model) handleQuitKey(k tea.KeyMsg) tea.Cmd {
-	switch k.String() {
-	case "enter", "d", "ctrl+d", "ctrl+c":
-		if d, ok := m.proc.(detacher); ok {
-			_ = d.Detach()
-		}
-		return tea.Quit
-	case "s":
-		if m.proc != nil {
-			m.proc.Stop()
-		}
-		return tea.Quit
-	case "esc", "n", "q":
-		m.quitAsk = false
-		if !m.chatFocus {
-			m.input.Focus()
-		}
-		m.layout()
-	}
-	return nil
-}
-
-func (m Model) quitView() string {
-	title := warnStyle.Bold(true).Render("Leave this session running?")
-	detail := mutedStyle.Render("Detached, it keeps working in the claudewitz daemon; resume it with ctrl+r or claudewitz --continue.")
-	keys := statusKey.Render("d") + mutedStyle.Render(" detach  ") +
-		statusKey.Render("s") + mutedStyle.Render(" stop session  ") +
-		statusKey.Render("esc") + mutedStyle.Render(" cancel")
-	return permBox.Width(m.mainWidth() - 2).Render(title + "\n\n" + lipgloss.NewStyle().Width(m.mainWidth()-6).Render(detail) + "\n\n" + keys)
 }
 
 func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
@@ -859,6 +879,12 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 		m.proc = nil
 		if ev.Err != nil {
 			m.chat.error("claude exited: %v", ev.Err)
+			if m.daemonLost() {
+				return nil // the lost-daemon notice covers every session
+			}
+			if m.toastFrom != "" {
+				return m.notify(toastError, "Claude Code exited", ev.Err.Error())
+			}
 			return m.notify(toastError, "Claude Code exited", "/new to start a fresh session")
 		} else {
 			m.chat.info("claude exited — /new to start again")
@@ -1149,6 +1175,9 @@ func (m *Model) handlePickerKey(k tea.KeyMsg) tea.Cmd {
 
 // resume switches to a saved session, moving to its directory if needed.
 func (m *Model) resume(s sessions.Info) tea.Cmd {
+	if id := m.liveByClaudeID(s.ID); id != "" {
+		return m.focusSession(id)
+	}
 	if s.CWD != "" && s.CWD != m.opts.CWD {
 		if _, err := os.Stat(s.CWD); err == nil {
 			m.opts.CWD = s.CWD
@@ -1162,8 +1191,18 @@ func (m *Model) resume(s sessions.Info) tea.Cmd {
 		m.replay(transcriptMsg{info: s, msgs: msgs, subagents: sessions.Subagents(s.Path)})
 	}
 	m.refresh()
+	cmds := []tea.Cmd{cmd}
+	if dir := m.cwd(); dir != m.workspace.dir {
+		old := m.workspace.dir
+		ws, created := m.spaceFor(dir)
+		m.workspace = ws
+		m.dropSpaceIfUnused(old)
+		if created {
+			cmds = append(cmds, indexFiles(dir), loadHistory(dir))
+		}
+	}
 	m.gitLoaded = false
-	return tea.Batch(cmd, indexFiles(m.opts.CWD), m.refreshGit(), m.notify(toastSuccess, "Session resumed", s.Label()))
+	return tea.Batch(append(cmds, m.refreshGit(), m.notify(toastSuccess, "Session resumed", s.Label()))...)
 }
 
 func (m *Model) cyclePermissionMode() tea.Cmd {
@@ -1366,7 +1405,10 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		if arg == "" {
 			return m.openPicker(), true
 		}
-		return tea.Batch(m.restart(claude.Options{Resume: arg}), loadTranscript(m.opts.CWD, arg)), true
+		if id := m.liveByClaudeID(arg); id != "" {
+			return m.focusSession(id), true
+		}
+		return tea.Batch(m.restart(claude.Options{Resume: arg}), loadTranscript(m.sessionView, m.opts.CWD, arg)), true
 	case "/model":
 		if arg == "" {
 			m.openModelPicker()
@@ -1434,10 +1476,16 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 }
 
 func (m *Model) restart(o claude.Options) tea.Cmd {
-	if m.proc != nil {
-		m.proc.Stop()
-		m.proc = nil
+	switch p := m.proc.(type) {
+	case nil:
+	case detacher:
+		// A daemon session keeps running in the panel; killing is ctrl+q.
+		_ = p.Detach()
+	default:
+		p.Stop()
 	}
+	m.proc = nil
+	m.sessionView.id = "" // the new session's id comes with startedMsg
 	opts := m.opts
 	opts.Resume, opts.Continue = o.Resume, o.Continue
 	m.track = newTracker()
@@ -1457,7 +1505,7 @@ func (m *Model) restart(o claude.Options) tea.Cmd {
 	m.alwaysAllow = map[string]bool{}
 	m.init = nil
 	m.refresh()
-	return m.startCmd(opts)
+	return m.startCmd(m.sessionView, opts)
 }
 
 func (m *Model) cwd() string {
@@ -1526,12 +1574,7 @@ func (m *Model) layout() {
 		bottom++
 	}
 	h := max(3, m.height-bottom)
-	if !m.ready {
-		m.vp = viewport.New(m.chatWidth(), h)
-		m.vp.MouseWheelEnabled = true
-	} else {
-		m.vp.Width, m.vp.Height = m.chatWidth(), h
-	}
+	m.vp.Width, m.vp.Height = m.chatWidth(), h
 }
 
 func (m *Model) refresh() {
@@ -1557,6 +1600,25 @@ func (m Model) View() string {
 	if !m.ready {
 		return ""
 	}
+	screen := m.viewMain()
+	switch m.panelMode {
+	case sessionsPanel:
+		screen = lipgloss.JoinHorizontal(lipgloss.Top, m.sessionsView(m.termH), screen)
+	case sessionsTabs:
+		screen = lipgloss.JoinVertical(lipgloss.Left, m.tabsView(m.termW), screen)
+	}
+	if m.kill != nil {
+		screen = center(screen, m.killView(), m.termW, m.termH-1)
+	}
+	if m.folders != nil {
+		screen = center(screen, m.folders.view(m.termW, m.termH), m.termW, m.termH-1)
+	}
+	// Strip any control sequence that slipped in with file contents, tool
+	// output or the like; only colours and text attributes get through.
+	return safetext.Screen(screen)
+}
+
+func (m Model) viewMain() string {
 	chatView := lipgloss.JoinHorizontal(lipgloss.Top, m.highlightSelection(m.vp.View()), strings.Join(m.scrollbar(), "\n"))
 	if pop := m.comp.view(m.mainWidth()); pop != "" {
 		chatView = overlayBottom(chatView, pop, m.vp.Height, m.mainWidth())
@@ -1583,7 +1645,7 @@ func (m Model) View() string {
 	h := m.height - 1
 	switch {
 	case m.showHelp:
-		screen = center(screen, helpDialog(m.width-4), m.width, h)
+		screen = center(screen, helpDialog(m.width-4, m.daemon != nil), m.width, h)
 	case m.themePick != nil:
 		// Pinned to the right so the live preview leaves the chat visible.
 		box := m.themePick.view(m.width)
@@ -1601,9 +1663,7 @@ func (m Model) View() string {
 		x, y := m.panelPos()
 		screen = overlay(screen, m.panelView(x, y), x, y)
 	}
-	// Strip any control sequence that slipped in with file contents, tool
-	// output or the like; only colours and text attributes get through.
-	return safetext.Screen(screen)
+	return screen
 }
 
 // showHeader is true when the compact brand strip replaces the sidebar.
@@ -1646,9 +1706,6 @@ func overlayBottom(base, pop string, height, width int) string {
 }
 
 func (m Model) bottomView() string {
-	if m.quitAsk {
-		return m.quitView()
-	}
 	if len(m.pending) > 0 {
 		return m.permissionView()
 	}

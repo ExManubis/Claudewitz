@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -147,27 +146,4 @@ func replaceStale(ctx context.Context, c *client.Client, sock string) (note stri
 		conn.Close()
 	}
 	return ""
-}
-
-// liveNote mentions the sessions already live in the daemon, so detached
-// ones don't pile up unnoticed.
-func liveNote(ctx context.Context, c *client.Client) string {
-	list, err := c.List(ctx)
-	if err != nil || len(list) == 0 {
-		return ""
-	}
-	var names []string
-	for i, s := range list {
-		if i == 3 {
-			names = append(names, fmt.Sprintf("%d more", len(list)-3))
-			break
-		}
-		names = append(names, fmt.Sprintf("%s (%s)", filepath.Base(s.CWD), s.State))
-	}
-	what := "1 session is"
-	if len(list) > 1 {
-		what = fmt.Sprintf("%d sessions are", len(list))
-	}
-	return fmt.Sprintf("%s already live in the daemon: %s. ctrl+r resumes one; `claudewitz daemon status` lists them.",
-		what, strings.Join(names, ", "))
 }

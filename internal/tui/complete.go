@@ -53,11 +53,15 @@ var localCommands = []suggestion{
 	{label: "/quit", desc: "exit claudewitz"},
 }
 
-type filesIndexedMsg []string
+type filesIndexedMsg struct {
+	dir   string
+	files []string
+}
 
 // indexFiles lists project files, preferring git's view of the tree.
 func indexFiles(dir string) tea.Cmd {
 	return func() tea.Msg {
+		orig := dir
 		if dir == "" {
 			dir = "."
 		}
@@ -65,7 +69,7 @@ func indexFiles(dir string) tea.Cmd {
 		cmd.Dir = dir
 		if out, err := cmd.Output(); err == nil && len(out) > 0 {
 			files := strings.Split(strings.TrimSpace(string(out)), "\n")
-			return filesIndexedMsg(withDirs(files))
+			return filesIndexedMsg{dir: orig, files: withDirs(files)}
 		}
 		var files []string
 		_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -86,7 +90,7 @@ func indexFiles(dir string) tea.Cmd {
 			}
 			return nil
 		})
-		return filesIndexedMsg(withDirs(files))
+		return filesIndexedMsg{dir: orig, files: withDirs(files)}
 	}
 }
 

@@ -55,8 +55,8 @@ func main() {
 	flag.BoolVar(&opts.Continue, "continue", false, "continue the most recent session in this directory")
 	flag.StringVar(&opts.CWD, "cwd", "", "working directory (defaults to current)")
 	theme := flag.String("theme", "", "colour theme for this run (overrides the saved one)")
-	// Off by default until the TUI can show and switch between the daemon's sessions.
-	useDaemon := flag.Bool("daemon", false, "experimental: run the session in the claudewitz daemon, so it outlives the TUI")
+	noDaemon := flag.Bool("no-daemon", false, "run claude directly instead of in the claudewitz daemon")
+	flag.Bool("daemon", true, "deprecated: the daemon is now the default") // v0.2.0's opt-in; ignored
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -88,20 +88,35 @@ func main() {
 
 	var start tui.Starter // nil: run claude directly
 	var notice string
-	if *useDaemon {
+	var hub client.Hub
+	if !*noDaemon {
 		c, note, err := connectDaemon(ctx, opts.Binary)
 		if err != nil {
 			notice = fmt.Sprintf("couldn't reach the claudewitz daemon (%v); this session runs here and ends when you quit", err)
 		} else {
 			defer c.Close()
 			start = client.Starter(c)
-			notice = strings.TrimSpace(note + "\n" + liveNote(ctx, c))
+			hub = client.Hub{C: c}
+			notice = note
 		}
 	}
 
-	p := tea.NewProgram(tui.New(ctx, opts, cfg, start).WithNotice(notice), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
+	model := tui.New(ctx, opts, cfg, start).WithNotice(notice)
+	if hub.C != nil {
+		model = model.WithDaemon(hub)
+	}
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	if hub.C != nil {
+		if list, err := hub.List(context.Background()); err == nil && len(list) > 0 {
+			what := "1 session keeps"
+			if len(list) > 1 {
+				what = fmt.Sprintf("%d sessions keep", len(list))
+			}
+			fmt.Printf("%s running in the claudewitz daemon · claudewitz to come back\n", what)
+		}
 	}
 }

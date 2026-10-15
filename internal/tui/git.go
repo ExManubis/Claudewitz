@@ -59,6 +59,11 @@ func (m *Model) refreshGit() tea.Cmd {
 // applyGit stores a fresh snapshot and toasts branch switches and new
 // commits made since the previous one.
 func (m *Model) applyGit(msg gitStatusMsg) tea.Cmd {
+	if ws, ok := m.spaces[msg.dir]; ok && ws != m.workspace {
+		ws.gitBusy = false
+		ws.git, ws.gitLoaded = msg.st, true
+		return nil // a folder in the background; no toasts for it
+	}
 	m.gitBusy = false
 	if msg.dir != m.cwd() {
 		return m.refreshGit() // directory changed (resume) while reading

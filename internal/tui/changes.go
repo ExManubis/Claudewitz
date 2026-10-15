@@ -214,7 +214,7 @@ func (m *Model) selectChange(d int) tea.Cmd {
 // It grows to fit the longest diff shown so far, up to the screen, and
 // doesn't shrink back while it's open.
 func (m Model) changesLayout() (boxW, boxH, listW, diffW, bodyH int) {
-	boxW = panelWidth(m.width)
+	boxW = diffPanelWidth(m.width)
 	innerW := boxW - 4 // border and padding
 	if innerW >= 90 {
 		listW = min(34, innerW/4)

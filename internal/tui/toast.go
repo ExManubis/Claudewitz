@@ -51,6 +51,9 @@ func (m *Model) notify(kind toastKind, title, body string) tea.Cmd {
 	case toastError:
 		ttl = 8 * time.Second
 	}
+	if m.toastFrom != "" {
+		title = m.toastFrom + " · " + title
+	}
 	// Replace an identical toast instead of stacking duplicates.
 	for i, t := range m.toasts {
 		if t.title == title && t.kind == kind {

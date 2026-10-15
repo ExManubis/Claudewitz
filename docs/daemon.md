@@ -29,11 +29,10 @@ iPhone app ────────▶│ one WebSocket protocol on both listene
 
 The daemon is part of the claudewitz binary (`claudewitz daemon`), not a separate install.
 
-For now the TUI uses the daemon only with `claudewitz -daemon`; without it the TUI spawns `claude`
-directly, as before. It becomes the default once the TUI can show and switch between the
-daemon's sessions.
+The TUI uses the daemon by default (`claudewitz -no-daemon` spawns `claude` directly) and shows
+every live session in its sessions panel.
 
-- **On demand.** Running `claudewitz -daemon` connects to `~/.claudewitz/daemon.sock`; if
+- **On demand (default).** Running `claudewitz` connects to `~/.claudewitz/daemon.sock`; if
   nothing answers it starts `claudewitz daemon` detached and connects. The daemon exits once
   it has had no clients and no live sessions for 10 min.
 - **Always on.** `claudewitz daemon install` writes a launchd LaunchAgent
@@ -42,8 +41,8 @@ daemon's sessions.
 
 Sessions are persistent agents, as with Claude Code Remote Control: quitting the TUI detaches
 from the session rather than ending it, and it stays live in the daemon (visible on the phone,
-reattachable from any TUI) until someone stops it with `session.stop`. The TUI's quit offers
-"detach" (default) or "stop".
+reattachable from any TUI) until someone stops it with `session.stop`. Quitting the TUI detaches
+from every session; ctrl+q (or the palette's Kill session) stops one.
 - `claudewitz daemon status` shows pid, uptime, listeners, sessions and paired devices.
 - `claudewitz daemon stop` ends the daemon; it refuses while sessions are live unless `-force`d.
 - A TUI that finds a daemon of another version (after an upgrade it is the old binary) asks it to
@@ -196,6 +195,8 @@ transcripts or configured roots, and `session.start` opened up on the remote lis
   "lastTurnEndedAt": "2026-10-14T13:58:40Z", // null until a turn ends; "done · 14m" in overviews
   "lastError": null,              // why the session exited, when state=exited after a failure
   "clients": 2,                   // clients subscribed right now
+  "repo": "/Users/mikkel/Developer/claudewitz", // the repository's main worktree; null outside git
+  "worktree": null,               // a linked worktree's folder name, e.g. "ring-tests"
   "git": {"branch": "main", "dirty": 3, "added": 120, "removed": 14}
 }
 ```
@@ -283,7 +284,7 @@ Payloads carry session id, cwd name and a one-line summary; no code or transcrip
 1. Put an interface in front of `claude.Process` (`Events`, `Send`, `SendWithImages`, `Respond`,
    `Interrupt`, `Set*`, `Close`) and have `internal/tui` use only that.
 2. Add `internal/daemon` (server) and `internal/daemon/client`, whose session handle implements
-   the same interface over the socket. The TUI picks local or daemon at startup (`-daemon`).
+   the same interface over the socket. The TUI picks local or daemon at startup (`-no-daemon`).
 3. Move git polling into the daemon, per cwd, so the TUI and phone share one poller.
 4. Add the remote listener, pairing and APNs, then build the app against this doc.
 

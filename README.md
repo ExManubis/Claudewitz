@@ -58,14 +58,14 @@ claudewitz -- --add-dir ../lib       # anything after -- goes straight to claude
 `esc` interrupts Claude, `tab` moves focus to the transcript, `shift+tab` cycles permission
 modes and `ctrl+b` toggles the sidebar.
 
-**Experimental:** `claudewitz -daemon` runs the session in a background `claudewitz daemon`,
-started on demand, so it outlives the TUI. Quitting asks whether to detach (the session keeps
-working; `claudewitz -daemon -continue` or `ctrl+r` picks it back up) or stop it. The TUI mentions
-sessions that are still live when it starts, and `claudewitz daemon status` lists them. The
-daemon exits after 10 minutes with no clients and no sessions; `claudewitz daemon stop` ends it
-sooner (`-force` also ends live sessions). After an upgrade, the old daemon is replaced the next
-time you run `claudewitz -daemon`, unless it still has live sessions. Without `-daemon`,
-claudewitz runs `claude` directly, as before.
+Sessions run in a background `claudewitz daemon`, started on demand, so they outlive the TUI and
+one window can drive them all. With two or more live sessions a panel lists them, most urgent
+first (a tab strip on narrow terminals): `alt+↑/↓` switches, `ctrl+]` jumps to the next one that
+needs you, `alt+n` starts one in any folder and `ctrl+q` kills one. Quitting leaves them running;
+`claudewitz daemon status` lists the live sessions.
+The daemon exits after 10 minutes with no clients and no sessions; `claudewitz daemon stop` ends
+it sooner. `claudewitz -no-daemon` runs `claude` directly instead. On macOS, the alt keys need
+"Use Option as Meta key" in Terminal and iTerm2.
 
 **Icons look like boxes?** claudewitz uses [Nerd Font](https://www.nerdfonts.com) icons by
 default. Install a Nerd Font or run `/icons unicode`.

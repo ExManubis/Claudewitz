@@ -11,8 +11,8 @@ import (
 // edit from the transcript, the changes viewer) uses one panel: centred,
 // most of the width, a hatched title, the diff, and a line of hints.
 
-// panelWidth is the panel's outer width on a screen this wide.
-func panelWidth(screen int) int {
+// diffPanelWidth is the panel's outer width on a screen this wide.
+func diffPanelWidth(screen int) int {
 	return max(40, min(screen-4, max(80, screen*9/10)))
 }
 

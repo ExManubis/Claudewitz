@@ -101,6 +101,15 @@ var helpSections = []struct {
 		{"ctrl+p", "command palette"},
 		{"ctrl+d", "quit"},
 	}},
+	{"Sessions", [][2]string{
+		{"alt+s", "sessions panel"},
+		{"alt+↑/↓", "previous / next session"},
+		{"alt+1‥9", "session by position"},
+		{"ctrl+]", "next that needs you"},
+		{"alt+n", "new session in a folder"},
+		{"ctrl+q", "kill session"},
+		{"", "macOS: alt needs Option as Meta"},
+	}},
 	{"View", [][2]string{
 		{"ctrl+o", "expand tool output"},
 		{"ctrl+b", "toggle sidebar"},
@@ -130,7 +139,7 @@ var helpSections = []struct {
 }
 
 // helpDialog is the full keyboard reference.
-func helpDialog(width int) string {
+func helpDialog(width int, daemon bool) string {
 	colW := 34
 	cols := 2
 	if width >= colW*4+8 {
@@ -138,6 +147,9 @@ func helpDialog(width int) string {
 	}
 	var blocks []string
 	for _, s := range helpSections {
+		if s.title == "Sessions" && !daemon {
+			continue
+		}
 		lines := []string{sectionTitle.MarginTop(0).Render(s.title)}
 		for _, k := range s.keys {
 			key := lipgloss.NewStyle().Width(11).Render(statusKey.Render(k[0]))
