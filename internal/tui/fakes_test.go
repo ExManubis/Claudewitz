@@ -59,6 +59,7 @@ type fakeDaemon struct {
 	list      []daemon.SessionSummary
 	overview  chan daemon.Frame
 	attached  []string
+	killed    []string
 	started   []claude.Options
 	procs     map[string]*fakeSession
 	attachErr error // returned (and cleared) by the next Attach
@@ -89,6 +90,13 @@ func (d *fakeDaemon) Attach(_ context.Context, id string) (claude.Session, error
 	p := newFakeSession()
 	d.procs[id] = p
 	return p, nil
+}
+
+func (d *fakeDaemon) Kill(_ context.Context, id string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.killed = append(d.killed, id)
+	return nil
 }
 
 func (d *fakeDaemon) List(context.Context) ([]daemon.SessionSummary, error) {

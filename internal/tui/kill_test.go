@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -63,5 +64,25 @@ func TestCtrlQDismissesAnErroredSession(t *testing.T) {
 	m = run(t, next.(Model), cmd)
 	if m.kill != nil || len(m.live) != 1 || m.sessionView.id != "s_2" {
 		t.Fatalf("dismiss: dialog %v live %d focused %q", m.kill, len(m.live), m.sessionView.id)
+	}
+}
+
+// A focused session with no process (mid-attach or attach failed) is killed
+// in the daemon by id, and a late push doesn't bring its row back.
+func TestKillWithoutProcAsksDaemon(t *testing.T) {
+	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle), sum("s_2", "/x/b", daemon.StateIdle))
+	m := daemonModel(t, d)
+	m.proc = nil
+	next, _ := m.Update(ctrlQ())
+	next, cmd := next.(Model).Update(key("y"))
+	m = run(t, next.(Model), cmd)
+	if len(d.killed) != 1 || d.killed[0] != "s_1" {
+		t.Fatalf("killed %v", d.killed)
+	}
+	before := len(m.live)
+	params, _ := json.Marshal(daemon.SessionUpdatedParams{Summary: sum("s_1", "/x/a", daemon.StateIdle)})
+	m.applyOverview(daemon.Frame{Event: daemon.EventSessionUpdated, Params: params})
+	if len(m.live) != before {
+		t.Fatalf("ghost row: live %d, was %d", len(m.live), before)
 	}
 }

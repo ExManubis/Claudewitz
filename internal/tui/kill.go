@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -57,11 +58,20 @@ func (m *Model) handleKillKey(k tea.KeyMsg) tea.Cmd {
 // killFocused stops the focused session in the daemon and moves on.
 func (m *Model) killFocused() tea.Cmd {
 	m.kill = nil
+	id := m.sessionView.id
+	var kill tea.Cmd
 	if m.proc != nil {
 		m.proc.Stop()
 		m.proc = nil
+	} else if id != "" && m.daemon != nil {
+		// Mid-attach or failed attach: no process to stop, so ask the daemon.
+		d := m.daemon
+		kill = func() tea.Msg { _ = d.Kill(context.Background(), id); return nil }
 	}
-	return m.leaveFocused()
+	if id != "" {
+		m.killed[id] = true
+	}
+	return tea.Batch(kill, m.leaveFocused())
 }
 
 // dismissFocused forgets an errored session's row.
@@ -77,6 +87,8 @@ func (m *Model) leaveFocused() tea.Cmd {
 	at := slices.IndexFunc(rows, func(r daemon.SessionSummary) bool { return r.ID == gone.id })
 	m.live = slices.DeleteFunc(m.live, func(s daemon.SessionSummary) bool { return s.ID == gone.id })
 	delete(m.done, gone.id)
+	delete(m.since, gone.id)
+	delete(m.lastState, gone.id)
 	rows = m.rows()
 	var cmd tea.Cmd
 	if len(rows) > 0 {

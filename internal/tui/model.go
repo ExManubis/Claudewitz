@@ -38,6 +38,7 @@ type Model struct {
 	done      map[string]bool         // turn ended while not focused
 	since     map[string]time.Time    // when each session entered its state
 	lastState map[string]rowState
+	killed    map[string]bool // sessions just killed, so late pushes don't bring their rows back
 
 	ctx   context.Context
 	start Starter
@@ -128,6 +129,7 @@ func New(ctx context.Context, opts claude.Options, cfg config.Config, start Star
 		done:        map[string]bool{},
 		since:       map[string]time.Time{},
 		lastState:   map[string]rowState{},
+		killed:      map[string]bool{},
 		base:        opts,
 		ctx:         ctx,
 		comp:        &completer{},

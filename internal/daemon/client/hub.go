@@ -36,4 +36,9 @@ func (h Hub) Attach(ctx context.Context, id string) (claude.Session, error) {
 func (h Hub) List(ctx context.Context) ([]daemon.SessionSummary, error) { return h.C.List(ctx) }
 
 // Overview delivers session.updated, session.closed and account.updated.
+// Kill stops the session id in the daemon, attached or not.
+func (h Hub) Kill(ctx context.Context, id string) error {
+	return h.C.Call(ctx, "session.stop", daemon.SessionParams{Session: id}, nil)
+}
+
 func (h Hub) Overview() <-chan daemon.Frame { return h.C.Overview() }

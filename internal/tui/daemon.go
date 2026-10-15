@@ -21,6 +21,7 @@ type Daemon interface {
 	Attach(ctx context.Context, id string) (claude.Session, error)
 	List(ctx context.Context) ([]daemon.SessionSummary, error)
 	Overview() <-chan daemon.Frame
+	Kill(ctx context.Context, id string) error
 }
 
 // WithDaemon runs sessions in the daemon and shows all of its sessions.
@@ -30,6 +31,7 @@ func (m Model) WithDaemon(d Daemon) Model {
 	m.done = map[string]bool{}
 	m.since = map[string]time.Time{}
 	m.lastState = map[string]rowState{}
+	m.killed = map[string]bool{}
 	return m
 }
 
@@ -182,6 +184,9 @@ func (m *Model) applyOverview(f daemon.Frame) tea.Cmd {
 			return nil
 		}
 		s := p.Summary
+		if m.killed[s.ID] {
+			return nil // a late push for a session just killed
+		}
 		i := slices.IndexFunc(m.live, func(x daemon.SessionSummary) bool { return x.ID == s.ID })
 		if i < 0 {
 			m.live = append(m.live, s)
@@ -204,6 +209,7 @@ func (m *Model) applyOverview(f daemon.Frame) tea.Cmd {
 		if json.Unmarshal(f.Params, &p) != nil {
 			return nil
 		}
+		delete(m.killed, p.Session)
 		i := slices.IndexFunc(m.live, func(x daemon.SessionSummary) bool { return x.ID == p.Session })
 		if i < 0 {
 			return nil
