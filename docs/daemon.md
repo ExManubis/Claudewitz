@@ -260,7 +260,7 @@ merges, releases and test runs come from the shell commands Claude ran and their
 | Method | Params | Result |
 |---|---|---|
 | `session.start` | `{cwd, model?, effort?, permissionMode?, resume?, continue?}` | `{session: SessionSummary}`; local only |
-| `session.subscribe` | `{session, since?}` | `{summary, pending: [Permission], fromSeq}` |
+| `session.subscribe` | `{session, since?}` | `{summary, pending: [Permission], fromSeq, liveSeq}` |
 | `session.unsubscribe` | `{session}` | `{}` |
 | `session.send` | `{session, text, images?: [{mediaType, data}]}` | `{}` |
 | `session.interrupt` | `{session}` | `{}` |
@@ -316,7 +316,9 @@ Exceptions the daemon handles itself rather than passing through:
 Every event gets a per-session `seq`. The daemon keeps the current turn's events, plus the last
 2,000 events, in memory. `subscribe` with `since` replays everything after that seq if it's still
 held; otherwise `fromSeq` says where replay starts, and the client loads earlier history with
-`sessions.history`/transcript replay, as the TUI does with `--resume` today. `stream_event`
+`sessions.history`/transcript replay, as the TUI does with `--resume` today. `liveSeq` is the
+first seq after the subscription: events before it are replay, so a client that reacts to events
+(the phone celebrating a commit) can tell history from news. `stream_event`
 deltas are dropped from the buffer once their complete message arrives, so a reconnecting phone
 gets finished messages, not thousands of deltas.
 

@@ -201,6 +201,10 @@ type SubscribeResult struct {
 	// FromSeq is where replay starts: the first replayed seq, or the next
 	// seq when nothing is replayed.
 	FromSeq int64 `json:"fromSeq"`
+	// LiveSeq is the first seq that happens after the subscription: the
+	// replay is everything before it. Clients that react to events (the
+	// phone's celebrations) leave the replay alone.
+	LiveSeq int64 `json:"liveSeq"`
 }
 
 // Permission is a permission request waiting for an answer.

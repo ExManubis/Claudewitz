@@ -441,8 +441,9 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 		}
 		s.recaps.once.Do(func() { s.recaps.s = recap.NewScanner(sessions.Root()) })
 		// The first recap reads weeks of transcripts; don't hold up the
-		// connection's other requests meanwhile.
-		go c.reply(req.ID, s.recaps.s.Recap(day, loc))
+		// connection's other requests meanwhile. (The tally runs inside the
+		// goroutine: `go c.reply(id, recap())` would run it here.)
+		go func() { c.reply(req.ID, s.recaps.s.Recap(day, loc)) }()
 		return nil, handled
 
 	case "sessions.history":
