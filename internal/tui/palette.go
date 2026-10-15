@@ -73,9 +73,13 @@ func (m *Model) actions() []action {
 			return nil
 		})
 	}
-	add("Session", "New session", "start fresh in this directory", "/new", func(m *Model) tea.Cmd {
-		return m.restart(claude.Options{})
-	})
+	if m.daemon != nil {
+		add("Session", "New session…", "in this folder or any other", "alt+n", func(m *Model) tea.Cmd { return m.openFolders() })
+	} else {
+		add("Session", "New session", "start fresh in this directory", "/new", func(m *Model) tea.Cmd {
+			return m.restart(claude.Options{})
+		})
+	}
 	add("Session", "Resume session…", "browse saved sessions", "ctrl+r", func(m *Model) tea.Cmd {
 		return m.openPicker()
 	})
@@ -84,7 +88,6 @@ func (m *Model) actions() []action {
 			cmd, _ := m.handleSessionKey(tea.KeyMsg{Type: tea.KeyCtrlCloseBracket})
 			return cmd
 		})
-		add("Sessions", "New session…", "start one in any folder", "alt+n", func(m *Model) tea.Cmd { return m.openFolders() })
 		add("Sessions", "Kill session", "end the focused session", "ctrl+q", func(m *Model) tea.Cmd { return m.openKill() })
 		labels := folderLabels(m.live)
 		for i, r := range m.rows() {

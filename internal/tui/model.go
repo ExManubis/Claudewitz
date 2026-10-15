@@ -1414,6 +1414,9 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 	case "/quit", "/exit":
 		return m.quit(), true
 	case "/new", "/clear":
+		if fields[0] == "/new" && m.daemon != nil {
+			return m.openFolders(), true
+		}
 		return tea.Batch(m.restart(claude.Options{}), m.notify(toastInfo, "New session", prettyPath(m.opts.CWD))), true
 	case "/resume", "/sessions":
 		if arg == "" {
