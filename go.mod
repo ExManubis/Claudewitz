@@ -10,6 +10,7 @@ require (
 	github.com/charmbracelet/glamour v0.9.1
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.8.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/lucasb-eyer/go-colorful v1.2.0
 	github.com/muesli/termenv v0.16.0
 )
