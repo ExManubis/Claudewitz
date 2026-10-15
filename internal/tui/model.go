@@ -1122,8 +1122,18 @@ func (m *Model) resume(s sessions.Info) tea.Cmd {
 		m.replay(transcriptMsg{info: s, msgs: msgs, subagents: sessions.Subagents(s.Path)})
 	}
 	m.refresh()
+	cmds := []tea.Cmd{cmd}
+	if dir := m.cwd(); dir != m.workspace.dir {
+		old := m.workspace.dir
+		ws, created := m.spaceFor(dir)
+		m.workspace = ws
+		m.dropSpaceIfUnused(old)
+		if created {
+			cmds = append(cmds, indexFiles(dir), loadHistory(dir))
+		}
+	}
 	m.gitLoaded = false
-	return tea.Batch(cmd, indexFiles(m.opts.CWD), m.refreshGit(), m.notify(toastSuccess, "Session resumed", s.Label()))
+	return tea.Batch(append(cmds, m.refreshGit(), m.notify(toastSuccess, "Session resumed", s.Label()))...)
 }
 
 func (m *Model) cyclePermissionMode() tea.Cmd {

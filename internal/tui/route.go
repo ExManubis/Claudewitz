@@ -73,16 +73,23 @@ func (m *Model) removeView(v *sessionView) {
 			break
 		}
 	}
-	dir := v.opts.CWD
+	m.dropSpaceIfUnused(v.dir())
+}
+
+// dir is the folder v works in: the one its process reported, else the one
+// it was asked for.
+func (v *sessionView) dir() string {
 	if v.init != nil && v.init.CWD != "" {
-		dir = v.init.CWD
+		return v.init.CWD
 	}
+	return v.opts.CWD
+}
+
+// dropSpaceIfUnused forgets dir's workspace when no view uses that folder
+// and it isn't the focused workspace.
+func (m *Model) dropSpaceIfUnused(dir string) {
 	for _, x := range m.views {
-		xd := x.opts.CWD
-		if x.init != nil && x.init.CWD != "" {
-			xd = x.init.CWD
-		}
-		if xd == dir {
+		if x.dir() == dir {
 			return
 		}
 	}

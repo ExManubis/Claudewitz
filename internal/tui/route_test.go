@@ -10,6 +10,7 @@ import (
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
 	"github.com/exmanubis/claudewitz/internal/gitstatus"
+	"github.com/exmanubis/claudewitz/internal/sessions"
 )
 
 // readyModel is a Model sized like a normal terminal.
@@ -119,5 +120,24 @@ func TestRemoveViewDropsUnusedWorkspace(t *testing.T) {
 	m.removeView(other)
 	if _, ok := m.spaces[dir]; ok || len(m.views) != 1 {
 		t.Fatalf("workspace kept: %v, views %d", m.spaces, len(m.views))
+	}
+}
+
+func TestResumeIntoAnotherFolderKeepsItsFileIndex(t *testing.T) {
+	m := readyModel(t)
+	m.start = func(context.Context, claude.Options) (claude.Session, error) { return newFakeSession(), nil }
+	oldDir := m.workspace.dir
+	newDir := t.TempDir()
+	_ = m.resume(sessions.Info{ID: "abc", CWD: newDir, Path: "/nonexistent"})
+	if m.workspace.dir != newDir {
+		t.Fatalf("workspace is %q, want %q", m.workspace.dir, newDir)
+	}
+	if _, ok := m.spaces[oldDir]; ok {
+		t.Fatal("old folder's workspace kept")
+	}
+	next, _ := m.Update(filesIndexedMsg{dir: newDir, files: []string{"new.go"}})
+	m = next.(Model)
+	if len(m.files) != 1 || m.files[0] != "new.go" {
+		t.Fatalf("files %v", m.files)
 	}
 }
