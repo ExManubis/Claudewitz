@@ -1152,6 +1152,9 @@ func (m *Model) handlePickerKey(k tea.KeyMsg) tea.Cmd {
 
 // resume switches to a saved session, moving to its directory if needed.
 func (m *Model) resume(s sessions.Info) tea.Cmd {
+	if id := m.liveByClaudeID(s.ID); id != "" {
+		return m.focusSession(id)
+	}
 	if s.CWD != "" && s.CWD != m.opts.CWD {
 		if _, err := os.Stat(s.CWD); err == nil {
 			m.opts.CWD = s.CWD
@@ -1379,6 +1382,9 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		if arg == "" {
 			return m.openPicker(), true
 		}
+		if id := m.liveByClaudeID(arg); id != "" {
+			return m.focusSession(id), true
+		}
 		return tea.Batch(m.restart(claude.Options{Resume: arg}), loadTranscript(m.sessionView, m.opts.CWD, arg)), true
 	case "/model":
 		if arg == "" {
@@ -1447,10 +1453,16 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 }
 
 func (m *Model) restart(o claude.Options) tea.Cmd {
-	if m.proc != nil {
-		m.proc.Stop()
-		m.proc = nil
+	switch p := m.proc.(type) {
+	case nil:
+	case detacher:
+		// A daemon session keeps running in the panel; killing is ctrl+q.
+		_ = p.Detach()
+	default:
+		p.Stop()
 	}
+	m.proc = nil
+	m.sessionView.id = "" // the new session's id comes with startedMsg
 	opts := m.opts
 	opts.Resume, opts.Continue = o.Resume, o.Continue
 	m.track = newTracker()

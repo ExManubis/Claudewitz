@@ -20,6 +20,17 @@ func (m *Model) summary(id string) (daemon.SessionSummary, bool) {
 	return m.live[i], true
 }
 
+// liveByClaudeID is the daemon id of the live session running Claude Code
+// session sid, or "".
+func (m *Model) liveByClaudeID(sid string) string {
+	for _, s := range m.live {
+		if s.ClaudeSessionID != nil && *s.ClaudeSessionID == sid && s.State != daemon.StateExited {
+			return s.ID
+		}
+	}
+	return ""
+}
+
 // attachCmd follows a live session from now on.
 func attachCmd(d Daemon, v *sessionView, id string) tea.Cmd {
 	return func() tea.Msg {

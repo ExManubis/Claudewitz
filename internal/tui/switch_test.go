@@ -12,6 +12,7 @@ import (
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
 	"github.com/exmanubis/claudewitz/internal/daemon"
+	"github.com/exmanubis/claudewitz/internal/sessions"
 )
 
 func daemonModel(t *testing.T, d *fakeDaemon) Model {
@@ -145,5 +146,49 @@ func TestQuitDetachesEverySession(t *testing.T) {
 	}
 	if !a.detached || !b.detached || a.stopped || b.stopped {
 		t.Fatalf("detached %v/%v stopped %v/%v", a.detached, b.detached, a.stopped, b.stopped)
+	}
+}
+
+// /new in a daemon session detaches from it (it keeps running in the
+// panel) and starts a fresh one.
+func TestNewDetachesTheDaemonSession(t *testing.T) {
+	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle), sum("s_2", "/x/b", daemon.StateIdle))
+	m := daemonModel(t, d)
+	p := newFakeSession()
+	m.proc = p
+	cmd, _ := m.slash("/new")
+	m = run(t, m, cmd)
+	if p.stopped || !p.detached {
+		t.Fatalf("old proc stopped %v detached %v", p.stopped, p.detached)
+	}
+	if len(d.started) != 1 || m.sessionView.id != "s_new1" {
+		t.Fatalf("started %d focused %q", len(d.started), m.sessionView.id)
+	}
+}
+
+// Resuming a session that is live in the daemon focuses its view instead
+// of starting a second one.
+func TestResumeLiveSessionFocusesIt(t *testing.T) {
+	b := sum("s_2", "/x/b", daemon.StateIdle)
+	b.ClaudeSessionID = ptr("c_2")
+	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle), b)
+	m := daemonModel(t, d)
+	p := newFakeSession()
+	m.proc = p
+	m = run(t, m, m.focusSession("s_2"))
+	bview := m.sessionView
+	m = run(t, m, m.focusSession("s_1"))
+	m = run(t, m, m.resume(sessions.Info{ID: "c_2", CWD: "/x/b", Path: "/nonexistent"}))
+	if m.sessionView != bview || len(d.started) != 0 || p.stopped {
+		t.Fatalf("focused %q started %d old stopped %v", m.sessionView.id, len(d.started), p.stopped)
+	}
+	n := 0
+	for _, v := range m.views {
+		if v.id == "s_2" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d views for s_2", n)
 	}
 }
