@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -107,5 +108,27 @@ func TestFocusErroredSessionShowsErrorAndDismisses(t *testing.T) {
 	m = run(t, next.(Model), cmd)
 	if m.kill != nil || len(m.live) != 1 || m.sessionView.id != "s_2" {
 		t.Fatalf("dismiss: dialog %v live %d focused %q", m.kill, len(m.live), m.sessionView.id)
+	}
+}
+
+// A click on another row while the Kill dialog is open doesn't switch
+// sessions, and y kills the session the dialog names.
+func TestKillDialogIgnoresRowClicks(t *testing.T) {
+	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle), sum("s_2", "/x/b", daemon.StateIdle), sum("s_3", "/x/c", daemon.StateIdle))
+	m := daemonModel(t, d)
+	p := newFakeSession()
+	m.proc = p
+	next, _ := m.Update(ctrlQ())
+	m = next.(Model)
+	click := tea.MouseMsg{X: 2, Y: panelTop + 2*2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft} // s_3's row
+	next, cmd := m.Update(click)
+	m = run(t, next.(Model), cmd)
+	if m.sessionView.id != "s_1" || m.kill == nil {
+		t.Fatalf("click under the dialog: focused %q dialog %v", m.sessionView.id, m.kill)
+	}
+	next, cmd = m.Update(key("y"))
+	m = run(t, next.(Model), cmd)
+	if !p.stopped || m.viewByID("s_1") != nil || slices.Contains(d.attached, "s_3") {
+		t.Fatalf("stopped %v focused %q attached %v", p.stopped, m.sessionView.id, d.attached)
 	}
 }

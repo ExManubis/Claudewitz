@@ -55,23 +55,42 @@ func (m *Model) handleKillKey(k tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// killFocused stops the focused session in the daemon and moves on.
+// killFocused stops the session the dialog names in the daemon and moves
+// on.
 func (m *Model) killFocused() tea.Cmd {
+	id := m.kill.id
 	m.kill = nil
-	id := m.sessionView.id
+	v := m.viewByID(id)
 	var kill tea.Cmd
-	if m.proc != nil {
-		m.proc.Stop()
-		m.proc = nil
-	} else if id != "" && m.daemon != nil {
+	if v != nil && v.proc != nil {
+		v.proc.Stop()
+		v.proc = nil
+	} else if m.daemon != nil {
 		// Mid-attach or failed attach: no process to stop, so ask the daemon.
 		d := m.daemon
 		kill = func() tea.Msg { _ = d.Kill(context.Background(), id); return nil }
 	}
-	if id != "" {
-		m.killed[id] = true
+	m.killed[id] = true
+	if v != m.sessionView {
+		// Not on screen (the dialog outlived a switch): just drop its row.
+		m.dropRow(id)
+		if v != nil {
+			m.removeView(v)
+		}
+		if m.ready && m.sessionsMode() != m.panelMode {
+			m.resize()
+		}
+		return kill
 	}
 	return tea.Batch(kill, m.leaveFocused())
+}
+
+// dropRow forgets session id's row and its state.
+func (m *Model) dropRow(id string) {
+	m.live = slices.DeleteFunc(m.live, func(s daemon.SessionSummary) bool { return s.ID == id })
+	delete(m.done, id)
+	delete(m.since, id)
+	delete(m.lastState, id)
 }
 
 // dismissFocused forgets an errored session's row.
@@ -85,10 +104,7 @@ func (m *Model) leaveFocused() tea.Cmd {
 	gone := m.sessionView
 	rows := m.rows()
 	at := slices.IndexFunc(rows, func(r daemon.SessionSummary) bool { return r.ID == gone.id })
-	m.live = slices.DeleteFunc(m.live, func(s daemon.SessionSummary) bool { return s.ID == gone.id })
-	delete(m.done, gone.id)
-	delete(m.since, gone.id)
-	delete(m.lastState, gone.id)
+	m.dropRow(gone.id)
 	rows = m.rows()
 	var cmd tea.Cmd
 	if len(rows) > 0 {

@@ -452,7 +452,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		if id, handled := m.sessionsMouse(&msg); handled {
-			if id != "" {
+			if id != "" && !m.modalOpen() {
 				return m, m.focusSession(id)
 			}
 			return m, nil
