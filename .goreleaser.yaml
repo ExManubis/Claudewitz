@@ -55,6 +55,16 @@ homebrew_casks:
       claudewitz drives the Claude Code CLI. If you don't have it yet:
         npm install -g @anthropic-ai/claude-code
       then run `claude` once to log in.
+      To keep the daemon running for the iPhone app: claudewitz daemon install
+    # Only zap (brew uninstall --zap) unloads the always-on daemon: a plain
+    # uninstall stanza also runs on every upgrade, which would end its
+    # sessions. Upgrades are handled by the daemon itself (see docs/daemon.md).
+    zap:
+      launchctl:
+        - ai.claudewitz.daemon
+      trash:
+        - ~/Library/LaunchAgents/ai.claudewitz.daemon.plist
+        - ~/.claudewitz
     # The binaries aren't notarised, so clear the quarantine flag macOS puts
     # on downloads; otherwise Gatekeeper refuses to run them.
     # Homebrew deprecated Ruby `postflight` blocks in favour of declarative

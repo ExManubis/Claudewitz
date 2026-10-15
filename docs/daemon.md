@@ -35,9 +35,30 @@ every live session in its sessions panel.
 - **On demand (default).** Running `claudewitz` connects to `~/.claudewitz/daemon.sock`; if
   nothing answers it starts `claudewitz daemon` detached and connects. The daemon exits once
   it has had no clients and no live sessions for 10 min.
-- **Always on.** `claudewitz daemon install` writes a launchd LaunchAgent
-  (`~/Library/LaunchAgents/ai.claudewitz.daemon.plist`, `RunAtLoad` + `KeepAlive`) and the
-  daemon never idles out. `claudewitz daemon uninstall` removes it.
+- **Always on (macOS, opt-in).** `claudewitz daemon install`, or the TUI's palette entry
+  "Keep daemon running at login" (after a confirmation that defaults to "Not now"), writes a
+  launchd LaunchAgent, `~/Library/LaunchAgents/ai.claudewitz.daemon.plist`, and loads it with
+  `launchctl bootstrap gui/$UID`. It runs `claudewitz daemon -idle 0 -wait` with the `PATH` of
+  the shell that installed it (so `claude`, `node` and `git` resolve), `RunAtLoad`, and
+  `KeepAlive` = `{SuccessfulExit: false}`: launchd restarts it when it fails, not when it is
+  stopped on purpose. Logs go to `~/.claudewitz/daemon.log`, as for an on-demand daemon. It is
+  never installed by Homebrew or by anything else on its own: the phone is the only reason to
+  have it, so `claudewitz daemon remote on` and `claudewitz pair` suggest it when it's missing.
+  - The agent runs the path that survives upgrades: Homebrew's `$(brew --prefix)/bin/claudewitz`
+    link when the running binary lives under a `Caskroom/` or `Cellar/` folder, else the binary
+    itself.
+  - Installing never ends sessions. If an on-demand daemon is running, launchd's starts with
+    `-wait` and waits for the socket; it takes over once the on-demand one idles out. (From the
+    CLI, an on-demand daemon with no sessions and no other clients is stopped straight away.)
+  - `claudewitz daemon uninstall` (or "Stop keeping daemon running") removes the plist and
+    boots the agent out. If its daemon still has sessions or other clients it is left running
+    with the usual 10 min idle timeout (`daemon.setIdle`) instead, and exits once idle; installing
+    again before then keeps it.
+  - `claudewitz daemon status` and the TUI's `/daemon` say which mode is in effect.
+  - Other systems: `install` fails with "only supported on macOS so far".
+  - `brew uninstall --zap claudewitz` unloads it and removes the plist and `~/.claudewitz`; a
+    plain uninstall or upgrade leaves it alone (Homebrew runs a cask's `uninstall` stanza on
+    every upgrade, which would end its sessions).
 
 Sessions are persistent agents, as with Claude Code Remote Control: quitting the TUI detaches
 from the session rather than ending it, and it stays live in the daemon (visible on the phone,
@@ -45,8 +66,13 @@ reattachable from any TUI) until someone stops it with `session.stop`. Quitting 
 from every session; ctrl+q (or the palette's Kill session) stops one.
 - `claudewitz daemon status` shows pid, uptime, listeners, sessions and paired devices.
 - `claudewitz daemon stop` ends the daemon; it refuses while sessions are live unless `-force`d.
+  An always-on daemon stays stopped until the next TUI starts it (`launchctl kickstart`) or the
+  next login.
 - A TUI that finds a daemon of another version (after an upgrade it is the old binary) asks it to
   stop and starts a fresh one; if the old one has live sessions it is kept, and the TUI says so.
+  When the daemon is installed, the TUI has launchd start it (`launchctl kickstart`), so the
+  fresh one is the always-on one, from the upgraded binary; it only starts one itself if launchd's
+  doesn't answer within 3 s.
 
 If the daemon is restarted, live `claude` processes go with it; sessions come back as resumable
 (`--resume`) from their transcripts, so nothing is lost but the in-flight turn.
@@ -142,12 +168,13 @@ Management methods, all local only, used by the `claudewitz` CLI:
 
 | Method | Params | Result |
 |---|---|---|
-| `daemon.status` | `{}` | `{pid, daemonVersion, startedAt, listeners: [{kind, address}], remote, clients, sessions, devices}` |
+| `daemon.status` | `{}` | `{pid, daemonVersion, startedAt, listeners: [{kind, address}], remote, clients, sessions, devices, idleSeconds}`; `idleSeconds` 0 never idles out |
 | `remote.set` | `{enabled, port?}` | `{enabled, host?, port?, error?}` |
 | `pair.code` | `{}` | `{host, port, code, expiresAt}` |
 | `devices.list` | `{}` | `{devices: [{id, name, pairedAt, lastSeen, connected}]}` |
 | `devices.revoke` | `{device}` (id or name) | `{device}` |
 | `daemon.stop` | `{force?}` | `{}`; the daemon exits just after replying. Without `force`, `busy` while sessions are live |
+| `daemon.setIdle` | `{seconds}` | `{}`; changes the idle timeout of the running daemon (0: never). Used when the always-on daemon is uninstalled while it has sessions |
 
 ### Overview (every client gets this, no subscription needed)
 

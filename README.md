@@ -64,7 +64,10 @@ first (a tab strip on narrow terminals): `alt+↑/↓` switches, `ctrl+]` jumps 
 needs you, `alt+n` starts one in any folder and `ctrl+q` kills one. Quitting leaves them running;
 `claudewitz daemon status` lists the live sessions.
 The daemon exits after 10 minutes with no clients and no sessions; `claudewitz daemon stop` ends
-it sooner. `claudewitz -no-daemon` runs `claude` directly instead. On macOS, the alt keys need
+it sooner. On macOS, `claudewitz daemon install` (or "Keep daemon running at login" in the
+`ctrl+p` palette) keeps it running and starts it at login, so the iPhone app can reach your Mac;
+`claudewitz daemon uninstall` undoes it, and `/daemon` shows which mode it's in.
+`claudewitz -no-daemon` runs `claude` directly instead. On macOS, the alt keys need
 "Use Option as Meta key" in Terminal and iTerm2.
 
 **Icons look like boxes?** claudewitz uses [Nerd Font](https://www.nerdfonts.com) icons by

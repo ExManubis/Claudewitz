@@ -14,6 +14,7 @@ import (
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
 	"github.com/exmanubis/claudewitz/internal/daemon/client"
+	"github.com/exmanubis/claudewitz/internal/daemon/launchd"
 	"github.com/exmanubis/claudewitz/internal/tui"
 )
 
@@ -89,6 +90,7 @@ func main() {
 	var start tui.Starter // nil: run claude directly
 	var notice string
 	var hub client.Hub
+	var always alwaysOn
 	if !*noDaemon {
 		c, note, err := connectDaemon(ctx, opts.Binary)
 		if err != nil {
@@ -97,13 +99,14 @@ func main() {
 			defer c.Close()
 			start = client.Starter(c)
 			hub = client.Hub{C: c}
+			always = alwaysOn{agent: launchd.New(), c: c}
 			notice = note
 		}
 	}
 
 	model := tui.New(ctx, opts, cfg, start).WithNotice(notice)
 	if hub.C != nil {
-		model = model.WithDaemon(hub)
+		model = model.WithDaemon(hub).WithAlwaysOn(always)
 	}
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
 	if _, err := p.Run(); err != nil {
