@@ -63,10 +63,12 @@ type fakeDaemon struct {
 	started   []claude.Options
 	procs     map[string]*fakeSession
 	attachErr error // returned (and cleared) by the next Attach
+	strict    bool  // Attach rejects ids not in list, as the daemon does
+	done      chan struct{}
 }
 
 func newFakeDaemon(list ...daemon.SessionSummary) *fakeDaemon {
-	return &fakeDaemon{list: list, overview: make(chan daemon.Frame, 16), procs: map[string]*fakeSession{}}
+	return &fakeDaemon{list: list, overview: make(chan daemon.Frame, 16), procs: map[string]*fakeSession{}, done: make(chan struct{})}
 }
 
 func (d *fakeDaemon) Start(_ context.Context, opts claude.Options) (claude.Session, string, error) {
@@ -86,6 +88,9 @@ func (d *fakeDaemon) Attach(_ context.Context, id string) (claude.Session, error
 	if err := d.attachErr; err != nil {
 		d.attachErr = nil
 		return nil, err
+	}
+	if d.strict && !slices.ContainsFunc(d.list, func(s daemon.SessionSummary) bool { return s.ID == id }) {
+		return nil, fmt.Errorf("no session %s", id)
 	}
 	p := newFakeSession()
 	d.procs[id] = p

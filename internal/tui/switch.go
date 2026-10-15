@@ -60,7 +60,27 @@ func (m *Model) focusSessionView(id string) tea.Cmd {
 	v.sessionTitle = s.Title
 	m.views = append(m.views, v)
 	delete(m.done, id)
-	cmds := []tea.Cmd{m.focus(v), attachCmd(m.daemon, v, id)}
+	cmds := []tea.Cmd{m.focus(v)}
+	if s.State == daemon.StateExited {
+		// The daemon has forgotten it: nothing to attach to. Show its history
+		// and why it ended; ctrl+q dismisses it.
+		why := "claude exited"
+		if s.LastError != nil {
+			why += ": " + *s.LastError
+		}
+		if v.sessionID == "" {
+			m.chat.error("%s", why)
+			m.refresh()
+			return tea.Batch(cmds...)
+		}
+		load := loadTranscript(v, s.CWD, v.sessionID)
+		return tea.Batch(append(cmds, func() tea.Msg {
+			msg := load().(transcriptMsg)
+			msg.exitErr = why
+			return msg
+		})...)
+	}
+	cmds = append(cmds, attachCmd(m.daemon, v, id))
 	if v.sessionID != "" {
 		cmds = append(cmds, loadTranscript(v, s.CWD, v.sessionID))
 	}

@@ -86,3 +86,26 @@ func TestKillWithoutProcAsksDaemon(t *testing.T) {
 		t.Fatalf("ghost row: live %d, was %d", len(m.live), before)
 	}
 }
+
+// An errored session the daemon has already forgotten opens without an
+// attach, shows its error, and ctrl+q dismisses it.
+func TestFocusErroredSessionShowsErrorAndDismisses(t *testing.T) {
+	errd := daemon.SessionSummary{ID: "s_1", CWD: "/x/a", State: daemon.StateExited, LastError: ptr("auth expired"),
+		ClaudeSessionID: ptr("c_1")}
+	d := newFakeDaemon(sum("s_2", "/x/b", daemon.StateIdle), errd)
+	m := daemonModel(t, d)
+	d.list = d.list[:1] // the daemon dropped s_1 when it exited
+	d.strict = true
+	m = run(t, m, m.focusSession("s_1"))
+	if m.sessionView.id != "s_1" || len(d.attached) != 0 {
+		t.Fatalf("focused %q attached %v", m.sessionView.id, d.attached)
+	}
+	if !strings.Contains(ansi.Strip(m.chatContent), "auth expired") {
+		t.Fatalf("chat lacks the error:\n%s", ansi.Strip(m.chatContent))
+	}
+	next, cmd := m.Update(ctrlQ())
+	m = run(t, next.(Model), cmd)
+	if m.kill != nil || len(m.live) != 1 || m.sessionView.id != "s_2" {
+		t.Fatalf("dismiss: dialog %v live %d focused %q", m.kill, len(m.live), m.sessionView.id)
+	}
+}

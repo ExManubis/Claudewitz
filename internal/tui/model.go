@@ -216,6 +216,7 @@ type transcriptMsg struct {
 	msgs      []sessions.Message
 	subagents map[string][]sessions.Message // by the Agent call's tool_use_id
 	err       error
+	exitErr   string // shown after the history: why the session ended
 }
 
 // loadTranscript reads a session from disk for replay. An empty id means the
@@ -345,6 +346,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.chat.error("could not load transcript: %v", msg.err)
 			} else {
 				m.replay(msg)
+			}
+			if msg.exitErr != "" {
+				m.chat.error("%s", msg.exitErr)
 			}
 			m.refresh()
 		})
