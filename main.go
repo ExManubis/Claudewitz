@@ -56,6 +56,7 @@ func main() {
 	flag.StringVar(&opts.CWD, "cwd", "", "working directory (defaults to current)")
 	theme := flag.String("theme", "", "colour theme for this run (overrides the saved one)")
 	noDaemon := flag.Bool("no-daemon", false, "run claude directly instead of in the claudewitz daemon")
+	flag.Bool("daemon", true, "deprecated: the daemon is now the default") // v0.2.0's opt-in; ignored
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 	if *showVersion {

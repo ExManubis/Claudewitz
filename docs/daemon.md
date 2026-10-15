@@ -41,8 +41,8 @@ every live session in its sessions panel.
 
 Sessions are persistent agents, as with Claude Code Remote Control: quitting the TUI detaches
 from the session rather than ending it, and it stays live in the daemon (visible on the phone,
-reattachable from any TUI) until someone stops it with `session.stop`. The TUI's quit offers
-"detach" (default) or "stop".
+reattachable from any TUI) until someone stops it with `session.stop`. Quitting the TUI detaches
+from every session; ctrl+q (or the palette's Kill session) stops one.
 - `claudewitz daemon status` shows pid, uptime, listeners, sessions and paired devices.
 - `claudewitz daemon stop` ends the daemon; it refuses while sessions are live unless `-force`d.
 - A TUI that finds a daemon of another version (after an upgrade it is the old binary) asks it to

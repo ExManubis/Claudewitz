@@ -61,7 +61,8 @@ modes and `ctrl+b` toggles the sidebar.
 Sessions run in a background `claudewitz daemon`, started on demand, so they outlive the TUI and
 one window can drive them all. With two or more live sessions a panel lists them, most urgent
 first (a tab strip on narrow terminals): `alt+↑/↓` switches, `ctrl+]` jumps to the next one that
-needs you, `alt+n` starts one in any folder and `ctrl+q` kills one. Quitting leaves them running.
+needs you, `alt+n` starts one in any folder and `ctrl+q` kills one. Quitting leaves them running;
+`claudewitz daemon status` lists the live sessions.
 The daemon exits after 10 minutes with no clients and no sessions; `claudewitz daemon stop` ends
 it sooner. `claudewitz -no-daemon` runs `claude` directly instead. On macOS, the alt keys need
 "Use Option as Meta key" in Terminal and iTerm2.
