@@ -12,9 +12,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The sidebar's working indicator: the headphone bean bops to a beat while
+// The sidebar's working indicator: tty bops to a beat while
 // Claude is idle, dissolves into a swirl of sparks while it works, and the
-// sparks gather back into the bean when the turn ends.
+// sparks gather back into tty when the turn ends.
 //
 // Positions are in Braille dot space: each character cell holds 2×4 dots,
 // and since cells are about twice as tall as wide, dots come out square.
@@ -22,10 +22,10 @@ import (
 type sparkMode int
 
 const (
-	sparkIdle      sparkMode = iota // the bean, bopping
+	sparkIdle      sparkMode = iota // tty, bopping
 	sparkWorking                    // swirling
-	sparkGathering                  // springing back into the bean
-	sparkWaiting                    // the bean, still and wide-eyed: Claude needs you
+	sparkGathering                  // springing back into tty
+	sparkWaiting                    // tty, still and asking: Claude needs you
 )
 
 const (
@@ -37,7 +37,7 @@ const (
 
 type spark struct {
 	x, y, vx, vy float64 // position and velocity
-	hx, hy       float64 // home, in the bean
+	hx, hy       float64 // home, in tty
 	// swirl orbit, so each spark has its own lane and pace
 	angle, radius, speed, wobble, phase float64
 	delay                               float64 // seconds before it lifts off when dissolving
@@ -46,11 +46,11 @@ type spark struct {
 
 type sparkField struct {
 	cols, rows int
-	w, h       int         // dot dimensions
-	frames     []beanFrame // the idle loop, rendered a few at a time
-	wait       beanFrame   // the waiting pose, rendered on first use
-	frame      int         // idle frame on screen
-	clock      float64     // idle time, for the beat
+	w, h       int           // dot dimensions
+	frames     []mascotFrame // the idle loop, rendered a few at a time
+	wait       mascotFrame   // the waiting pose, rendered on first use
+	frame      int           // idle frame on screen
+	clock      float64       // idle time, for the beat
 	sparks     []spark
 	glow       []float64 // per dot, decays every frame
 	glowMat    []int8    // material of the spark that last lit each dot
@@ -75,7 +75,7 @@ func newSparkField(cols, rows int) *sparkField {
 	return f
 }
 
-// resize re-renders the bean for a new area, keeping the current mode.
+// resize re-renders tty for a new area, keeping the current mode.
 func (f *sparkField) resize(cols, rows int) {
 	if cols == f.cols && rows == f.rows {
 		return
@@ -84,9 +84,9 @@ func (f *sparkField) resize(cols, rows int) {
 	f.w, f.h = cols*2, rows*4
 	f.glow = make([]float64, f.w*f.h)
 	f.glowMat = make([]int8, f.w*f.h)
-	f.frames = make([]beanFrame, beanLoop)
-	f.frames[0] = renderBean(f.w, f.h, beanIdlePose(0))
-	f.wait = beanFrame{}
+	f.frames = make([]mascotFrame, mascotLoop)
+	f.frames[0] = renderMascot(f.w, f.h, mascotIdlePose(0))
+	f.wait = mascotFrame{}
 	f.frame = 0
 	switch f.mode {
 	case sparkWorking:
@@ -103,7 +103,7 @@ func (f *sparkField) resize(cols, rows int) {
 func (f *sparkField) renderMore(n int) {
 	if f.mode == sparkWaiting || f.rest == sparkWaiting {
 		if f.wait.mat == nil {
-			f.wait = renderBean(f.w, f.h, beanWaitPose())
+			f.wait = renderMascot(f.w, f.h, mascotWaitPose())
 			n--
 		}
 	}
@@ -112,7 +112,7 @@ func (f *sparkField) renderMore(n int) {
 			return
 		}
 		if f.frames[i].mat == nil {
-			f.frames[i] = renderBean(f.w, f.h, beanIdlePose(i))
+			f.frames[i] = renderMascot(f.w, f.h, mascotIdlePose(i))
 			n--
 		}
 	}
@@ -127,11 +127,11 @@ func (f *sparkField) pending() bool {
 	return false
 }
 
-// display is the frame to draw when the bean is resting.
-func (f *sparkField) display() *beanFrame {
+// display is the frame to draw when tty is resting.
+func (f *sparkField) display() *mascotFrame {
 	if f.mode == sparkWaiting {
 		if f.wait.mat == nil {
-			f.wait = renderBean(f.w, f.h, beanWaitPose())
+			f.wait = renderMascot(f.w, f.h, mascotWaitPose())
 		}
 		return &f.wait
 	}
@@ -163,8 +163,8 @@ func (f *sparkField) setMode(m sparkMode) {
 }
 
 // dissolve turns the dots of a frame into sparks, each lifting off after a
-// short random delay so the bean comes apart rather than vanishing.
-func (f *sparkField) dissolve(fr *beanFrame) {
+// short random delay so tty comes apart rather than vanishing.
+func (f *sparkField) dissolve(fr *mascotFrame) {
 	f.sparks = f.sparks[:0]
 	cx, cy := float64(f.w)/2, float64(f.h)/2
 	maxR := cy
@@ -199,10 +199,10 @@ func (f *sparkField) dissolve(fr *beanFrame) {
 func (f *sparkField) gather(rest sparkMode) {
 	f.rest = rest
 	f.mode = sparkGathering
-	var fr *beanFrame
+	var fr *mascotFrame
 	if rest == sparkWaiting {
 		if f.wait.mat == nil {
-			f.wait = renderBean(f.w, f.h, beanWaitPose())
+			f.wait = renderMascot(f.w, f.h, mascotWaitPose())
 		}
 		fr = &f.wait
 	} else {
@@ -240,7 +240,7 @@ func (f *sparkField) gather(rest sparkMode) {
 	}
 }
 
-// settle ends a gather: the bean takes over from the sparks.
+// settle ends a gather: tty takes over from the sparks.
 func (f *sparkField) settle() {
 	f.mode = f.rest
 	f.flash = 0.6
@@ -260,12 +260,12 @@ func (f *sparkField) animating() bool {
 }
 
 // interval is the tick rate for the current mode: smooth for the swirl,
-// the bean's own frame rate otherwise.
+// tty's own frame rate otherwise.
 func (f *sparkField) interval() time.Duration {
 	if f.mode == sparkWorking || f.mode == sparkGathering {
 		return time.Second / sparkFPS
 	}
-	return time.Second / beanFPS
+	return time.Second / mascotFPS
 }
 
 // step advances the animation by dt seconds. targetEnergy sets how fast
@@ -282,7 +282,7 @@ func (f *sparkField) step(targetEnergy, dt float64) {
 		if !f.paused {
 			f.clock += dt
 		}
-		f.frame = int(f.clock*beanFPS) % beanLoop
+		f.frame = int(f.clock*mascotFPS) % mascotLoop
 		return
 	case sparkWaiting:
 		return
@@ -338,8 +338,8 @@ func (f *sparkField) plot() {
 // braille bit for each dot position in a 2×4 cell.
 var brailleBits = [4][2]rune{{0x01, 0x08}, {0x02, 0x10}, {0x04, 0x20}, {0x40, 0x80}}
 
-// beanColor is the theme colour for a material.
-func beanColor(th theme, m int8) ac {
+// mascotColor is the theme colour for a material.
+func mascotColor(th theme, m int8) ac {
 	switch m {
 	case matPhone:
 		return th.second
@@ -352,33 +352,35 @@ func beanColor(th theme, m int8) ac {
 		return th.warn
 	case matDark:
 		return th.subtle
+	case matPrompt:
+		return th.ok
 	}
 	return th.accent
 }
 
-const beanShades = 6
+const mascotShades = 6
 
-type beanStyleSet [matCount][beanShades]lipgloss.Style
+type mascotStyleSet [matCount][mascotShades]lipgloss.Style
 
-// beanStyles builds a shade ramp per material, from the subtle colour up to
+// mascotStyles builds a shade ramp per material, from the subtle colour up to
 // the material's own; tweak may adjust a material's colour first.
-func beanStyles(th theme, tweak func(m int8, c ac) ac) *beanStyleSet {
-	var st beanStyleSet
+func mascotStyles(th theme, tweak func(m int8, c ac) ac) *mascotStyleSet {
+	var st mascotStyleSet
 	for m := int8(0); m < matCount; m++ {
-		c := beanColor(th, m)
+		c := mascotColor(th, m)
 		if tweak != nil {
 			c = tweak(m, c)
 		}
-		for i, rc := range gradient(beanShades, th.subtle, c, c) {
+		for i, rc := range gradient(mascotShades, th.subtle, c, c) {
 			st[m][i] = lipgloss.NewStyle().Foreground(rc)
 		}
 	}
 	return &st
 }
 
-// drawBean renders a frame as Braille: dithered dots, each cell coloured
+// drawMascot renders a frame as Braille: dithered dots, each cell coloured
 // by its dominant material and shaded by how lit it is.
-func drawBean(fr *beanFrame, w, cols, rows int, st *beanStyleSet) string {
+func drawMascot(fr *mascotFrame, w, cols, rows int, st *mascotStyleSet) string {
 	var b strings.Builder
 	for row := 0; row < rows; row++ {
 		if row > 0 {
@@ -392,12 +394,14 @@ func drawBean(fr *beanFrame, w, cols, rows int, st *beanStyleSet) string {
 				for dx := 0; dx < 2; dx++ {
 					x, y := col*2+dx, row*4+dy
 					m := fr.mat[y*w+x]
-					if m < 0 {
+					// The screen draws no dots, so it mustn't colour or dim the cells
+					// it shares with the prompt.
+					if m < 0 || m == matDark {
 						continue
 					}
 					lit += float64(fr.inten[y*w+x])
 					n++
-					if m == matEye || m == matPink || m == matGold {
+					if m == matEye || m == matPink || m == matGold || m == matPrompt {
 						weight[m] += 3
 					} else {
 						weight[m]++
@@ -429,15 +433,15 @@ func dominant(weight [matCount]float64) int8 {
 }
 
 func shadeIndex(k float64) int {
-	return max(0, min(beanShades-1, int(math.Round(k*(beanShades-1)))))
+	return max(0, min(mascotShades-1, int(math.Round(k*(mascotShades-1)))))
 }
 
-// view renders the field: the bean's dithered frame while resting, the
+// view renders the field: tty's dithered frame while resting, the
 // sparks and their trails otherwise. Waiting pulses the headphones in the
 // warning colour; the done flash brightens everything for a moment.
 func (f *sparkField) view() string {
 	th := currentTheme()
-	st := beanStyles(th, func(m int8, c ac) ac {
+	st := mascotStyles(th, func(m int8, c ac) ac {
 		if m == matPhone && f.mode == sparkWaiting {
 			k := 0.5 + 0.5*math.Sin(f.t*5)
 			hx := resolve(th.second).BlendLab(resolve(th.warn), k).Clamped().Hex()
@@ -450,7 +454,7 @@ func (f *sparkField) view() string {
 		return c
 	})
 	if f.mode == sparkIdle || f.mode == sparkWaiting {
-		return drawBean(f.display(), f.w, f.cols, f.rows, st)
+		return drawMascot(f.display(), f.w, f.cols, f.rows, st)
 	}
 
 	var b strings.Builder
@@ -512,12 +516,12 @@ func (m Model) sparkTarget() (sparkMode, float64) {
 	return sparkGathering, 0
 }
 
-// idleBop is how long the bean keeps bopping after the last input or
+// idleBop is how long tty keeps bopping after the last input or
 // turn. Not every terminal reports focus (tmux doesn't by default), so
 // without a limit it would redraw the screen forever.
 const idleBop = time.Minute
 
-// idle reports whether the idle bean should hold still: the terminal is
+// idle reports whether idle tty should hold still: the terminal is
 // unfocused, or nothing has happened for a while.
 func (m *Model) idle() bool {
 	last := m.lastInput
