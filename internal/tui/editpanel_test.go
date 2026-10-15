@@ -27,7 +27,7 @@ func panelModel(t *testing.T, w, h int) (Model, string) {
 	path := filepath.Join(dir, "notes.txt")
 	os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 
-	m := New(context.Background(), claude.Options{CWD: dir}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: dir}, config.Config{}, nil)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	m = next.(Model)
 	in, _ := json.Marshal(map[string]any{"file_path": path, "old_string": "line 40\nline 41\n", "new_string": "line forty\nline 41\n"})

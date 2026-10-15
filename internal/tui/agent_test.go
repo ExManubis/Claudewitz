@@ -74,7 +74,7 @@ func TestAgentReportRendersMarkdown(t *testing.T) {
 
 // Resuming a session rebuilds each agent's steps from its own transcript.
 func TestReplayLoadsAgentSteps(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	m.replay(transcriptMsg{
 		info: sessions.Info{ID: "abcdef12"},
 		msgs: []sessions.Message{

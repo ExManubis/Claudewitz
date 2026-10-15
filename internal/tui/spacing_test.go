@@ -17,7 +17,7 @@ import (
 // the activity line, and the screen still fits the terminal exactly.
 func TestChatHasRoomAboveAndBelow(t *testing.T) {
 	for _, width := range []int{90, 140} { // header strip, sidebar
-		m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+		m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 		var tm tea.Model = m
 		tm, _ = tm.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 		mm := tm.(Model)

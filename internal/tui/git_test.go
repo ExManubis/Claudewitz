@@ -12,7 +12,7 @@ import (
 
 func TestApplyGitToasts(t *testing.T) {
 	dir := t.TempDir()
-	m := New(context.Background(), claude.Options{CWD: dir}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: dir}, config.Config{}, nil)
 	base := gitstatus.Status{IsRepo: true, Branch: "main", Head: "aaa", LastCommit: "aaa old", LastWhen: time.Now().Add(-time.Hour)}
 
 	// The first snapshot never toasts.

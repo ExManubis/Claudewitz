@@ -77,7 +77,7 @@ func TestRenderDiffLayout(t *testing.T) {
 // Below the docking width ctrl+b opens the sidebar over the chat instead
 // of doing nothing.
 func TestSidebarDrawer(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	var tm tea.Model = m
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyCtrlB})

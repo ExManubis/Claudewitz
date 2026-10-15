@@ -46,8 +46,44 @@ type Event struct {
 	// Suggestion is the CLI's guess at the user's next prompt, sent after
 	// a turn's result.
 	Suggestion string
-	Err        error // stdout closed or unparseable output
-	Exited     bool
+	// PermissionResolved is the request id of a permission request another
+	// client answered (daemon sessions only).
+	PermissionResolved string
+	Err                error // stdout closed or unparseable output
+	Exited             bool
+	// Raw is the stream-json line the event was parsed from.
+	Raw json.RawMessage
+}
+
+// Session is a running Claude Code session: a local Process, or one held by
+// the claudewitz daemon.
+type Session interface {
+	Events() <-chan Event
+	Send(text string) error
+	SendWithImages(text string, images []Image) error
+	Respond(req *PermissionRequest, d PermissionDecision) error
+	// RespondAndInterrupt answers and then stops the turn, in one step.
+	RespondAndInterrupt(req *PermissionRequest, d PermissionDecision) error
+	Interrupt() error
+	SetModel(model string) error
+	SetEffort(level string) error
+	SetPermissionMode(mode string) error
+	Close() error
+}
+
+var _ Session = (*Process)(nil)
+
+// Launch starts the CLI and asks it for its commands, models and account.
+func Launch(ctx context.Context, opts Options) (Session, error) {
+	p, err := Start(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.Initialize(); err != nil {
+		_ = p.Close()
+		return nil, err
+	}
+	return p, nil
 }
 
 // Process is a running `claude` CLI.
@@ -121,7 +157,7 @@ func (p *Process) readLoop(r io.Reader) {
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
 	for sc.Scan() {
 		line := sc.Bytes()
-		if ev, ok := parseLine(line); ok {
+		if ev, ok := ParseLine(line); ok {
 			p.events <- ev
 		}
 	}
@@ -132,6 +168,16 @@ func (p *Process) readLoop(r io.Reader) {
 		}
 	}
 	p.events <- Event{Exited: true, Err: err}
+}
+
+// ParseLine parses one stream-json line from the CLI. ok is false for lines
+// nothing reads. The event keeps a copy of the line in Raw.
+func ParseLine(line []byte) (ev Event, ok bool) {
+	ev, ok = parseLine(line)
+	if ok && ev.Err == nil {
+		ev.Raw = append(json.RawMessage(nil), line...)
+	}
+	return ev, ok
 }
 
 func parseLine(line []byte) (Event, bool) {
@@ -298,12 +344,21 @@ func (p *Process) Respond(req *PermissionRequest, d PermissionDecision) error {
 	if d.Behavior == "allow" && d.UpdatedInput == nil {
 		d.UpdatedInput = req.Input
 	}
+	d.AlwaysForSession = false // a client-side rule, not something the CLI knows
 	var r controlResponse
 	r.Type = "control_response"
 	r.Response.Subtype = "success"
 	r.Response.RequestID = req.RequestID
 	r.Response.Response = d
 	return p.write(r)
+}
+
+// RespondAndInterrupt answers a permission request and stops the turn.
+func (p *Process) RespondAndInterrupt(req *PermissionRequest, d PermissionDecision) error {
+	if err := p.Respond(req, d); err != nil {
+		return err
+	}
+	return p.Interrupt()
 }
 
 // control sends a host-initiated control request (interrupt, set_model, ...).

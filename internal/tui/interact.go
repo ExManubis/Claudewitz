@@ -92,10 +92,11 @@ func readPlanFile(path, fallback string) string {
 func (m *Model) finishPending(d claude.PermissionDecision, interrupt bool) {
 	p := m.pending[0]
 	if m.proc != nil {
-		_ = m.proc.Respond(p, d)
 		if interrupt {
-			_ = m.proc.Interrupt()
+			_ = m.proc.RespondAndInterrupt(p, d)
 			m.stopped = true
+		} else {
+			_ = m.proc.Respond(p, d)
 		}
 	}
 	m.pending = m.pending[1:]

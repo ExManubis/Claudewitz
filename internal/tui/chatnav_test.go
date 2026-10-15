@@ -15,7 +15,7 @@ import (
 
 func chatModel(t *testing.T) *Model {
 	t.Helper()
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	mm := &m
 	mm.width, mm.height = 90, 20
 	mm.layout()

@@ -70,7 +70,7 @@ func TestDroppedPaths(t *testing.T) {
 }
 
 func TestReplayedImageOnlyMessage(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	m.applyBlocks("user", []claude.ContentBlock{{Type: "image"}, {Type: "image"}}, false)
 	m.applyBlocks("user", []claude.ContentBlock{{Type: "image"}, {Type: "text", Text: "what's this?"}}, false)
 	if len(m.chat.entries) != 2 {

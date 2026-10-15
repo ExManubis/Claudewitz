@@ -60,7 +60,7 @@ func TestHistoryBrowse(t *testing.T) {
 
 func TestQueuedMessagesJoinOnReplay(t *testing.T) {
 	t.Setenv("CLAUDEWITZ_CONFIG", filepath.Join(t.TempDir(), "config.json"))
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	m.width, m.height = 120, 40
 	m.queued = []queuedMsg{{text: "second"}, {text: "third"}}
 	if p := m.pillsView(120); !strings.Contains(p, "2 queued") || !strings.Contains(p, "second") {
@@ -86,7 +86,7 @@ func TestQueuedMessagesJoinOnReplay(t *testing.T) {
 }
 
 func TestTodoPill(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	m.track.todos = []todo{{content: "a", status: "completed"}, {content: "b", active: "Writing tests", status: "in_progress"}, {content: "c"}}
 	if p := m.pillsView(120); !strings.Contains(p, "1/3") || !strings.Contains(p, "Writing tests") {
 		t.Fatalf("todo pill: %q", p)
@@ -113,7 +113,7 @@ func TestOSCNotification(t *testing.T) {
 }
 
 func TestNoNotificationWhileFocused(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{Notifications: "bell"})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{Notifications: "bell"}, nil)
 	if m.desktopNotify("x", "y") != nil {
 		t.Fatal("focused terminals shouldn't get notifications")
 	}

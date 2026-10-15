@@ -25,7 +25,7 @@ func stream(t *testing.T, m *Model, js string) {
 // Thinking that arrives without text (only a signature) would leave a
 // "Thinking…" placeholder in the transcript; the activity line covers it.
 func TestEmptyThinkingAddsNoEntry(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	stream(t, &m, `{"event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}}`)
 	stream(t, &m, `{"event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta"}}}`)
 	if n := len(m.chat.entries); n != 0 {
@@ -37,7 +37,7 @@ func TestEmptyThinkingAddsNoEntry(t *testing.T) {
 }
 
 func TestThinkingWithTextIsShown(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	stream(t, &m, `{"event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}}`)
 	stream(t, &m, `{"event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me look"}}}`)
 	stream(t, &m, `{"event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" at chat.go"}}}`)
@@ -54,7 +54,7 @@ func TestThinkingWithTextIsShown(t *testing.T) {
 
 // Hidden thinking still says how long it took once the block stops.
 func TestHiddenThinkingShowsDuration(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	stream(t, &m, `{"event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}}`)
 	m.chat.streaming[0].thinkStart = time.Now().Add(-3 * time.Second)
 	stream(t, &m, `{"event":{"type":"content_block_stop","index":0}}`)
@@ -68,7 +68,7 @@ func TestHiddenThinkingShowsDuration(t *testing.T) {
 
 // A sub-second hidden block isn't worth a line.
 func TestQuickHiddenThinkingAddsNoEntry(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	stream(t, &m, `{"event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}}`)
 	stream(t, &m, `{"event":{"type":"content_block_stop","index":0}}`)
 	if n := len(m.chat.entries); n != 0 {

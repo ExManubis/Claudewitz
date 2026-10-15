@@ -114,7 +114,7 @@ func BenchmarkRenderBean(b *testing.B) {
 }
 
 func TestSparkTarget(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	if mode, _ := m.sparkTarget(); mode != sparkGathering {
 		t.Errorf("idle model: mode %v", mode)
 	}
@@ -131,7 +131,7 @@ func TestSparkTarget(t *testing.T) {
 // Going busy adds the activity line under the chat; the screen must still
 // fit the terminal, or it scrolls and the sidebar jumps up a line.
 func TestBusyKeepsScreenHeight(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 44})
 	m = next.(Model)
 	height := func() int { return strings.Count(m.View(), "\n") + 1 }

@@ -35,18 +35,18 @@ func TestParseLine(t *testing.T) {
 			func(e Event) bool { return e.Suggestion == "Create these files." }},
 	}
 	for _, c := range cases {
-		ev, ok := parseLine([]byte(c.line))
+		ev, ok := ParseLine([]byte(c.line))
 		if !ok || !c.check(ev) {
 			t.Errorf("parse failed for %s: %+v", c.line, ev)
 		}
 	}
-	if _, ok := parseLine([]byte(`{"type":"active_goal","value":null}`)); ok {
+	if _, ok := ParseLine([]byte(`{"type":"active_goal","value":null}`)); ok {
 		t.Error("unknown event types should be ignored")
 	}
 }
 
 func TestParseStatusPermissionMode(t *testing.T) {
-	ev, ok := parseLine([]byte(`{"type":"system","subtype":"status","status":null,"permissionMode":"acceptEdits"}`))
+	ev, ok := ParseLine([]byte(`{"type":"system","subtype":"status","status":null,"permissionMode":"acceptEdits"}`))
 	if !ok || ev.PermissionMode != "acceptEdits" || ev.Status != "" {
 		t.Fatalf("got %+v", ev)
 	}
@@ -65,7 +65,7 @@ func TestAnswerQuestions(t *testing.T) {
 }
 
 func TestParseReplayWithStringContent(t *testing.T) {
-	ev, ok := parseLine([]byte(`{"type":"user","message":{"role":"user","content":"Now say 'second done'.\nNow say 'third done'."},"parent_tool_use_id":null,"isReplay":true}`))
+	ev, ok := ParseLine([]byte(`{"type":"user","message":{"role":"user","content":"Now say 'second done'.\nNow say 'third done'."},"parent_tool_use_id":null,"isReplay":true}`))
 	if !ok || ev.Message == nil || !ev.Message.IsReplay {
 		t.Fatalf("replay not parsed: %+v", ev)
 	}
@@ -103,7 +103,7 @@ func TestSendWithImages(t *testing.T) {
 }
 
 func TestResultContextWindow(t *testing.T) {
-	ev, ok := parseLine([]byte(`{"type":"result","subtype":"success","modelUsage":{"claude-haiku-4-5":{"contextWindow":200000},"claude-opus-5-5[1m]":{"contextWindow":1000000,"canonicalModel":"claude-opus-5-5"}}}`))
+	ev, ok := ParseLine([]byte(`{"type":"result","subtype":"success","modelUsage":{"claude-haiku-4-5":{"contextWindow":200000},"claude-opus-5-5[1m]":{"contextWindow":1000000,"canonicalModel":"claude-opus-5-5"}}}`))
 	if !ok || ev.Result == nil {
 		t.Fatalf("got %+v", ev)
 	}
@@ -116,5 +116,36 @@ func TestResultContextWindow(t *testing.T) {
 		if got := ev.Result.ContextWindow(model); got != want {
 			t.Errorf("ContextWindow(%q) = %d, want %d", model, got, want)
 		}
+	}
+}
+
+func TestRespondDropsAlwaysForSession(t *testing.T) {
+	var buf bufCloser
+	p := &Process{stdin: &buf}
+	req := &PermissionRequest{RequestID: "r1", ToolName: "Bash", Input: json.RawMessage(`{"command":"ls"}`)}
+	if err := p.RespondAndInterrupt(req, PermissionDecision{Behavior: "allow", AlwaysForSession: true}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want a response and an interrupt, got %q", lines)
+	}
+	if strings.Contains(lines[0], "alwaysForSession") || !strings.Contains(lines[0], `"updatedInput":{"command":"ls"}`) {
+		t.Fatalf("response: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], `"subtype":"interrupt"`) {
+		t.Fatalf("interrupt: %s", lines[1])
+	}
+}
+
+func TestParseLineKeepsRaw(t *testing.T) {
+	line := []byte(`{"type":"result","subtype":"success","total_cost_usd":0.5}`)
+	ev, ok := ParseLine(line)
+	if !ok || ev.Result == nil || string(ev.Raw) != string(line) {
+		t.Fatalf("got %+v", ev)
+	}
+	line[0] = 'x' // Raw is a copy
+	if ev.Raw[0] != '{' {
+		t.Fatal("Raw aliases the scanner's buffer")
 	}
 }

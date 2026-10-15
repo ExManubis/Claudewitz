@@ -40,7 +40,7 @@ func changesRepo(t *testing.T, w, h int) Model {
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {\n\tprintln(\"changed line\")\n}\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("brand new file\n"), 0o644)
 
-	m := New(context.Background(), claude.Options{CWD: dir}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: dir}, config.Config{}, nil)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	m = next.(Model)
 	st, err := gitstatus.Read(context.Background(), dir)

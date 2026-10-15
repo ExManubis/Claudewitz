@@ -21,7 +21,7 @@ const twoQuestions = `{"questions":[
 // tool, with a matching transcript entry.
 func withRequest(t *testing.T, tool, input string) *Model {
 	t.Helper()
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	m.width, m.height = 120, 40
 	m.chat.add(&entry{kind: kindTool, toolID: "tu1", toolName: tool, toolInput: json.RawMessage(input)})
 	m.pending = []*claude.PermissionRequest{{RequestID: "r1", ToolName: tool, ToolUseID: "tu1", Input: json.RawMessage(input)}}

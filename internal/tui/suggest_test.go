@@ -11,7 +11,7 @@ import (
 )
 
 func TestPromptSuggestion(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	m.width, m.height = 120, 40
 	m.handleEvent(claude.Event{Suggestion: "Create these files."})
 	if !strings.HasPrefix(m.input.Placeholder, "Create these files.") {

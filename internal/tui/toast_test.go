@@ -11,7 +11,7 @@ import (
 )
 
 func TestToastsDedupeAndExpire(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	m.notify(toastInfo, "Plan mode", "")
 	m.notify(toastSuccess, "Theme: charm", "")
 	m.notify(toastInfo, "Plan mode", "")
@@ -30,7 +30,7 @@ func TestToastsDedupeAndExpire(t *testing.T) {
 }
 
 func TestUsageWarningsFireOncePerThreshold(t *testing.T) {
-	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{})
+	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	m.limits["five_hour"] = claude.RateLimitWindow{Utilization: 0.5}
 	if m.usageWarnings() != nil {
 		t.Fatal("no warning below 80%")

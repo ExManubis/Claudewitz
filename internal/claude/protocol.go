@@ -278,6 +278,9 @@ type PermissionDecision struct {
 	// UpdatedPermissions applies permission changes along with an allow,
 	// e.g. SetModeUpdate("acceptEdits").
 	UpdatedPermissions []PermissionUpdate `json:"updatedPermissions,omitempty"`
+	// AlwaysForSession (with allow) allows the tool for the rest of the
+	// session. It is a rule kept by claudewitz, never sent to the CLI.
+	AlwaysForSession bool `json:"alwaysForSession,omitempty"`
 }
 
 // PermissionUpdate is one entry of PermissionDecision.UpdatedPermissions.

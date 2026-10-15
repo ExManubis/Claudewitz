@@ -26,9 +26,10 @@ var permissionModes = []string{"default", "acceptEdits", "plan"}
 
 // Model is the root Bubble Tea model.
 type Model struct {
-	opts claude.Options
-	ctx  context.Context
-	proc *claude.Process
+	opts  claude.Options
+	ctx   context.Context
+	start Starter
+	proc  claude.Session
 
 	chat      *chat
 	track     *tracker
@@ -122,7 +123,15 @@ const inputPlaceholder = "Ask Claude anything…  / for commands · @ to mention
 // New builds the model; the CLI is started from Init.
 // The config's theme and appearance are applied here; callers that want a
 // one-off theme (the -theme flag) set cfg.Theme without saving it.
-func New(ctx context.Context, opts claude.Options, cfg config.Config) Model {
+// Starter starts (or attaches to) a session: claude.Launch runs the CLI
+// directly, the daemon client asks the daemon.
+type Starter func(ctx context.Context, opts claude.Options) (claude.Session, error)
+
+// New builds the root model. start launches sessions; nil means claude.Launch.
+func New(ctx context.Context, opts claude.Options, cfg config.Config, start Starter) Model {
+	if start == nil {
+		start = claude.Launch
+	}
 	setAppearance(cfg.Appearance)
 	applyIcons(cfg.Icons)
 	applyDiffMode(cfg.Diff)
@@ -172,11 +181,12 @@ func New(ctx context.Context, opts claude.Options, cfg config.Config) Model {
 		focused:     true,
 		alwaysAllow: map[string]bool{},
 		cfg:         cfg,
+		start:       start,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, startCmd(m.ctx, m.opts), indexFiles(m.opts.CWD), m.refreshGit(), gitPoll(), loadHistory(m.opts.CWD)}
+	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, m.startCmd(m.opts), indexFiles(m.opts.CWD), m.refreshGit(), gitPoll(), loadHistory(m.opts.CWD)}
 	if m.opts.Resume != "" || m.opts.Continue {
 		cmds = append(cmds, loadTranscript(m.opts.CWD, m.opts.Resume))
 	}
@@ -184,16 +194,14 @@ func (m Model) Init() tea.Cmd {
 }
 
 type startedMsg struct {
-	proc *claude.Process
+	proc claude.Session
 	err  error
 }
 
-func startCmd(ctx context.Context, opts claude.Options) tea.Cmd {
+func (m *Model) startCmd(opts claude.Options) tea.Cmd {
+	ctx, start := m.ctx, m.start
 	return func() tea.Msg {
-		p, err := claude.Start(ctx, opts)
-		if err == nil {
-			err = p.Initialize()
-		}
+		p, err := start(ctx, opts)
 		return startedMsg{p, err}
 	}
 }
@@ -201,11 +209,11 @@ func startCmd(ctx context.Context, opts claude.Options) tea.Cmd {
 // procEvent tags events with their process so late events from a replaced
 // process are ignored.
 type procEvent struct {
-	proc *claude.Process
+	proc claude.Session
 	ev   claude.Event
 }
 
-func waitEvent(p *claude.Process) tea.Cmd {
+func waitEvent(p claude.Session) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-p.Events()
 		if !ok {
@@ -757,6 +765,18 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 			alert = m.desktopNotify("Claude needs your approval", strings.TrimSpace(p.ToolName+" "+summarizeInput(p.ToolName, p.Input, 100)))
 		}
 
+	case ev.PermissionResolved != "":
+		// Another client answered; close the request here too.
+		for i, p := range m.pending {
+			if p.RequestID == ev.PermissionResolved {
+				m.pending = append(m.pending[:i:i], m.pending[i+1:]...)
+				if i == 0 {
+					m.afterPermission()
+				}
+				break
+			}
+		}
+
 	case ev.Exited:
 		m.busy = false
 		m.proc = nil
@@ -947,7 +967,7 @@ func (m *Model) handlePermissionKey(k tea.KeyMsg) tea.Cmd {
 		d = &claude.PermissionDecision{Behavior: "allow"}
 	case "a":
 		m.alwaysAllow[p.ToolName] = true
-		d = &claude.PermissionDecision{Behavior: "allow"}
+		d = &claude.PermissionDecision{Behavior: "allow", AlwaysForSession: true}
 	case "n", "esc":
 		d = &claude.PermissionDecision{Behavior: "deny", Message: "The user denied this tool call."}
 	case "t":
@@ -960,8 +980,7 @@ func (m *Model) handlePermissionKey(k tea.KeyMsg) tea.Cmd {
 	case "ctrl+c":
 		d = &claude.PermissionDecision{Behavior: "deny", Message: "The user denied this tool call and interrupted."}
 		if m.proc != nil {
-			_ = m.proc.Respond(p, *d)
-			_ = m.proc.Interrupt()
+			_ = m.proc.RespondAndInterrupt(p, *d)
 			m.stopped = true
 		}
 		m.pending = m.pending[1:]
@@ -1359,7 +1378,7 @@ func (m *Model) restart(o claude.Options) tea.Cmd {
 	m.alwaysAllow = map[string]bool{}
 	m.init = nil
 	m.refresh()
-	return startCmd(m.ctx, opts)
+	return m.startCmd(opts)
 }
 
 func (m *Model) cwd() string {
