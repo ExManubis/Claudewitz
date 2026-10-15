@@ -46,6 +46,8 @@ func TestSessionsModeByWidth(t *testing.T) {
 
 func TestNoPanelWithOneSessionOrWithoutDaemon(t *testing.T) {
 	m := withSessions(t, 160, sum("a", "/x/one", daemon.StateIdle))
+	m.sessionView.id = "a" // the one session is the focused one
+	m.resize()
 	if m.sessionsMode() != sessionsNone || m.width != 160 {
 		t.Fatalf("one session: mode %d width %d", m.sessionsMode(), m.width)
 	}

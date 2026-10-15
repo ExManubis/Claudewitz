@@ -29,7 +29,11 @@ const (
 // sessionsMode is how the daemon's sessions are shown: a panel, a tab strip
 // when narrow, or not at all with fewer than two or without the daemon.
 func (m Model) sessionsMode() sessionsMode {
-	if m.daemon == nil || !m.panelOn || len(m.live) < 2 {
+	n := len(m.live)
+	if _, ok := m.summary(m.sessionView.id); !ok {
+		n++ // the focused view has no row (dead, or not started yet)
+	}
+	if m.daemon == nil || !m.panelOn || n < 2 {
 		return sessionsNone
 	}
 	if m.termW >= panelMinTerm {

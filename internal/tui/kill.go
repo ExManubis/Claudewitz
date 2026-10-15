@@ -160,5 +160,5 @@ func (m Model) killView() string {
 		label := style.Render(c.label)
 		lines = append(lines, pointer+mutedStyle.Render(fmt.Sprintf("%d. ", i+1))+label+mutedStyle.Render("  "+c.keys))
 	}
-	return popupBox.BorderForeground(th.err).Width(64).Render(strings.Join(lines, "\n"))
+	return popupBox.BorderForeground(th.err).Width(min(64, m.termW-4)).Render(strings.Join(lines, "\n"))
 }

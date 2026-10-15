@@ -144,6 +144,9 @@ func (m *Model) handleSessionKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		m.resize()
 		return nil, true
 	case s == "alt+up" || s == "alt+down":
+		if at < 0 && len(rows) > 0 {
+			return m.focusSession(rows[0].ID), true
+		}
 		if len(rows) < 2 {
 			return nil, true
 		}
@@ -209,6 +212,11 @@ func (m *Model) launch(msg launchListMsg) tea.Cmd {
 			s, _ := m.summary(id)
 			v := m.sessionView
 			v.id = id
+			v.opts.Model, v.opts.Effort, v.opts.PermissionMode = s.Model, s.Effort, s.PermissionMode
+			v.model = s.Model
+			if s.PermissionMode != "" {
+				v.permMode = s.PermissionMode
+			}
 			if s.ClaudeSessionID != nil {
 				v.sessionID = *s.ClaudeSessionID
 			}

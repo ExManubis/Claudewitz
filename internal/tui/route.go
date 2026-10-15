@@ -58,6 +58,7 @@ func (m *Model) focus(v *sessionView) tea.Cmd {
 	}
 	m.input.Blur()
 	m.sessionView = v
+	m.textSel = nil // a selection is in the last session's coordinates
 	dir := m.cwd()
 	ws, created := m.spaceFor(dir)
 	m.workspace = ws

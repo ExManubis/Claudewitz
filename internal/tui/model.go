@@ -1645,7 +1645,7 @@ func (m Model) viewMain() string {
 	h := m.height - 1
 	switch {
 	case m.showHelp:
-		screen = center(screen, helpDialog(m.width-4), m.width, h)
+		screen = center(screen, helpDialog(m.width-4, m.daemon != nil), m.width, h)
 	case m.themePick != nil:
 		// Pinned to the right so the live preview leaves the chat visible.
 		box := m.themePick.view(m.width)

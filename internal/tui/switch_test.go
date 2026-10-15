@@ -208,3 +208,20 @@ func TestBackgroundToastsNameTheirSession(t *testing.T) {
 		t.Fatalf("toasts %+v", m.toasts)
 	}
 }
+
+// With one live session and a focused view that has no row (after killing
+// the other), the panel still shows and alt+down goes to the live one.
+func TestOneRowPlusDeadViewShowsPanel(t *testing.T) {
+	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle))
+	m := daemonModel(t, d)
+	m.sessionView.id = ""
+	m.resize()
+	if m.panelMode != sessionsPanel {
+		t.Fatalf("panel mode %v", m.panelMode)
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown, Alt: true})
+	m = run(t, next.(Model), cmd)
+	if m.sessionView.id != "s_1" {
+		t.Fatalf("alt+down: %q", m.sessionView.id)
+	}
+}

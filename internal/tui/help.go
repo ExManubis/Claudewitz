@@ -139,7 +139,7 @@ var helpSections = []struct {
 }
 
 // helpDialog is the full keyboard reference.
-func helpDialog(width int) string {
+func helpDialog(width int, daemon bool) string {
 	colW := 34
 	cols := 2
 	if width >= colW*4+8 {
@@ -147,6 +147,9 @@ func helpDialog(width int) string {
 	}
 	var blocks []string
 	for _, s := range helpSections {
+		if s.title == "Sessions" && !daemon {
+			continue
+		}
 		lines := []string{sectionTitle.MarginTop(0).Render(s.title)}
 		for _, k := range s.keys {
 			key := lipgloss.NewStyle().Width(11).Render(statusKey.Render(k[0]))
