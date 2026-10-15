@@ -189,7 +189,7 @@ func effortMeter(levels []string, chosen string) string {
 }
 
 func (p *modelPicker) view(width int) string {
-	w := min(width-4, 72)
+	w := dialogWidth(width, 72)
 	inner := w - 6
 	th := currentTheme()
 	lines := []string{gradientText("Switch model", true), ""}

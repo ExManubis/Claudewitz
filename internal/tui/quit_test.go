@@ -16,7 +16,7 @@ type daemonSession struct {
 	closed, detached bool
 }
 
-func (d *daemonSession) Close() error  { d.closed = true; return nil }
+func (d *daemonSession) Stop()         { d.closed = true }
 func (d *daemonSession) Detach() error { d.detached = true; return nil }
 
 func isQuit(cmd tea.Cmd) bool {

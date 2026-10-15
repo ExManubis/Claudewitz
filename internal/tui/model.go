@@ -19,6 +19,7 @@ import (
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
 	"github.com/exmanubis/claudewitz/internal/gitstatus"
+	"github.com/exmanubis/claudewitz/internal/safetext"
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
 
@@ -46,6 +47,8 @@ type Model struct {
 
 	attachments []attachment // images for the next message
 	focused     bool         // terminal focus, when the terminal reports it
+	lastInput   time.Time    // last key, click or focus, for pausing the idle bop
+	gitPolls    int          // poll ticks so far, for reading less often while idle
 
 	sparks       *sparkField // working indicator at the foot of the sidebar
 	sparkTicking bool
@@ -181,6 +184,7 @@ func New(ctx context.Context, opts claude.Options, cfg config.Config, start Star
 		hist:        newHistory(opts.CWD),
 		sparks:      newSparkField(sidebarWidth-3, sparkMinRows),
 		focused:     true,
+		lastInput:   time.Now(),
 		alwaysAllow: map[string]bool{},
 		cfg:         cfg,
 		start:       start,
@@ -263,6 +267,10 @@ func loadTranscript(cwd, id string) tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	nm := next.(Model)
+	switch msg.(type) {
+	case tea.KeyMsg, tea.MouseMsg, tea.FocusMsg:
+		nm.lastInput = time.Now()
+	}
 	// The area under the chat grows and shrinks (the activity line, pills,
 	// attachments); resize the chat to match, or the screen overflows the
 	// terminal and everything scrolls up a line.
@@ -365,13 +373,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.FocusMsg:
+		// Catch up on changes made while away (polling slows when idle).
+		wasIdle := m.idle()
 		m.focused = true
+		if wasIdle {
+			return m, m.refreshGit()
+		}
 
 	case tea.BlurMsg:
 		m.focused = false
 
 	case gitPollMsg:
-		return m, tea.Batch(m.refreshGit(), gitPoll())
+		return m, m.onGitPoll()
 
 	case sessionsLoadedMsg:
 		if m.picker != nil && m.picker.all == msg.all {
@@ -643,7 +656,7 @@ func (m *Model) quit() tea.Cmd {
 		return nil
 	}
 	if m.proc != nil {
-		_ = m.proc.Close()
+		m.proc.Stop()
 	}
 	return tea.Quit
 }
@@ -657,7 +670,7 @@ func (m *Model) handleQuitKey(k tea.KeyMsg) tea.Cmd {
 		return tea.Quit
 	case "s":
 		if m.proc != nil {
-			_ = m.proc.Close()
+			m.proc.Stop()
 		}
 		return tea.Quit
 	case "esc", "n", "q":
@@ -1295,7 +1308,9 @@ type queuedMsg struct {
 func (m *Model) takeQueued(replay string) {
 	kept := m.queued[:0]
 	for _, q := range m.queued {
-		if strings.Contains(replay, q.text) { // image-only messages have no text to match
+		// The replay is cleaned for display (see claude.ContentBlock), so
+		// match against the cleaned text. Image-only messages have no text.
+		if strings.Contains(replay, safetext.Clean(q.text)) {
 			m.chat.add(&entry{kind: kindUser, text: q.text, images: q.images, pics: q.pics})
 		} else {
 			kept = append(kept, q)
@@ -1420,7 +1435,7 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 
 func (m *Model) restart(o claude.Options) tea.Cmd {
 	if m.proc != nil {
-		_ = m.proc.Close()
+		m.proc.Stop()
 		m.proc = nil
 	}
 	opts := m.opts
@@ -1586,7 +1601,9 @@ func (m Model) View() string {
 		x, y := m.panelPos()
 		screen = overlay(screen, m.panelView(x, y), x, y)
 	}
-	return screen
+	// Strip any control sequence that slipped in with file contents, tool
+	// output or the like; only colours and text attributes get through.
+	return safetext.Screen(screen)
 }
 
 // showHeader is true when the compact brand strip replaces the sidebar.
@@ -1715,7 +1732,7 @@ func (m Model) prettyInput(tool string, raw json.RawMessage, width int) string {
 	rel := relPath(fp, m.cwd())
 	switch tool {
 	case "Bash":
-		return lipgloss.NewStyle().Width(width).Render(statusKey.Render("$ ") + textStyle.Render(str(in, "command")))
+		return lipgloss.NewStyle().Width(width).Render(statusKey.Render("$ ") + textStyle.Render(safetext.Clean(str(in, "command"))))
 	case "Edit":
 		return textStyle.Render(rel) + "\n" + renderDiff(computeDiff(str(in, "old_string"), str(in, "new_string")), fp, width, 14)
 	case "MultiEdit":
@@ -1732,7 +1749,7 @@ func (m Model) prettyInput(tool string, raw json.RawMessage, width int) string {
 	case "Write":
 		return textStyle.Render(rel) + "\n" + renderDiff(addedLines(str(in, "content")), fp, width, 12)
 	case "WebFetch":
-		return textStyle.Render(str(in, "url"))
+		return textStyle.Render(safetext.Line(str(in, "url")))
 	}
 	b, _ := json.MarshalIndent(in, "", "  ")
 	return mutedStyle.Render(clipText(string(b), width, 12))

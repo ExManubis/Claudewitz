@@ -82,7 +82,7 @@ func (f *fakeProc) Interrupt() error                 { f.record("interrupt"); re
 func (f *fakeProc) SetModel(m string) error          { f.record("model " + m); return nil }
 func (f *fakeProc) SetEffort(e string) error         { f.record("effort " + e); return nil }
 func (f *fakeProc) SetPermissionMode(m string) error { f.record("mode " + m); return nil }
-func (f *fakeProc) Close() error {
+func (f *fakeProc) Stop() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !f.closed {
@@ -90,7 +90,6 @@ func (f *fakeProc) Close() error {
 		f.events <- claude.Event{Exited: true}
 		close(f.events)
 	}
-	return nil
 }
 
 // exit ends the process with an error.
@@ -501,7 +500,7 @@ func TestOverviewPushes(t *testing.T) {
 
 	var updated, account, closed bool
 	timeout := time.After(2 * time.Second)
-	_ = s.Close()
+	s.Stop()
 	for !(updated && account && closed) {
 		select {
 		case fr := <-watcher.Overview():

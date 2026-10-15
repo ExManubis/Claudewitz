@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
+	"github.com/exmanubis/claudewitz/internal/safetext"
 )
 
 // Tools that need an answer from the user rather than a yes/no.
@@ -62,7 +63,7 @@ func (m *Model) startInteraction() {
 			Path string `json:"planFilePath"`
 		}
 		_ = json.Unmarshal(p.Input, &in)
-		text := readPlanFile(in.Path, in.Plan)
+		text := safetext.Clean(readPlanFile(in.Path, in.Plan))
 		m.plan = &planState{plan: text, path: in.Path, input: newFreeText("What should Claude change?")}
 		if e, ok := m.chat.byToolID[p.ToolUseID]; ok {
 			e.planText, e.dirty = text, true
@@ -324,19 +325,19 @@ func (m Model) questionView(width int) string {
 		lines = append(lines, textStyle.Bold(true).Render("Review your answers"), "")
 		for i, qq := range q.qs {
 			a := q.answer(i)
-			val := okStyle.Render(a)
+			val := okStyle.Render(safetext.Line(a))
 			if a == "" {
 				val = warnStyle.Render("not answered")
 			}
 			lines = append(lines, fmt.Sprintf("%s %s %s",
 				mutedStyle.Render(fmt.Sprintf("%d.", i+1)),
-				textStyle.Render(truncate(firstNonEmpty(qq.Header, qq.Question), inner/2)+":"),
+				textStyle.Render(truncate(safetext.Line(firstNonEmpty(qq.Header, qq.Question)), inner/2)+":"),
 				val))
 		}
 	} else {
 		i := q.idx
 		qq := q.qs[i]
-		lines = append(lines, lipgloss.NewStyle().Width(inner).Render(textStyle.Bold(true).Render(qq.Question)))
+		lines = append(lines, lipgloss.NewStyle().Width(inner).Render(textStyle.Bold(true).Render(safetext.Clean(qq.Question))))
 		hint := "Choose one"
 		if qq.MultiSelect {
 			hint = "Choose any · space to toggle"
@@ -380,9 +381,9 @@ func (m Model) questionRow(i, row, inner int) string {
 	case row < len(qq.Options):
 		opt := qq.Options[row]
 		num := mutedStyle.Render(fmt.Sprintf("%d. ", row+1))
-		head := pointer + num + mark(q.picked[i][row]) + labelStyle.Render(opt.Label)
+		head := pointer + num + mark(q.picked[i][row]) + labelStyle.Render(safetext.Line(opt.Label))
 		if opt.Description != "" && opt.Description != opt.Label {
-			head += mutedStyle.Render("  " + truncate(opt.Description, max(10, inner-lipgloss.Width(head)-2)))
+			head += mutedStyle.Render("  " + truncate(safetext.Line(opt.Description), max(10, inner-lipgloss.Width(head)-2)))
 		}
 		return head
 	case row == q.otherRow(i):

@@ -11,6 +11,8 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/exmanubis/claudewitz/internal/safetext"
 )
 
 type entryKind int
@@ -100,6 +102,18 @@ type chat struct {
 	focused bool
 	offsets []int
 	heights []int
+
+	// The last joined transcript, where each entry's text ends in it, and
+	// what it was drawn for. View re-joins only from the first entry that
+	// changed, so streaming into a long session doesn't rebuild it all.
+	joined  string
+	ends    []int
+	joinKey joinKey
+}
+
+type joinKey struct {
+	width, sel int
+	focused    bool
 }
 
 func newChat(t *tracker) *chat {
@@ -129,6 +143,7 @@ func (c *chat) reset(t *tracker) {
 	c.streaming = map[int]*entry{}
 	c.track = t
 	c.sel = -1
+	c.ends = c.ends[:0]
 }
 
 func (c *chat) markAllDirty() {
@@ -176,12 +191,32 @@ func cachedRenderer(cache *map[int]*glamour.TermRenderer, width int, opts ...gla
 }
 
 func (c *chat) View(width int) string {
+	// Keep the joined text of the leading entries that haven't changed.
+	key := joinKey{width: width, sel: c.sel, focused: c.focused}
+	keep := 0
+	if key == c.joinKey {
+		keep = min(len(c.ends), len(c.entries))
+	}
+	for i := range keep {
+		if e := c.entries[i]; e.dirty || e.width != width {
+			keep = i
+			break
+		}
+	}
+	c.offsets, c.heights, c.ends = c.offsets[:keep], c.heights[:keep], c.ends[:keep]
+	c.joinKey = key
+
 	var b strings.Builder
 	var prev *entry
 	line := 0
-	c.offsets = c.offsets[:0]
-	c.heights = c.heights[:0]
-	for i, e := range c.entries {
+	if keep > 0 {
+		b.Grow(len(c.joined) + 4096)
+		b.WriteString(c.joined[:c.ends[keep-1]])
+		prev = c.entries[keep-1]
+		line = c.offsets[keep-1] + c.heights[keep-1] - 1
+	}
+	for i := keep; i < len(c.entries); i++ {
+		e := c.entries[i]
 		if e.dirty || e.width != width {
 			e.rendered = c.renderEntry(e, width)
 			e.width, e.dirty = width, false
@@ -203,10 +238,12 @@ func (c *chat) View(width int) string {
 		c.offsets = append(c.offsets, line)
 		c.heights = append(c.heights, h)
 		b.WriteString(out)
+		c.ends = append(c.ends, b.Len())
 		line += h - 1
 		prev = e
 	}
-	return b.String()
+	c.joined = b.String()
+	return c.joined
 }
 
 // markSelected draws an accent bar down the left edge of a rendered entry.
@@ -687,8 +724,13 @@ func summarizeInput(tool string, raw json.RawMessage, max int) string {
 	return s
 }
 
-// toolResultText flattens a tool_result content field to text.
+// toolResultText flattens a tool_result content field to text that is
+// safe to display.
 func toolResultText(raw json.RawMessage) string {
+	return safetext.Clean(rawResultText(raw))
+}
+
+func rawResultText(raw json.RawMessage) string {
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
 		return s

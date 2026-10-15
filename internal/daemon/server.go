@@ -347,7 +347,7 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 		if err := decode(&p); err != nil {
 			return nil, err
 		}
-		return withSession(p.Session, func(ss *session) error { return wrap(ss.proc.Close()) })
+		return withSession(p.Session, func(ss *session) error { ss.proc.Stop(); return nil })
 	}
 	return nil, &Error{CodeUnknownMethod, "unknown method " + req.Method}
 }

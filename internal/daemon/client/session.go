@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/daemon"
@@ -204,10 +205,15 @@ func (s *Session) SetPermissionMode(mode string) error {
 	return s.call("session.configure", daemon.ConfigureParams{Session: s.ID, PermissionMode: mode})
 }
 
-// Close stops the session in the daemon, as closing a local process's
-// stdin ends it. Use Detach to leave it running.
-func (s *Session) Close() error {
-	return s.call("session.stop", daemon.SessionParams{Session: s.ID})
+// stopTimeout bounds Stop, which waits for the daemon to take the request
+// so that quitting right after it can't lose it.
+const stopTimeout = 2 * time.Second
+
+// Stop ends the session in the daemon. Use Detach to leave it running.
+func (s *Session) Stop() {
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer cancel()
+	_ = s.c.Call(ctx, "session.stop", daemon.SessionParams{Session: s.ID}, nil)
 }
 
 // Detach unsubscribes and ends Events; the session stays live in the

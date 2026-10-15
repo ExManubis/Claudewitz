@@ -11,6 +11,9 @@ import (
 	"github.com/aymanbagabas/go-udiff"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/exmanubis/claudewitz/internal/safetext"
 )
 
 type diffLine struct {
@@ -342,7 +345,9 @@ func pairDiff(lines []diffLine) []splitRow {
 	return rows
 }
 
-func expandTabs(s string) string { return strings.ReplaceAll(s, "\t", "    ") }
+// expandTabs readies one line of file or tool output for display: tabs
+// become spaces and control characters are made harmless.
+func expandTabs(s string) string { return strings.ReplaceAll(safetext.Clean(s), "\t", "    ") }
 
 // highlightLine tokenises one line and paints each token over bg, padding
 // (or truncating) to exactly width cells.
@@ -350,10 +355,7 @@ func highlightLine(lexer chroma.Lexer, style *chroma.Style, text string, bg lipg
 	if width < 1 {
 		return ""
 	}
-	runes := []rune(text)
-	if len(runes) > width {
-		text = string(runes[:width-1]) + "…"
-	}
+	text = ansi.Truncate(text, width, "…")
 	var b strings.Builder
 	used := 0
 	it, err := lexer.Tokenise(nil, text)

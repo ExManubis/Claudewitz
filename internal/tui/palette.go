@@ -287,7 +287,7 @@ func (m *Model) handlePaletteKey(k tea.KeyMsg) tea.Cmd {
 }
 
 func (p *palette) view(width int) string {
-	w := min(width-4, 76)
+	w := dialogWidth(width, 76)
 	inner := w - 4
 	title := gradientText("Commands", true)
 	count := mutedStyle.Render(fmt.Sprintf("%d", len(p.shown)))

@@ -54,3 +54,8 @@ func scrollHint(pairs [][2]string, rows, from, height int) [][2]string {
 	}
 	return pairs
 }
+
+// dialogWidth is a dialog's outer width on a terminal width cells wide: a
+// margin either side, at most widest, and never so narrow that the
+// layout inside goes negative (a tiny terminal clips it instead).
+func dialogWidth(width, widest int) int { return max(min(width-4, widest), 24) }

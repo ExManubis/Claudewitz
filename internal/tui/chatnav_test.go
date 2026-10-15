@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -146,4 +147,34 @@ func TestBatchedKeys(t *testing.T) {
 	if m.chatFocus || m.input.Value() != "hello" {
 		t.Fatalf("typing after a nav key: focus=%v value=%q", m.chatFocus, m.input.Value())
 	}
+}
+
+// The incrementally joined transcript always matches a full rebuild.
+func TestChatViewCacheMatchesRebuild(t *testing.T) {
+	m := chatModel(t)
+	c := m.chat
+	check := func(step string) {
+		t.Helper()
+		got, offs, hs := c.View(80), append([]int(nil), c.offsets...), append([]int(nil), c.heights...)
+		c.ends = nil
+		want := c.View(80)
+		if got != want || fmt.Sprint(offs) != fmt.Sprint(c.offsets) || fmt.Sprint(hs) != fmt.Sprint(c.heights) {
+			t.Fatalf("%s: cached view differs from a rebuild", step)
+		}
+	}
+	check("initial")
+	c.add(&entry{kind: kindAssistant, text: "a new reply"})
+	check("append")
+	c.entries[1].setText("a changed thought")
+	c.entries[1].dirty = true
+	check("middle entry changed")
+	c.focused, c.sel = true, 2
+	check("selection")
+	c.sel = 0
+	check("selection moved")
+	c.View(60)
+	check("resized back")
+	c.reset(c.track)
+	c.add(&entry{kind: kindUser, text: "fresh"})
+	check("reset")
 }

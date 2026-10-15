@@ -49,7 +49,7 @@ func TestSmokeRealClaude(t *testing.T) {
 			case ev.Result != nil:
 				list, _ := c.List(ctx)
 				t.Logf("result: cost %.4f; summary %+v activity %+v", ev.Result.TotalCostUSD, list[0], list[0].Activity)
-				_ = s.Close()
+				s.Stop()
 			case ev.Exited:
 				t.Logf("exited: %v; hello account %+v", ev.Err, c.Hello.Account)
 				return

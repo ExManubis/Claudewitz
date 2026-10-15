@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/exmanubis/claudewitz/internal/safetext"
 )
 
 // File is one changed path. X and Y are the index and worktree status
@@ -125,7 +127,7 @@ func Read(ctx context.Context, dir string) (Status, error) {
 		if lc, err := git(ctx, dir, "log", "-1", "--format=%h %ct %s"); err == nil {
 			parts := strings.SplitN(strings.TrimSpace(lc), " ", 3)
 			if len(parts) == 3 {
-				st.LastCommit = parts[0] + " " + parts[2]
+				st.LastCommit = parts[0] + " " + safetext.Line(parts[2])
 				if sec, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
 					st.LastWhen = time.Unix(sec, 0)
 				}
