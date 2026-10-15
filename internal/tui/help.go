@@ -101,6 +101,15 @@ var helpSections = []struct {
 		{"ctrl+p", "command palette"},
 		{"ctrl+d", "quit"},
 	}},
+	{"Sessions (with -daemon)", [][2]string{
+		{"alt+s", "sessions panel"},
+		{"alt+↑/↓", "previous / next session"},
+		{"alt+1‥9", "session by position"},
+		{"ctrl+]", "next that needs you"},
+		{"alt+n", "new session in a folder"},
+		{"ctrl+q", "kill session"},
+		{"", "macOS: alt needs Option as Meta"},
+	}},
 	{"View", [][2]string{
 		{"ctrl+o", "expand tool output"},
 		{"ctrl+b", "toggle sidebar"},

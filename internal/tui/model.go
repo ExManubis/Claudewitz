@@ -72,7 +72,6 @@ type Model struct {
 	showHelp  bool
 	kill      *killState
 	folders   *folderPicker
-	quitAsk   bool   // asking whether to leave a daemon session running
 	notice    string // shown in the chat at startup
 	spin      spinner.Model
 	width     int // what the chat gets
@@ -476,9 +475,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.mouseDown {
 			m.textSel = nil // any key clears a mouse selection
 		}
-		if m.quitAsk {
-			return m, m.handleQuitKey(msg)
-		}
 		if m.showHelp {
 			switch msg.String() {
 			case "esc", "ctrl+g", "q", "enter", "ctrl+c":
@@ -680,50 +676,19 @@ func (m *Model) interrupt() {
 // by the daemon.
 type detacher interface{ Detach() error }
 
-// quit ends a local session. A daemon session may outlive the TUI, so
-// quitting asks whether to detach (the default) or stop it.
+// quit leaves: daemon sessions keep running (killing is ctrl+q); a session
+// run directly ends with the TUI.
 func (m *Model) quit() tea.Cmd {
-	if _, ok := m.proc.(detacher); ok {
-		m.quitAsk = true
-		m.input.Blur()
-		m.layout()
-		return nil
-	}
-	if m.proc != nil {
-		m.proc.Stop()
+	for _, v := range m.views {
+		switch p := v.proc.(type) {
+		case nil:
+		case detacher:
+			_ = p.Detach()
+		default:
+			p.Stop()
+		}
 	}
 	return tea.Quit
-}
-
-func (m *Model) handleQuitKey(k tea.KeyMsg) tea.Cmd {
-	switch k.String() {
-	case "enter", "d", "ctrl+d", "ctrl+c":
-		if d, ok := m.proc.(detacher); ok {
-			_ = d.Detach()
-		}
-		return tea.Quit
-	case "s":
-		if m.proc != nil {
-			m.proc.Stop()
-		}
-		return tea.Quit
-	case "esc", "n", "q":
-		m.quitAsk = false
-		if !m.chatFocus {
-			m.input.Focus()
-		}
-		m.layout()
-	}
-	return nil
-}
-
-func (m Model) quitView() string {
-	title := warnStyle.Bold(true).Render("Leave this session running?")
-	detail := mutedStyle.Render("Detached, it keeps working in the claudewitz daemon; resume it with ctrl+r or claudewitz --continue.")
-	keys := statusKey.Render("d") + mutedStyle.Render(" detach  ") +
-		statusKey.Render("s") + mutedStyle.Render(" stop session  ") +
-		statusKey.Render("esc") + mutedStyle.Render(" cancel")
-	return permBox.Width(m.mainWidth() - 2).Render(title + "\n\n" + lipgloss.NewStyle().Width(m.mainWidth()-6).Render(detail) + "\n\n" + keys)
 }
 
 func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
@@ -1702,9 +1667,6 @@ func overlayBottom(base, pop string, height, width int) string {
 }
 
 func (m Model) bottomView() string {
-	if m.quitAsk {
-		return m.quitView()
-	}
 	if len(m.pending) > 0 {
 		return m.permissionView()
 	}

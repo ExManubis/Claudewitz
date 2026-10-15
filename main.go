@@ -97,7 +97,7 @@ func main() {
 			defer c.Close()
 			start = client.Starter(c)
 			hub = client.Hub{C: c}
-			notice = strings.TrimSpace(note + "\n" + liveNote(ctx, c))
+			notice = note
 		}
 	}
 
@@ -109,5 +109,14 @@ func main() {
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	if hub.C != nil {
+		if list, err := hub.List(context.Background()); err == nil && len(list) > 0 {
+			what := "1 session keeps"
+			if len(list) > 1 {
+				what = fmt.Sprintf("%d sessions keep", len(list))
+			}
+			fmt.Printf("%s running in the claudewitz daemon · claudewitz to come back\n", what)
+		}
 	}
 }

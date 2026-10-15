@@ -131,3 +131,19 @@ func TestFocusAwayFromStartingViewKeepsIt(t *testing.T) {
 		t.Fatalf("starting view lost: viewFor %v, views %d", m.viewFor(p), len(m.views))
 	}
 }
+
+func TestQuitDetachesEverySession(t *testing.T) {
+	m := daemonModel(t, newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle), sum("s_2", "/x/b", daemon.StateIdle)))
+	a, b := newFakeSession(), newFakeSession()
+	m.proc = a
+	other := newSessionView(claude.Options{CWD: t.TempDir()})
+	other.proc, other.id = b, "s_2"
+	m.views = append(m.views, other)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	if cmd == nil {
+		t.Fatal("ctrl+d didn't quit")
+	}
+	if !a.detached || !b.detached || a.stopped || b.stopped {
+		t.Fatalf("detached %v/%v stopped %v/%v", a.detached, b.detached, a.stopped, b.stopped)
+	}
+}
