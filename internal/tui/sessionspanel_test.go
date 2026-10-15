@@ -96,3 +96,35 @@ func TestPanelClickPicksRow(t *testing.T) {
 		t.Fatalf("chat click shifted to %d, handled %v", chat.X, handled)
 	}
 }
+
+func TestReleaseOverPanelReachesChat(t *testing.T) {
+	m := withSessions(t, 160, sum("a", "/x/one", daemon.StateIdle), sum("b", "/x/two", daemon.StateWaiting))
+	m.mouseDown = true
+	m.textSel = &textSelection{}
+	rel := tea.MouseMsg{X: 5, Y: 5, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft}
+	if _, handled := m.sessionsMouse(&rel); handled || rel.X != 0 {
+		t.Fatalf("release over panel: handled %v X %d", handled, rel.X)
+	}
+	next, _ := m.Update(tea.MouseMsg{X: 5, Y: 5, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+	if next.(Model).mouseDown {
+		t.Fatal("release over the panel left the drag running")
+	}
+}
+
+func TestTabClickWhenScrolled(t *testing.T) {
+	var list []daemon.SessionSummary
+	for _, n := range []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot"} {
+		list = append(list, sum(n, "/x/"+n+"-project-long-name", daemon.StateIdle))
+	}
+	m := withSessions(t, 60, list...)
+	rows := m.rows()
+	m.sessionView.id = rows[len(rows)-1].ID
+	_, start := m.tabStrip(rows, m.termW)
+	if start == 0 {
+		t.Fatal("strip did not scroll")
+	}
+	msg := tea.MouseMsg{X: 1, Y: 0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
+	if id, handled := m.sessionsMouse(&msg); !handled || id != rows[start].ID {
+		t.Fatalf("click on first visible tab: %q %v, want %q", id, handled, rows[start].ID)
+	}
+}

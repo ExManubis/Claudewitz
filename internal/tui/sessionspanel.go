@@ -161,13 +161,11 @@ func (m Model) tabLabels(rows []daemon.SessionSummary) []string {
 	return out
 }
 
-// tabsView draws the one-line tab strip, scrolled to keep the focused tab
-// in view.
-func (m Model) tabsView(width int) string {
+// tabStrip renders each tab and picks the first one shown, scrolled so the
+// focused tab stays in view within width.
+func (m Model) tabStrip(rows []daemon.SessionSummary, width int) (tabs []string, start int) {
 	th := currentTheme()
-	rows := m.rows()
 	labels := m.tabLabels(rows)
-	var tabs []string
 	focusedAt := 0
 	for i, s := range rows {
 		st := stateOf(s, m.done[s.ID])
@@ -186,48 +184,53 @@ func (m Model) tabsView(width int) string {
 		}
 		tabs = append(tabs, tab)
 	}
-	start := 0
 	for start < focusedAt && lipgloss.Width(strings.Join(tabs[start:focusedAt+1], "")) > width {
 		start++
 	}
-	line := strings.Join(tabs[start:], "")
-	return ansi.Truncate(line, width, "…")
+	return tabs, start
+}
+
+// tabsView draws the one-line tab strip, scrolled to keep the focused tab
+// in view.
+func (m Model) tabsView(width int) string {
+	tabs, start := m.tabStrip(m.rows(), width)
+	return ansi.Truncate(strings.Join(tabs[start:], ""), width, "…")
 }
 
 // sessionsMouse handles clicks on the panel or strip and shifts other mouse
 // events into the coordinates today's layout expects.
 func (m *Model) sessionsMouse(msg *tea.MouseMsg) (id string, handled bool) {
 	click := msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft
+	wheel := msg.Action == tea.MouseActionPress &&
+		(msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown)
 	switch m.panelMode {
 	case sessionsPanel:
-		if msg.X < panelWidth {
-			if !click {
-				return "", true
-			}
+		if msg.X < panelWidth && (click || wheel) {
 			row := (msg.Y - panelTop) / 2
-			if rows := m.rows(); msg.Y >= panelTop && row < len(rows) {
+			if rows := m.rows(); click && msg.Y >= panelTop && row < len(rows) {
 				return rows[row].ID, true
 			}
 			return "", true
 		}
-		msg.X -= panelWidth
+		// Releases and motion go on to the chat, so a drag that ends over
+		// the panel still finishes.
+		msg.X = max(0, msg.X-panelWidth)
 	case sessionsTabs:
-		if msg.Y == 0 {
-			if !click {
-				return "", true
-			}
-			rows := m.rows()
-			x := 0
-			for i, l := range m.tabLabels(rows) {
-				w := lipgloss.Width(" " + icons.sessIdle + " " + l + " ")
-				if msg.X < x+w {
-					return rows[i].ID, true
+		if msg.Y == 0 && (click || wheel) {
+			if click {
+				rows := m.rows()
+				tabs, start := m.tabStrip(rows, m.termW)
+				x := 0
+				for i := start; i < len(tabs); i++ {
+					x += lipgloss.Width(tabs[i])
+					if msg.X < x {
+						return rows[i].ID, true
+					}
 				}
-				x += w
 			}
 			return "", true
 		}
-		msg.Y--
+		msg.Y = max(0, msg.Y-1)
 	}
 	return "", false
 }
