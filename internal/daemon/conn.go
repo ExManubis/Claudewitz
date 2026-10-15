@@ -27,8 +27,11 @@ type conn struct {
 	mu     sync.Mutex
 	hello  bool
 	client string // "tui", "ios"
-	remote bool   // on the remote listener (not built yet)
+	remote bool   // on the remote listener; set before the read loop starts
+	device string // the paired device; "" on local and unpaired remote connections
 	subs   map[string]*session
+
+	pairFailures int
 }
 
 func newConn(srv *Server, ws *websocket.Conn) *conn {
@@ -57,10 +60,31 @@ func (c *conn) isClosed() bool {
 	}
 }
 
+// ready reports whether c gets pushes: it has said hello and, if remote,
+// is a paired device.
 func (c *conn) ready() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.hello && (!c.remote || c.device != "")
+}
+
+func (c *conn) saidHello() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.hello
+}
+
+// authed reports whether c may call methods other than hello and pair.
+func (c *conn) authed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return !c.remote || c.device != ""
+}
+
+func (c *conn) deviceID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.device
 }
 
 // send queues a frame. A client too slow to keep up is disconnected
@@ -129,12 +153,17 @@ func (c *conn) readLoop() {
 			c.replyErr(req.ID, &Error{CodeBadRequest, "expected {id, method, params}"})
 			continue
 		}
-		if !c.ready() {
+		if !c.saidHello() {
 			if !c.handshake(req) {
 				c.flushAndClose()
 				return
 			}
 			continue
+		}
+		if !c.authed() && req.Method != "pair" {
+			c.replyErr(req.ID, &Error{CodeUnauthorized, "pair first, or connect with a device token"})
+			c.flushAndClose()
+			return
 		}
 		res, err := c.srv.call(c, req)
 		switch {

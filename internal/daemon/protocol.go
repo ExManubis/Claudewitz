@@ -50,6 +50,7 @@ const (
 	CodeBadRequest    = "bad_request"
 	CodeNotFound      = "not_found"
 	CodeLocalOnly     = "local_only"
+	CodeUnauthorized  = "unauthorized"
 	CodeProtocol      = "protocol"
 	CodeUnknownMethod = "unknown_method"
 	CodeFailed        = "failed"
@@ -269,3 +270,82 @@ type AccountUpdatedParams struct {
 // now is the current time at whole seconds: Swift's .iso8601 decoding
 // rejects fractional seconds.
 func now() time.Time { return time.Now().UTC().Truncate(time.Second) }
+
+// ── Remote access and pairing ───────────────────────────────────────────
+
+// PairParams is sent by an unpaired remote client, with the code from the
+// QR code `claudewitz pair` shows.
+type PairParams struct {
+	Code       string `json:"code"`
+	DeviceName string `json:"deviceName"`
+}
+
+type PairResult struct {
+	// Token is the device's long-lived token, for "Authorization: Bearer"
+	// on later connections. It is only ever sent this once.
+	Token    string `json:"token"`
+	DeviceID string `json:"deviceId"`
+}
+
+// The methods below are local only: the CLI's `claudewitz daemon …`,
+// `pair` and `devices` commands.
+
+type RemoteSetParams struct {
+	Enabled bool `json:"enabled"`
+	Port    int  `json:"port,omitempty"` // 0: the saved port, else DefaultRemotePort
+}
+
+// RemoteStatus is the remote listener: Host and Port are set while it is
+// listening; Error says why an enabled listener is down.
+type RemoteStatus struct {
+	Enabled bool   `json:"enabled"`
+	Host    string `json:"host,omitempty"`
+	Port    int    `json:"port,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// PairCodeResult is what `claudewitz pair` puts in its QR code (host,
+// port, code), plus when the code expires.
+type PairCodeResult struct {
+	Host      string    `json:"host"`
+	Port      int       `json:"port"`
+	Code      string    `json:"code"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// DeviceInfo is a paired device as `claudewitz devices` shows it.
+type DeviceInfo struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	PairedAt  time.Time `json:"pairedAt"`
+	LastSeen  time.Time `json:"lastSeen"`
+	Connected int       `json:"connected"` // live connections right now
+}
+
+type DevicesResult struct {
+	Devices []DeviceInfo `json:"devices"`
+}
+
+type RevokeParams struct {
+	Device string `json:"device"` // id or name
+}
+
+type RevokeResult struct {
+	Device DeviceInfo `json:"device"`
+}
+
+type Listener struct {
+	Kind    string `json:"kind"` // local | remote
+	Address string `json:"address"`
+}
+
+type StatusResult struct {
+	PID           int              `json:"pid"`
+	DaemonVersion string           `json:"daemonVersion"`
+	StartedAt     time.Time        `json:"startedAt"`
+	Listeners     []Listener       `json:"listeners"`
+	Remote        RemoteStatus     `json:"remote"`
+	Clients       int              `json:"clients"`
+	Sessions      []SessionSummary `json:"sessions"`
+	Devices       []DeviceInfo     `json:"devices"`
+}

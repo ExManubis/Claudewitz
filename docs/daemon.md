@@ -1,6 +1,7 @@
 # Daemon and client protocol (draft)
 
-Status: sketch, nothing built yet. This is the contract between `claudewitz daemon`, the
+Status: built except APNs (`device.registerPush`, push notifications), git state and
+`session.changes`/`session.diff`. This is the contract between `claudewitz daemon`, the
 claudewitz TUI and the iPhone companion app (separate repo).
 
 ## Why
@@ -55,13 +56,37 @@ One protocol, two listeners:
 | Local | WebSocket over unix socket `~/.claudewitz/daemon.sock` (mode 0600) | File permissions |
 | Remote | WebSocket on TCP, off by default; bound to the Tailscale address when enabled | Device token |
 
-Remote is enabled with `claudewitz daemon remote on`. It binds to the machine's Tailscale IP
-(never `0.0.0.0`), so it's reachable from the tailnet only, and Tailscale encrypts the link.
+Remote is enabled with `claudewitz daemon remote on [-port N]` (default port 7745) and disabled
+with `claudewitz daemon remote off`; the setting is kept in `~/.claudewitz/daemon.json` and
+survives restarts. It binds to the machine's Tailscale IPv4 address (what `tailscale ip -4` says,
+else the 100.64.0.0/10 address of a local interface), never `0.0.0.0`, so it's reachable from the
+tailnet only, and Tailscale encrypts the link. `remote on` fails with a clear error when Tailscale
+isn't up; a daemon that starts before Tailscale does keeps retrying every 30s. The on-demand
+daemon still idles out with no clients and no live sessions, so the phone can only reach it while
+there is something to see (or always, with `daemon install`).
 
-Pairing: `claudewitz pair` prints a QR code with `{host, port, pairing code}`. The code is single
-use and expires after 5 min. The app sends it in `pair`, gets back a long-lived device token, and
-uses that as `Authorization: Bearer …` on later connections. Tokens are stored hashed in
-`~/.claudewitz/devices.json`; `claudewitz devices` lists and revokes them.
+Pairing: `claudewitz pair` prints a QR code whose content is the JSON
+`{"host": "100.x.y.z", "port": 7745, "code": "K7MQ2XRA9DFP"}`. The code is 12 characters from
+`23456789ABCDEFGHJKLMNPQRSTUVWXYZ` (compared case-insensitively), single use, and expires after
+5 min. The app connects with no `Authorization` header, sends `hello`, then
+`pair {code, deviceName}` and gets back `{token, deviceId}`. From then on that same connection is
+the paired device (it gets pushes and may call everything a remote client may), so the app can
+carry on without reconnecting. Later connections send `Authorization: Bearer <token>` on the
+WebSocket upgrade. Tokens are stored as SHA-256 hashes in `~/.claudewitz/devices.json` (0600),
+with the device name, when it was paired and when it was last seen. `claudewitz devices` lists
+paired devices and `claudewitz devices revoke <name|id>` unpairs one and drops its live
+connections. `claudewitz daemon status` shows the listeners and paired devices.
+
+Refusals on the remote listener:
+
+- A token that is unknown or revoked, or an `Authorization` header that isn't `Bearer …`: the
+  upgrade is refused with HTTP 401. The app should treat 401 as "unpaired" and offer to pair again.
+- No `Authorization` header while no pairing code is outstanding: HTTP 401.
+- Any `Origin` header (a browser on the tailnet): HTTP 403. The app must not send one.
+- On an unpaired connection, anything but `hello` and `pair` gets `error.code = "unauthorized"`
+  and the connection is closed. A wrong or expired code gets `unauthorized`; the third wrong code,
+  or a minute without pairing, closes the connection. Unpaired connections get no pushes.
+- `pair` on a local or already paired connection is `bad_request`.
 
 ## Framing
 
@@ -89,7 +114,7 @@ can add things without breaking the other. Breaking changes bump `protocol` in `
 | Method | Params | Result |
 |---|---|---|
 | `hello` | `{protocol: 1, client: "tui" \| "ios", clientVersion}` | `{protocol, daemonVersion, account: Account}` |
-| `pair` | `{code, deviceName}` | `{token}` (remote, unauthenticated connections only) |
+| `pair` | `{code, deviceName}` | `{token, deviceId}` (remote, unpaired connections only; see Transport and auth) |
 | `device.registerPush` | `{apnsToken, sandbox}` | `{}` |
 
 ```jsonc
@@ -109,6 +134,16 @@ usage bars stay current without subscribing to a session.
 `hello` must be the first request; the daemon closes connections that send anything else first,
 or that ask for a `protocol` it doesn't speak.
 
+Management methods, all local only, used by the `claudewitz` CLI:
+
+| Method | Params | Result |
+|---|---|---|
+| `daemon.status` | `{}` | `{pid, daemonVersion, startedAt, listeners: [{kind, address}], remote, clients, sessions, devices}` |
+| `remote.set` | `{enabled, port?}` | `{enabled, host?, port?, error?}` |
+| `pair.code` | `{}` | `{host, port, code, expiresAt}` |
+| `devices.list` | `{}` | `{devices: [{id, name, pairedAt, lastSeen, connected}]}` |
+| `devices.revoke` | `{device}` (id or name) | `{device}` |
+
 ### Overview (every client gets this, no subscription needed)
 
 | Method | Params | Result |
@@ -127,7 +162,8 @@ data and battery over Tailscale.
 **Remote clients see live sessions only.** Like Remote Control, the phone lists and drives the
 persistent agents running in the daemon; it doesn't browse folders, start sessions or resume
 past ones. Sessions are started from a TUI on the Mac. Methods marked *local only* are refused
-on the remote listener with `error.code = "local_only"`. (Decided 2026-10-15: live only for now.
+on the remote listener with `error.code = "local_only"`; so are the CLI's management methods
+(see below). (Decided 2026-10-15: live only for now.
 Resuming or starting from the phone would need a way to pick a cwd, recent projects from
 transcripts or configured roots, and `session.start` opened up on the remote listener.)
 

@@ -20,6 +20,16 @@ import (
 // runDaemon is `claudewitz daemon`: it owns sessions for every client until
 // it has had no clients and no sessions for -idle.
 func runDaemon(args []string) {
+	if len(args) > 0 {
+		switch args[0] {
+		case "status":
+			runDaemonStatus()
+			return
+		case "remote":
+			runDaemonRemote(args[1:])
+			return
+		}
+	}
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
 	bin := fs.String("claude", "claude", "path to the claude CLI")
 	sock := fs.String("socket", daemon.SocketPath(), "unix socket to listen on")
@@ -43,6 +53,8 @@ func runDaemon(args []string) {
 		Version:     versionString(),
 		Base:        claude.Options{Binary: *bin},
 		IdleTimeout: *idle,
+		ConfigPath:  filepath.Join(filepath.Dir(*sock), "daemon.json"),
+		Devices:     &daemon.Devices{Path: filepath.Join(filepath.Dir(*sock), "devices.json")},
 		Log:         log.New(os.Stderr, "claudewitz daemon: ", log.LstdFlags),
 	}
 	srv.Log.Printf("listening on %s (pid %d)", *sock, os.Getpid())

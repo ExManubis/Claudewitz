@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,14 @@ type Server struct {
 	IdleTimeout time.Duration
 	// Log receives diagnostics; nil means the standard logger.
 	Log *log.Logger
+	// ConfigPath is daemon.json, where remote access is remembered; ""
+	// keeps it in memory only.
+	ConfigPath string
+	// Devices are the paired phones; nil means DevicesPath().
+	Devices *Devices
+	// TailscaleAddr finds the address the remote listener binds to; nil
+	// means TailscaleIP.
+	TailscaleAddr func() (netip.Addr, error)
 
 	ctx      context.Context // outlives requests; ends the processes
 	mu       sync.RWMutex
@@ -45,6 +54,14 @@ type Server struct {
 	conns    map[*conn]bool
 	account  Account
 	idleFrom time.Time
+	codes    map[string]time.Time // pairing code → expiry
+	started  time.Time
+	local    string // the local listener's address
+
+	remoteMu  sync.Mutex // guards the fields below
+	config    Config
+	remote    *remoteListener // nil while off or down
+	remoteErr string          // why an enabled remote listener is down
 }
 
 // Serve accepts clients on ln until ctx ends or the daemon idles out.
@@ -56,14 +73,30 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.sessions = map[string]*session{}
 	s.conns = map[*conn]bool{}
 	s.idleFrom = time.Now()
+	s.codes = map[string]time.Time{}
+	s.started = now()
+	s.local = ln.Addr().String()
 	s.mu.Unlock()
 	if s.Launch == nil {
 		s.Launch = claude.Launch
 	}
+	if s.Devices == nil {
+		s.Devices = &Devices{Path: DevicesPath()}
+	}
 
-	hs := &http.Server{Handler: http.HandlerFunc(s.serveWS)}
+	hs := &http.Server{Handler: s.handler(false)}
 	errc := make(chan error, 1)
 	go func() { errc <- hs.Serve(ln) }()
+
+	s.remoteMu.Lock()
+	s.config = s.loadConfig()
+	s.remoteMu.Unlock()
+	s.retryRemote()
+	defer func() {
+		s.remoteMu.Lock()
+		s.closeRemote()
+		s.remoteMu.Unlock()
+	}()
 
 	tick := time.NewTicker(idleCheck(s.IdleTimeout))
 	defer tick.Stop()
@@ -75,6 +108,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 			hs.Close()
 			return nil
 		case <-tick.C:
+			s.retryRemote()
 			if s.idle() {
 				s.logf("idle for %s, exiting", s.IdleTimeout)
 				hs.Close()
@@ -135,17 +169,33 @@ func (s *Server) logf(format string, args ...any) {
 }
 
 var upgrader = websocket.Upgrader{
-	// The local listener is a unix socket, which browsers can't reach.
+	// The local listener is a unix socket, which browsers can't reach;
+	// the remote one refuses requests with an Origin (see handler).
 	CheckOrigin: func(*http.Request) bool { return true },
 }
 
-func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
+// serveWS runs one client connection. Remote connections without a
+// device may only pair, and are dropped if they don't within pairTimeout.
+func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, remote bool, dev *Device) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	ws.SetReadLimit(64 << 20) // images arrive inline
 	c := newConn(s, ws)
+	c.remote = remote
+	if dev != nil {
+		c.device = dev.ID
+		defer s.devices().Seen(dev.ID)
+	} else if remote {
+		ws.SetReadLimit(4 << 10)
+		t := time.AfterFunc(pairTimeout, func() {
+			if !c.authed() {
+				c.close()
+			}
+		})
+		defer t.Stop()
+	}
 	s.mu.Lock()
 	s.conns[c] = true
 	s.mu.Unlock()
@@ -256,16 +306,70 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 		return struct{}{}, f(ss)
 	}
 
+	localOnly := func() error {
+		if c.remote {
+			return &Error{CodeLocalOnly, req.Method + " is local only"}
+		}
+		return nil
+	}
+
 	switch req.Method {
 	case "hello":
 		return nil, &Error{CodeProtocol, "hello was already sent"}
+
+	case "pair":
+		var p PairParams
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		return s.pair(c, p)
+
+	case "daemon.status":
+		if err := localOnly(); err != nil {
+			return nil, err
+		}
+		return s.status()
+
+	case "remote.set":
+		if err := localOnly(); err != nil {
+			return nil, err
+		}
+		var p RemoteSetParams
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		return s.setRemote(p)
+
+	case "pair.code":
+		if err := localOnly(); err != nil {
+			return nil, err
+		}
+		return s.newPairCode()
+
+	case "devices.list":
+		if err := localOnly(); err != nil {
+			return nil, err
+		}
+		devs, err := s.deviceList()
+		return DevicesResult{Devices: devs}, err
+
+	case "devices.revoke":
+		if err := localOnly(); err != nil {
+			return nil, err
+		}
+		var p RevokeParams
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		d, err := s.revoke(p.Device)
+		return RevokeResult{Device: d}, err
 
 	case "sessions.list":
 		return ListResult{Sessions: s.list()}, nil
 
 	case "sessions.history":
-		if c.remote {
-			return nil, &Error{CodeLocalOnly, "sessions.history is local only"}
+		if err := localOnly(); err != nil {
+			return nil, err
 		}
 		var p struct {
 			CWD   string `json:"cwd"`
@@ -277,8 +381,8 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 		return historyResult(p.CWD, p.Limit), nil
 
 	case "session.start":
-		if c.remote {
-			return nil, &Error{CodeLocalOnly, "session.start is local only"}
+		if err := localOnly(); err != nil {
+			return nil, err
 		}
 		var p StartParams
 		if err := decode(&p); err != nil {

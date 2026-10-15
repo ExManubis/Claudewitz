@@ -33,9 +33,18 @@ func versionString() string {
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "daemon" {
-		runDaemon(os.Args[2:])
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "daemon":
+			runDaemon(os.Args[2:])
+			return
+		case "pair":
+			runPair(os.Args[2:])
+			return
+		case "devices":
+			runDevices(os.Args[2:])
+			return
+		}
 	}
 	var opts claude.Options
 	flag.StringVar(&opts.Binary, "claude", "claude", "path to the claude CLI")
