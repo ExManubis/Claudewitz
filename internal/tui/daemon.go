@@ -71,6 +71,16 @@ func orderRows(list []daemon.SessionSummary, done map[string]bool) []daemon.Sess
 	return out
 }
 
+// folderPath is a session's whole folder for the panel, with ~ for home:
+// "repo ⎇ worktree" for a linked worktree, whose own folder name is
+// usually meaningless.
+func folderPath(s daemon.SessionSummary) string {
+	if s.Worktree != nil && s.Repo != nil {
+		return prettyPath(*s.Repo) + " " + icons.worktree + " " + *s.Worktree
+	}
+	return prettyPath(s.CWD)
+}
+
 // folderLabels names each session's folder: the base name, with the parent
 // when two different folders share it, and "repo ⎇ worktree" for linked
 // worktrees.

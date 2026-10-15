@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -128,5 +130,35 @@ func TestTabClickWhenScrolled(t *testing.T) {
 	msg := tea.MouseMsg{X: 1, Y: 0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
 	if id, handled := m.sessionsMouse(&msg); !handled || id != rows[start].ID {
 		t.Fatalf("click on first visible tab: %q %v, want %q", id, handled, rows[start].ID)
+	}
+}
+
+// Rows show the session's whole folder path (~ for home), cut from the left
+// when it doesn't fit, so the folder's own name stays visible.
+func TestPanelShowsWholePath(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	long := filepath.Join(home, "Developer", "clients", "acme", "infrastructure", "terraform-modules", "networking")
+	wt := daemon.SessionSummary{ID: "c", CWD: filepath.Join(home, "Developer", "claudewitz", ".claude", "worktrees", "ring-tests"),
+		State: daemon.StateIdle, Repo: ptr(filepath.Join(home, "Developer", "claudewitz")), Worktree: ptr("ring-tests")}
+	m := withSessions(t, 160,
+		sum("a", filepath.Join(home, "Developer", "api"), daemon.StateIdle),
+		sum("b", long, daemon.StateIdle),
+		wt,
+	)
+	view := ansi.Strip(m.sessionsView(40))
+	if !strings.Contains(view, "~/Developer/api") {
+		t.Fatalf("short path:\n%s", view)
+	}
+	if !strings.Contains(view, "…") || !strings.Contains(view, "/networking") || strings.Contains(view, "~/Developer/clients") {
+		t.Fatalf("long path not cut from the left:\n%s", view)
+	}
+	// Too long for the panel: cut from the left, keeping the repo and worktree names.
+	if !strings.Contains(view, "/claudewitz "+icons.worktree+" ring-tests") {
+		t.Fatalf("worktree path:\n%s", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if w := ansi.StringWidth(line); w > panelWidth {
+			t.Fatalf("line %d wide: %q", w, line)
+		}
 	}
 }

@@ -93,7 +93,6 @@ func (m Model) sessionsView(height int) string {
 		count = warnStyle.Render(fmt.Sprintf("▲ %d need you", n))
 	}
 	lines := []string{spread(head, count, inner), ""}
-	labels := folderLabels(m.live)
 	for _, s := range m.rows() {
 		st := stateOf(s, m.done[s.ID])
 		glyph, gs := m.rowGlyph(st)
@@ -123,7 +122,7 @@ func (m Model) sessionsView(height int) string {
 		age := mutedStyle.Render(ageLabel(time.Since(m.since[s.ID])))
 		title := truncate(rowTitle(s), inner-6-lipgloss.Width(age))
 		l1 := spread(bar+" "+gs.Render(glyph)+" "+titleStyle.Render(title), age, inner)
-		l2 := bar + "   " + lipgloss.NewStyle().Foreground(th.second).Render(truncate(labels[s.ID], inner-4))
+		l2 := bar + "   " + lipgloss.NewStyle().Foreground(th.second).Render(truncateLeft(folderPath(s), inner-4))
 		if focused {
 			bg := lipgloss.NewStyle().Background(th.selBg).Width(inner)
 			l1, l2 = bg.Render(l1), bg.Render(l2)
