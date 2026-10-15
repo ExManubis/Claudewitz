@@ -197,7 +197,11 @@ func recapCard(d recap.Day, w, maxH int, isToday bool) []string {
 		if isToday {
 			msg = []string{"", "", bold.Render("Nothing yet today."), mutedStyle.Render("tty is ready when you are.")}
 		}
-		return joinBeside(strings.Split(recapArt(false), "\n"), msg, w)
+		out := joinBeside(strings.Split(recapArt(false), "\n"), msg, w)
+		if len(out)+3 <= maxH && len(d.Week) > 0 {
+			out = append(append(out, ""), recapWeek(d)...)
+		}
+		return out
 	}
 
 	// Hero: tty and the headline numbers.

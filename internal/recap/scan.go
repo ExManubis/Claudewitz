@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,9 @@ type turn struct {
 	active  time.Duration
 	prompt  string
 	project string
+	// tentative is a slash command Claude hasn't answered yet: /clear and
+	// /login never start a turn, a skill does.
+	tentative bool
 }
 
 type edit struct {
@@ -280,6 +284,7 @@ func (t *tally) work(at time.Time) {
 	if t.side || t.lastAt.IsZero() {
 		return
 	}
+	t.turns[len(t.turns)-1].tentative = false
 	if gap := at.Sub(t.lastAt); gap > 0 && gap <= idleGap {
 		q := at.Unix() / quarter
 		t.active[q] += gap
@@ -354,8 +359,11 @@ func (t *tally) user(l *rawLine) {
 	if t.side || l.IsMeta || l.Compact || (l.Origin != nil && l.Origin.Kind != "human") {
 		return
 	}
-	text := ""
+	text, command := "", false
 	for _, s := range texts {
+		if text, command = slashCommand(s); command {
+			break
+		}
 		if text = promptLine(s); text != "" {
 			break
 		}
@@ -363,7 +371,7 @@ func (t *tally) user(l *rawLine) {
 	if text == "" {
 		return
 	}
-	t.turns = append(t.turns, turn{at: l.Timestamp, prompt: text, project: projectOf(l.CWD)})
+	t.turns = append(t.turns, turn{at: l.Timestamp, prompt: text, project: projectOf(l.CWD), tentative: command})
 	t.lastAt = l.Timestamp
 }
 
@@ -428,6 +436,27 @@ func resultText(raw json.RawMessage) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+var (
+	commandName = regexp.MustCompile(`<command-name>\s*([^<]+?)\s*</command-name>`)
+	commandArgs = regexp.MustCompile(`<command-args>([^<]*)</command-args>`)
+)
+
+// slashCommand is a slash command or skill you ran, as "/name args".
+func slashCommand(s string) (string, bool) {
+	m := commandName.FindStringSubmatch(s)
+	if m == nil {
+		return "", false
+	}
+	text := "/" + strings.TrimPrefix(m[1], "/")
+	if a := commandArgs.FindStringSubmatch(s); a != nil && strings.TrimSpace(a[1]) != "" {
+		text += " " + strings.Join(strings.Fields(a[1]), " ")
+	}
+	if r := []rune(text); len(r) > 160 {
+		text = string(r[:159]) + "…"
+	}
+	return text, true
 }
 
 // promptLine is what you typed, on one line; "" for harness messages

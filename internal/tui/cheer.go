@@ -60,7 +60,9 @@ func (m *Model) celebrate(input json.RawMessage, output string, failed bool) {
 		}
 		m.cheer, m.cheerAt = title, time.Now()
 		m.cheers = append(m.cheers, m.notify(toastCheer, title, body))
-		if m.sparks != nil {
+		// Hidden, the field doesn't tick: the fireworks would go up whenever
+		// the sidebar next showed.
+		if m.sparks != nil && m.sidebarVisible() {
 			m.sparks.celebrate(big)
 		}
 	}

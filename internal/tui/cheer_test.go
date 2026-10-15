@@ -33,6 +33,8 @@ func toastTitles(m *Model) string {
 
 func TestShippingSetsOffFireworks(t *testing.T) {
 	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
+	m.termW, m.termH = 140, 50
+	m.resize()
 	m.busy = true
 	shell(&m, "t1", `git add -A && git commit -m "Add the recap"`, "[main 1a2b3c4] Add the recap", false)
 	if got := toastTitles(&m); got != "Committed: Add the recap" {
@@ -50,6 +52,14 @@ func TestShippingSetsOffFireworks(t *testing.T) {
 	shell(&m, "t2", `git tag -a v1.0.0 -m v1.0.0 && git push -q origin v1.0.0`, "", false)
 	if len(m.sparks.launches) != 3 || !strings.Contains(toastTitles(&m), "Released v1.0.0") {
 		t.Fatalf("release: %d launches, toasts %q", len(m.sparks.launches), toastTitles(&m))
+	}
+
+	// With the sidebar hidden there's nowhere to see fireworks: just the toast.
+	m.sparks.launches = nil
+	m.sidebarOn = false
+	shell(&m, "t3", `gh pr merge 38 --merge`, "✓ Merged pull request a/b#38 (More)", false)
+	if len(m.sparks.launches) != 0 || !strings.Contains(toastTitles(&m), "Merged: a/b#38 (More)") {
+		t.Fatalf("hidden sidebar: %d launches, toasts %q", len(m.sparks.launches), toastTitles(&m))
 	}
 }
 
@@ -133,5 +143,26 @@ func TestPokingTtySpinsIt(t *testing.T) {
 	}
 	if c := ansi.Strip(m.sparkCaption(30)); !strings.Contains(c, m.quip) {
 		t.Fatalf("caption %q", c)
+	}
+}
+
+func TestFireworksFadeAndTicksStop(t *testing.T) {
+	f := newSparkField(30, 8)
+	f.celebrate(true)
+	for i := 0; i < 24*10; i++ {
+		f.step(0, 1.0/24)
+	}
+	if f.celebrating() || f.fxLit() {
+		t.Fatal("embers still glowing ten seconds on")
+	}
+	// Celebrated, then waiting on you with the terminal unfocused: the ✓
+	// waits for tty to rest, and nothing keeps ticking meanwhile.
+	f.celebrate(false)
+	f.mode, f.paused = sparkWaiting, true
+	for i := 0; i < 24*10; i++ {
+		f.step(0, 1.0/24)
+	}
+	if f.proudFor != proudTime || f.animating() {
+		t.Fatalf("waiting: proudFor %v, animating %v", f.proudFor, f.animating())
 	}
 }

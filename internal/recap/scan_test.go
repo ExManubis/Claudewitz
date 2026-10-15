@@ -280,3 +280,26 @@ func TestRecapForgetsOldAndDeletedTranscripts(t *testing.T) {
 		t.Fatalf("still holding %d files and %d uuids", len(s.files), len(s.seen))
 	}
 }
+
+func TestSlashCommandsCountOnceClaudeAnswers(t *testing.T) {
+	root := t.TempDir()
+	tr := newTranscript(t, root, "app", "s1")
+	d := "2026-10-15"
+	command := func(at time.Time, name, args string) {
+		tr.write(map[string]any{"type": "user", "timestamp": at, "message": map[string]any{"role": "user",
+			"content": "<command-message>" + name + "</command-message>\n<command-name>/" + name + "</command-name>\n<command-args>" + args + "</command-args>"}})
+	}
+	command(at(d, "09:00:00"), "clear", "") // local: nothing answers it
+	tr.prompt(at(d, "09:01:00"), "hello")
+	tr.say(at(d, "09:01:10"), "m1", 5)
+	command(at(d, "09:05:00"), "superpowers:brainstorming", "a recap  card")
+	tr.say(at(d, "09:05:30"), "m2", 5)
+	tr.say(at(d, "09:09:00"), "m3", 5)
+	day := scannerAt(root, at(d, "23:00:00")).Recap(at(d, "12:00:00"), cph)
+	if day.Prompts != 2 {
+		t.Fatalf("prompts %d, want 2 (hello and the skill, not /clear)", day.Prompts)
+	}
+	if day.Longest == nil || day.Longest.Prompt != "/superpowers:brainstorming a recap card" || day.Longest.Seconds != 240 {
+		t.Fatalf("longest %+v", day.Longest)
+	}
+}

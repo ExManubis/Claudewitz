@@ -99,6 +99,9 @@ func (s *Scanner) Recap(date time.Time, loc *time.Location) Day {
 
 	for _, t := range s.files {
 		for _, tn := range t.turns {
+			if tn.tentative {
+				continue // a slash command that started nothing
+			}
 			key := tn.at.In(loc).Format(time.DateOnly)
 			dt := totals[key]
 			if dt == nil {

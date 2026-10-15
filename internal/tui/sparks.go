@@ -313,7 +313,10 @@ func (f *sparkField) animating() bool {
 	case sparkWorking, sparkGathering:
 		return true
 	}
-	return f.flash > 0 || !f.paused || f.celebrating() || f.proudFor > 0 || f.spinFor > 0
+	// The ✓ and a spin only run down while tty rests: waiting, they mustn't
+	// keep the ticks going.
+	resting := f.mode == sparkIdle
+	return f.flash > 0 || !f.paused || f.celebrating() || (resting && (f.proudFor > 0 || f.spinFor > 0))
 }
 
 // poke is a click on tty: a spin when it rests, a bloom of the swirl while
@@ -340,7 +343,10 @@ func (f *sparkField) celebrate(big bool) {
 	f.proudFor = proudTime
 }
 
-func (f *sparkField) celebrating() bool { return len(f.embers) > 0 || len(f.launches) > 0 }
+// celebrating reports whether fireworks are in the air or still fading.
+func (f *sparkField) celebrating() bool {
+	return len(f.embers) > 0 || len(f.launches) > 0 || f.fxLit()
+}
 
 var emberMats = []int8{matGold, matPrompt, matPink, matPhone, matBody}
 
@@ -631,7 +637,7 @@ func (f *sparkField) view() string {
 		}
 		return c
 	})
-	if f.celebrating() || f.fxLit() {
+	if f.celebrating() {
 		return f.composite(th, st)
 	}
 	if f.mode == sparkIdle || f.mode == sparkWaiting {

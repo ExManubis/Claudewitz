@@ -36,9 +36,12 @@ var (
 	commitMsg  = regexp.MustCompile(`\s-[a-zA-Z]*m\s*(?:"\$\(cat <<-?'?EOF'?\n([^\n]+)|"((?:\\.|[^"\\\n])+)|'([^'\n]+))`)
 	newTag     = regexp.MustCompile(`\[new tag\]\s+(\S+)\s+->`)
 	pushedTag  = regexp.MustCompile(`git push\b[^;&|]*?\s(v\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?)(?:\s|$|[;&|])`)
+	tagDelete  = regexp.MustCompile(`git push\b[^;&|]*?(?:\s--delete\b|\s-d\b|\s:\S)`)
+	pushedTo   = regexp.MustCompile(`(?m)^To \S`)
 	releaseURL = regexp.MustCompile(`https://github\.com/\S+/releases/tag/(\S+)`)
 	prURL      = regexp.MustCompile(`https://github\.com/[^\s/]+/[^\s/]+/pull/\d+`)
-	mergedLine = regexp.MustCompile(`(?m)Merged pull request (\S+(?: \(.*\))?)`)
+	// gh says "Merged", "Squashed and merged" or "Rebased and merged pull request …".
+	mergedLine = regexp.MustCompile(`(?i)merged pull request (\S+(?: \(.*\))?)`)
 	prArg      = regexp.MustCompile(`gh pr merge\s+(?:-\S+\s+)*#?(\d+)`)
 
 	// testRunner finds a test command anywhere in a shell line, such as
@@ -46,6 +49,9 @@ var (
 	testRunner = regexp.MustCompile(`(?:^|[\s;&|(])(go test|swift test|xcodebuild\b[^;&|]*\btest\b|cargo (?:nextest run|test)|(?:npm|pnpm|yarn|bun)(?: run)? test\b|bun test|deno test|pytest|python3? -m (?:pytest|unittest)|rspec|jest|vitest|phpunit|mix test|(?:\./)?gradlew? test|mvn test|dotnet test|ctest|make (?:test|check))\b`)
 	// testFailure catches failures that a pipe (| tail) hid from the exit code.
 	testFailure = regexp.MustCompile(`(?m)^(?:--- )?FAIL\b|\*\* TEST FAILED \*\*|\b[1-9]\d* (?:failed|failing)\b|with [1-9]\d* failures?\b|Tests? failed|^FAILED |test result: FAILED`)
+	// testSuccess tells a chain that failed after its tests passed
+	// ("go test ./... && git push", the push rejected) from red tests.
+	testSuccess = regexp.MustCompile(`(?m)^ok\s|\b[1-9]\d* passed\b|\*\* TEST SUCCEEDED \*\*|test result: ok|Tests? passed|with 0 failures\b`)
 )
 
 var shellUnescape = strings.NewReplacer(`\"`, `"`, "\\`", "`", `\$`, `$`, `\\`, `\`)
@@ -88,7 +94,7 @@ func Classify(command, output string, failed bool) []Milestone {
 	command = stripHeredocs(command)
 	if m := testRunner.FindStringSubmatch(command); m != nil {
 		kind := Tests
-		if failed || testFailure.MatchString(output) {
+		if testFailure.MatchString(output) || failed && !testSuccess.MatchString(output) {
 			kind = TestsFailed
 		}
 		runner := m[1]
@@ -119,7 +125,8 @@ func Classify(command, output string, failed bool) []Milestone {
 			out = append(out, Milestone{Kind: PR, Text: u})
 		}
 	}
-	if strings.Contains(command, "gh pr merge") {
+	if strings.Contains(command, "gh pr merge") && !strings.Contains(command, "--auto") &&
+		!strings.Contains(strings.ToLower(output), "automatically merged") {
 		text := ""
 		if m := mergedLine.FindStringSubmatch(output); m != nil {
 			text = m[1]
@@ -128,9 +135,13 @@ func Classify(command, output string, failed bool) []Milestone {
 		}
 		out = append(out, Milestone{Kind: Merge, Text: text})
 	}
-	if strings.Contains(command, "git push") {
-		tags := newTag.FindAllStringSubmatch(output, -1)
-		if len(tags) == 0 {
+	if strings.Contains(command, "git push") && !tagDelete.MatchString(command) {
+		// Only tags after "To <remote>" were pushed; a "[new tag]" from a
+		// pull earlier in the chain came in, not out.
+		var tags [][]string
+		if i := pushedTo.FindStringIndex(output); i != nil {
+			tags = newTag.FindAllStringSubmatch(output[i[0]:], -1)
+		} else if !strings.Contains(output, "up-to-date") && !strings.Contains(output, "[deleted]") {
 			// git push -q origin v1.2.3 says nothing.
 			tags = pushedTag.FindAllStringSubmatch(command, -1)
 		}
