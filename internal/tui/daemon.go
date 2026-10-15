@@ -26,6 +26,7 @@ type Daemon interface {
 // WithDaemon runs sessions in the daemon and shows all of its sessions.
 func (m Model) WithDaemon(d Daemon) Model {
 	m.daemon = d
+	m.panelOn = true
 	m.done = map[string]bool{}
 	m.since = map[string]time.Time{}
 	m.lastState = map[string]rowState{}

@@ -188,7 +188,7 @@ func editDiff(tool string, raw json.RawMessage, pending bool) (lines []diffLine,
 // panelLayout sizes the panel: most of the width, and tall enough for the
 // diff up to the room above the waiting line under the chat.
 func (m Model) panelLayout() (boxW, boxH, innerW, bodyH int) {
-	boxW = panelWidth(m.width)
+	boxW = diffPanelWidth(m.width)
 	innerW = boxW - 4 // border and padding
 	// border 2, title + blank, details + blank, blank + buttons, blank + hints
 	fixed := 2 + 2 + len(m.panelDetails(innerW)) + 1 + 2

@@ -72,8 +72,12 @@ type Model struct {
 	quitAsk   bool   // asking whether to leave a daemon session running
 	notice    string // shown in the chat at startup
 	spin      spinner.Model
-	width     int
+	width     int // what the chat gets
 	height    int
+	termW     int // the terminal
+	termH     int
+	panelOn   bool
+	panelMode sessionsMode // last applied
 	ready     bool
 	sidebarOn bool
 	drawer    bool // sidebar open over the chat, below sidebarMinWidth
@@ -241,13 +245,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-		if m.width >= sidebarMinWidth {
-			m.drawer = false // docked (or hidden) from here on
-		}
-		m.layout()
+		m.termW, m.termH = msg.Width, msg.Height
 		m.ready = true
-		m.refresh()
+		m.resize()
 
 	case noticeMsg:
 		m.chat.info("%s", string(msg))
@@ -260,9 +260,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.noteState(s)
 			}
 		}
+		if m.ready && m.sessionsMode() != m.panelMode {
+			m.resize()
+		}
 
 	case overviewMsg:
 		cmds = append(cmds, m.applyOverview(daemon.Frame(msg)), waitOverview(m.daemon.Overview()))
+		if m.ready && m.sessionsMode() != m.panelMode {
+			m.resize()
+		}
 
 	case startedMsg:
 		v := msg.view
@@ -413,6 +419,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, animTick(m.animID)
 
 	case tea.MouseMsg:
+		if id, handled := m.sessionsMouse(&msg); handled {
+			if id != "" {
+				return m, m.focusSession(id)
+			}
+			return m, nil
+		}
 		overlaid := m.picker != nil || m.palette != nil || m.modelPick != nil || m.themePick != nil || m.showHelp
 		var path string // a changed file clicked in the sidebar
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.changes == nil && !overlaid {
@@ -1546,6 +1558,19 @@ func (m Model) View() string {
 	if !m.ready {
 		return ""
 	}
+	screen := m.viewMain()
+	switch m.panelMode {
+	case sessionsPanel:
+		screen = lipgloss.JoinHorizontal(lipgloss.Top, m.sessionsView(m.termH), screen)
+	case sessionsTabs:
+		screen = lipgloss.JoinVertical(lipgloss.Left, m.tabsView(m.termW), screen)
+	}
+	// Strip any control sequence that slipped in with file contents, tool
+	// output or the like; only colours and text attributes get through.
+	return safetext.Screen(screen)
+}
+
+func (m Model) viewMain() string {
 	chatView := lipgloss.JoinHorizontal(lipgloss.Top, m.highlightSelection(m.vp.View()), strings.Join(m.scrollbar(), "\n"))
 	if pop := m.comp.view(m.mainWidth()); pop != "" {
 		chatView = overlayBottom(chatView, pop, m.vp.Height, m.mainWidth())
@@ -1590,9 +1615,7 @@ func (m Model) View() string {
 		x, y := m.panelPos()
 		screen = overlay(screen, m.panelView(x, y), x, y)
 	}
-	// Strip any control sequence that slipped in with file contents, tool
-	// output or the like; only colours and text attributes get through.
-	return safetext.Screen(screen)
+	return screen
 }
 
 // showHeader is true when the compact brand strip replaces the sidebar.
