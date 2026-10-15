@@ -1612,6 +1612,32 @@ func (m *Model) refresh() {
 	m.scrollToSel = false
 }
 
+// dialogOpen is true while a dialog that covers the chat is showing.
+func (m Model) dialogOpen() bool {
+	return m.showHelp || m.themePick != nil || m.modelPick != nil || m.palette != nil || m.picker != nil
+}
+
+// drawDialogs draws the open dialog centred on the whole terminal, sessions
+// panel or tab strip included.
+func (m Model) drawDialogs(screen string) string {
+	w, h := m.termW, m.termH-1 // above the status bar
+	switch {
+	case m.showHelp:
+		return center(screen, helpDialog(w-4, m.daemon != nil), w, h)
+	case m.themePick != nil:
+		// Pinned to the right so the live preview leaves the chat visible.
+		box := m.themePick.view(w)
+		return overlay(screen, box, max(0, w-lipgloss.Width(box)-1), max(0, (h-lipgloss.Height(box))/2))
+	case m.modelPick != nil:
+		return center(screen, m.modelPick.view(w), w, h)
+	case m.palette != nil:
+		return center(screen, m.palette.view(w), w, h)
+	case m.picker != nil:
+		return center(screen, m.picker.view(w, h), w, h)
+	}
+	return screen
+}
+
 func (m Model) View() string {
 	if !m.ready {
 		return ""
@@ -1623,6 +1649,7 @@ func (m Model) View() string {
 	case sessionsTabs:
 		screen = lipgloss.JoinVertical(lipgloss.Left, m.tabsView(m.termW), screen)
 	}
+	screen = m.drawDialogs(screen)
 	if m.kill != nil {
 		screen = center(screen, m.killView(), m.termW, m.termH-1)
 	}
@@ -1660,21 +1687,10 @@ func (m Model) viewMain() string {
 	}
 	screen = m.drawToasts(screen)
 
-	// Floating dialogs.
-	h := m.height - 1
+	// Panels that belong to the chat; dialogs are drawn over the whole
+	// screen in View.
 	switch {
-	case m.showHelp:
-		screen = center(screen, helpDialog(m.width-4, m.daemon != nil), m.width, h)
-	case m.themePick != nil:
-		// Pinned to the right so the live preview leaves the chat visible.
-		box := m.themePick.view(m.width)
-		screen = overlay(screen, box, max(0, m.width-lipgloss.Width(box)-1), max(0, (h-lipgloss.Height(box))/2))
-	case m.modelPick != nil:
-		screen = center(screen, m.modelPick.view(m.width), m.width, h)
-	case m.palette != nil:
-		screen = center(screen, m.palette.view(m.width), m.width, h)
-	case m.picker != nil:
-		screen = center(screen, m.picker.view(m.width, h), m.width, h)
+	case m.dialogOpen():
 	case m.changes != nil:
 		x, y := m.changesPos()
 		screen = overlay(screen, m.changesView(), x, y)

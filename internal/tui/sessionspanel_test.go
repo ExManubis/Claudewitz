@@ -1,13 +1,16 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/exmanubis/claudewitz/internal/daemon"
 )
@@ -159,6 +162,108 @@ func TestPanelShowsWholePath(t *testing.T) {
 	for _, line := range strings.Split(view, "\n") {
 		if w := ansi.StringWidth(line); w > panelWidth {
 			t.Fatalf("line %d wide: %q", w, line)
+		}
+	}
+}
+
+// Each session is a rounded box; the focused one has the accent border and
+// no background fill.
+func TestPanelDrawsABoxPerSession(t *testing.T) {
+	// Tests have no terminal, so lipgloss drops colour unless told otherwise.
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	m := withSessions(t, 160, sum("a", "/x/one", daemon.StateIdle), sum("b", "/x/two", daemon.StateWaiting))
+	m.sessionView.id = "a"
+	raw := m.sessionsView(40)
+	view := ansi.Strip(raw)
+	if n := strings.Count(view, "╭"); n != 2 {
+		t.Fatalf("%d boxes:\n%s", n, view)
+	}
+	// The escape sequence that turns a colour on, without the text after it.
+	colour := func(st lipgloss.Style) string {
+		r := st.Render("x")
+		return r[:strings.Index(r, "x")]
+	}
+	accent, subtle := colour(lipgloss.NewStyle().Foreground(currentTheme().accent)), colour(lipgloss.NewStyle().Foreground(currentTheme().subtle))
+	var accentTops, subtleTops int
+	for _, line := range strings.Split(raw, "\n") {
+		if i := strings.Index(line, "╭"); i >= 0 {
+			switch {
+			case strings.HasSuffix(line[:i], accent):
+				accentTops++
+			case strings.HasSuffix(line[:i], subtle):
+				subtleTops++
+			}
+		}
+	}
+	if accentTops != 1 || subtleTops != 1 {
+		t.Fatalf("box tops: %d accent, %d subtle; want 1 and 1:\n%q", accentTops, subtleTops, raw)
+	}
+	if strings.Contains(raw, colour(lipgloss.NewStyle().Background(currentTheme().selBg))) {
+		t.Fatal("focused box still has a background fill")
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if w := ansi.StringWidth(line); w > panelWidth {
+			t.Fatalf("line %d wide: %q", w, line)
+		}
+	}
+}
+
+// With more sessions than fit, the list scrolls so the focused box is shown,
+// says how many are hidden, and clicks pick the box under the pointer.
+func TestPanelScrollsToFocusedBox(t *testing.T) {
+	var list []daemon.SessionSummary
+	for i := 0; i < 12; i++ {
+		list = append(list, sum(fmt.Sprintf("s%02d", i), fmt.Sprintf("/x/p%02d", i), daemon.StateIdle))
+	}
+	m := withSessions(t, 160, list...)
+	m.sessionView.id = "s11"
+	view := ansi.Strip(m.sessionsView(m.termH))
+	if !strings.Contains(view, "t s11") {
+		t.Fatalf("focused box not shown:\n%s", view)
+	}
+	if strings.Contains(view, "t s00") || !strings.Contains(view, "more") {
+		t.Fatalf("expected the top boxes hidden with a count:\n%s", view)
+	}
+	start, _ := m.boxWindow(len(m.rows()), m.termH)
+	msg := tea.MouseMsg{X: 5, Y: panelTop + boxHeight, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
+	if id, _ := m.sessionsMouse(&msg); id != m.rows()[start+1].ID {
+		t.Fatalf("click on the second visible box picked %q, want %q", id, m.rows()[start+1].ID)
+	}
+}
+
+// dialogSpan finds a dialog on screen by its top border, a "╭───╮" run
+// exactly as wide as the dialog, and returns its first and last column.
+func dialogSpan(screen, dialog string) (left, right int) {
+	want := ansi.StringWidth(strings.SplitN(ansi.Strip(dialog), "\n", 2)[0])
+	for _, line := range strings.Split(ansi.Strip(screen), "\n") {
+		r := []rune(line)
+		for i := 0; i+want <= len(r); i++ {
+			if r[i] == '╭' && r[i+want-1] == '╮' && strings.Trim(string(r[i+1:i+want-1]), "─") == "" {
+				return i, i + want - 1
+			}
+		}
+	}
+	return -1, -1
+}
+
+// Dialogs centre on the whole terminal, not on the area beside the
+// sessions panel.
+func TestDialogsCentreOnTheWholeScreen(t *testing.T) {
+	m := withSessions(t, 160, sum("a", "/x/one", daemon.StateIdle), sum("b", "/x/two", daemon.StateIdle))
+	for name, open := range map[string]func(m *Model) string{
+		"palette": func(m *Model) string { m.openPalette(); return m.palette.view(m.termW) },
+		"help":    func(m *Model) string { m.showHelp = true; return helpDialog(m.termW-4, true) },
+	} {
+		mm := m
+		dialog := open(&mm)
+		left, right := dialogSpan(mm.View(), dialog)
+		if left < 0 {
+			t.Fatalf("%s: nothing drawn", name)
+		}
+		if gap := left - (m.termW - 1 - right); gap < -2 || gap > 2 {
+			t.Errorf("%s not centred: columns %d-%d of %d", name, left, right, m.termW)
 		}
 	}
 }
