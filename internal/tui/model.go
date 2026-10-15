@@ -18,6 +18,7 @@ import (
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
 	"github.com/exmanubis/claudewitz/internal/daemon"
+	"github.com/exmanubis/claudewitz/internal/recap"
 	"github.com/exmanubis/claudewitz/internal/safetext"
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
@@ -65,6 +66,7 @@ type Model struct {
 
 	sparks       *sparkField // working indicator at the foot of the sidebar
 	sparkTicking bool
+	pokes        int // clicks on tty, to vary what it says
 	sparkID      int
 	sparkLast    time.Time
 	bottomH      int // height of the input area at the last layout
@@ -83,6 +85,8 @@ type Model struct {
 	kill        *killState
 	alwaysOnAsk *alwaysOnState
 	pair        *pairState // the "Pair an iPhone" dialog
+	recapView   *recapState
+	recaps      *recap.Scanner // made on the first recap, then kept warm
 	folders     *folderPicker
 	notice      string // shown in the chat at startup
 	spin        spinner.Model
@@ -292,6 +296,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.gotPairCode(msg)
 		return m, nil
 
+	case recapMsg:
+		m.gotRecap(msg)
+		return m, nil
+
 	case daemonStatusMsg:
 		m.chat.info("%s", string(msg))
 		m.refresh()
@@ -499,6 +507,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		overlaid := m.picker != nil || m.palette != nil || m.modelPick != nil || m.themePick != nil || m.showHelp
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && !overlaid && !m.modalOpen() && m.mascotAt(msg.X, msg.Y) {
+			m.poke()
+			return m, nil
+		}
 		var path string // a changed file clicked in the sidebar
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.changes == nil && !overlaid {
 			path, _ = m.sidebarFileAt(msg.X, msg.Y)
@@ -535,6 +547,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.pair != nil {
 			return m, m.handlePairKey(msg)
+		}
+		if m.recapView != nil {
+			return m, m.handleRecapKey(msg)
 		}
 		if m.folders != nil {
 			return m, m.handleFoldersKey(msg)
@@ -809,6 +824,11 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 		if u := ev.Message.Message.Usage; u != nil && ev.Message.Message.Role == "assistant" {
 			m.lastUsage = *u
 		}
+		if len(m.cheers) > 0 {
+			cmd = tea.Batch(m.cheers...)
+			m.cheers = nil
+			return cmd
+		}
 
 	case ev.Task != nil:
 		before := m.agentStatus(ev.Task.ToolUseID, ev.Task.TaskID)
@@ -1041,6 +1061,9 @@ func (m *Model) applyBlocks(role string, blocks []claude.ContentBlock, live bool
 		case "tool_result":
 			out := toolResultText(b.Content)
 			m.track.toolResult(b.ToolUseID, out, b.IsError)
+			if t, ok := m.chat.byToolID[b.ToolUseID]; ok && live && t.toolName == "Bash" {
+				m.celebrate(t.toolInput, out, b.IsError)
+			}
 			if t, ok := m.chat.byToolID[b.ToolUseID]; ok {
 				t.toolOutput = out
 				t.pics = toolResultPictures(b.Content)
@@ -1505,6 +1528,8 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		m.chat.info("session %s\ncwd %s", m.sessionID, m.cwd())
 	case "/daemon":
 		return m.daemonStatus(), true
+	case "/recap":
+		return m.openRecap(), true
 	case "/pair":
 		if m.daemon == nil {
 			m.chat.info("Pairing needs the daemon: start claudewitz without -no-daemon")
@@ -1684,6 +1709,9 @@ func (m Model) View() string {
 	}
 	if m.pair != nil {
 		screen = center(screen, m.pairView(), m.termW, m.termH-1)
+	}
+	if m.recapView != nil {
+		screen = center(screen, m.recapDialog(), m.termW, m.termH-1)
 	}
 	if m.folders != nil {
 		screen = center(screen, m.folders.view(m.termW, m.termH), m.termW, m.termH-1)

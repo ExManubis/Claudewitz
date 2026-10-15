@@ -52,6 +52,7 @@ var localCommands = []suggestion{
 	{label: "/session", desc: "show session id and cwd"},
 	{label: "/daemon", desc: "daemon status, and whether it keeps running"},
 	{label: "/pair", desc: "QR code to pair the iPhone app"},
+	{label: "/recap", desc: "your day with Claude, from the transcripts"},
 	{label: "/quit", desc: "exit claudewitz"},
 }
 

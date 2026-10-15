@@ -27,6 +27,12 @@ tools, MCP servers, skills, hooks, `CLAUDE.md` and session history.
 - **Sessions**: resume any past session (`ctrl+r`), with prompt history across sessions
 - **Model and effort picker** (`ctrl+t`), plus autocompletion for `/` commands and `@` files
 - **Desktop notifications** when Claude needs you or finishes a turn, and they work over SSH too
+- **Recap** (`/recap`): your day with Claude, from Claude Code's transcripts: how long Claude
+  worked, prompts, commits, pull requests, releases, green and red test runs, an hours chart,
+  badges and your streak; `←→` walks back a month and `c` copies it as Markdown
+- **tty**, the mascot at the foot of the sidebar, swirls while Claude works, sets off
+  fireworks when a commit, merge or release goes out (and when red tests go green), and spins
+  round when you click it
 - **Themes**: claude, charm, flexoki, catppuccin, tokyonight, gruvbox, dracula, nord and mono,
   each in light and dark (`/theme`)
 
@@ -69,6 +75,10 @@ it sooner. On macOS, `claudewitz daemon install` (or "Keep daemon running at log
 `claudewitz daemon uninstall` undoes it, and `/daemon` shows which mode it's in.
 `claudewitz -no-daemon` runs `claude` directly instead. On macOS, the alt keys need
 "Use Option as Meta key" in Terminal and iTerm2.
+
+`claudewitz recap` prints the day's recap in the terminal (`-yesterday` or `-date 2026-10-14` for
+another day, `-md` for Markdown to paste, `-json` for the numbers). It only reads the transcripts
+on your machine.
 
 **Icons look like boxes?** claudewitz uses [Nerd Font](https://www.nerdfonts.com) icons by
 default. Install a Nerd Font or run `/icons unicode`.

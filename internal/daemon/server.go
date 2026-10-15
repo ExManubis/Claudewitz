@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
+	"github.com/exmanubis/claudewitz/internal/recap"
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
 
@@ -56,8 +57,12 @@ type Server struct {
 	account  Account
 	idleFrom time.Time
 	codes    map[string]time.Time // pairing code → expiry
-	started  time.Time
-	local    string // the local listener's address
+	recaps   struct {
+		once sync.Once
+		s    *recap.Scanner // kept warm between recaps
+	}
+	started time.Time
+	local   string // the local listener's address
 
 	remoteMu  sync.Mutex // guards the fields below
 	config    Config
@@ -412,6 +417,34 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 
 	case "sessions.list":
 		return ListResult{Sessions: s.list()}, nil
+
+	case "recap.day":
+		var p RecapParams
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		loc := time.Local
+		if p.TZ != "" {
+			l, err := time.LoadLocation(p.TZ)
+			if err != nil {
+				return nil, &Error{CodeBadRequest, "unknown time zone " + p.TZ}
+			}
+			loc = l
+		}
+		day := time.Now().In(loc)
+		if p.Date != "" {
+			d, err := time.ParseInLocation(time.DateOnly, p.Date, loc)
+			if err != nil {
+				return nil, &Error{CodeBadRequest, "date wants YYYY-MM-DD"}
+			}
+			day = d
+		}
+		s.recaps.once.Do(func() { s.recaps.s = recap.NewScanner(sessions.Root()) })
+		// The first recap reads weeks of transcripts; don't hold up the
+		// connection's other requests meanwhile. (The tally runs inside the
+		// goroutine: `go c.reply(id, recap())` would run it here.)
+		go func() { c.reply(req.ID, s.recaps.s.Recap(day, loc)) }()
+		return nil, handled
 
 	case "sessions.history":
 		if err := localOnly(); err != nil {

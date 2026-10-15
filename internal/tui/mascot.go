@@ -69,6 +69,7 @@ type mascotFace int
 const (
 	facePrompt mascotFace = iota // > and the cursor
 	faceAsk                      // a steady ?, waiting for you
+	faceCheck                    // a ✓, for something shipped
 )
 
 // mascotPose is everything that changes between frames.
@@ -123,6 +124,10 @@ func (ps *mascotPose) sdf(p vec3) (float64, int8) {
 		}
 	}
 	switch ps.face {
+	case faceCheck:
+		const r = 0.075
+		add(sdCapsule(q, vec3{-0.36, -0.2, screenZ}, vec3{-0.12, 0.04, screenZ}, r), matPrompt)
+		add(sdCapsule(q, vec3{-0.12, 0.04, screenZ}, vec3{0.36, -0.42, screenZ}, r), matPrompt)
 	case faceAsk:
 		stroke([2]float64{-0.13, -0.38}, [2]float64{-0.05, -0.46}, [2]float64{0.08, -0.45},
 			[2]float64{0.14, -0.36}, [2]float64{0.1, -0.27}, [2]float64{0, -0.2}, [2]float64{0, -0.1})

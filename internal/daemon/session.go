@@ -468,7 +468,7 @@ func (s *session) subscribe(c *conn, id int64, since *int64, live bool) {
 	}
 	sub := &subscriber{replaying: len(frames) > 0}
 	s.subs[c] = sub
-	res := SubscribeResult{Summary: s.summary(), Pending: []Permission{}, FromSeq: from}
+	res := SubscribeResult{Summary: s.summary(), Pending: []Permission{}, FromSeq: from, LiveSeq: s.seq + 1}
 	for _, p := range s.pending {
 		res.Pending = append(res.Pending, Permission{RequestID: p.req.RequestID, Request: p.req})
 	}

@@ -152,6 +152,14 @@ type ListResult struct {
 	Sessions []SessionSummary `json:"sessions"`
 }
 
+// RecapParams asks for a day of work with Claude, tallied from the
+// transcripts on this Mac: Date is YYYY-MM-DD (default today) in the IANA
+// time zone TZ (default the daemon's). The result is a recap.Day.
+type RecapParams struct {
+	Date string `json:"date,omitempty"`
+	TZ   string `json:"tz,omitempty"`
+}
+
 // ── Driving a session ───────────────────────────────────────────────────
 
 type StartParams struct {
@@ -193,6 +201,10 @@ type SubscribeResult struct {
 	// FromSeq is where replay starts: the first replayed seq, or the next
 	// seq when nothing is replayed.
 	FromSeq int64 `json:"fromSeq"`
+	// LiveSeq is the first seq that happens after the subscription: the
+	// replay is everything before it. Clients that react to events (the
+	// phone's celebrations) leave the replay alone.
+	LiveSeq int64 `json:"liveSeq"`
 }
 
 // Permission is a permission request waiting for an answer.

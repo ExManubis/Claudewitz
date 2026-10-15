@@ -511,6 +511,10 @@ func TestSubscribeReplaysSince(t *testing.T) {
 	if res.FromSeq != mid+1 {
 		t.Fatalf("fromSeq %d, want %d", res.FromSeq, mid+1)
 	}
+	// Live starts after the permission request, the last event replayed.
+	if res.LiveSeq != mid+2 {
+		t.Fatalf("liveSeq %d, want %d", res.LiveSeq, mid+2)
+	}
 }
 
 func TestOverviewPushes(t *testing.T) {
