@@ -103,6 +103,9 @@ func (m *Model) actions() []action {
 			return nil
 		})
 	}
+	if m.daemon != nil {
+		add("Daemon", "Pair an iPhone…", "a QR code for the claudewitz app", "/pair", func(m *Model) tea.Cmd { return m.openPair() })
+	}
 	m.alwaysOnActions(add)
 	add("Session", "Copy session id", m.sessionID, "", func(m *Model) tea.Cmd {
 		if m.sessionID == "" {

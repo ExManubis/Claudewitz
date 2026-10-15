@@ -22,7 +22,9 @@ type Daemon interface {
 	List(ctx context.Context) ([]daemon.SessionSummary, error)
 	Overview() <-chan daemon.Frame
 	Kill(ctx context.Context, id string) error
-	Done() <-chan struct{} // closed when the connection to the daemon is lost
+	PairCode(ctx context.Context) (daemon.PairCodeResult, error) // a single-use code for the iPhone app
+	EnableRemote(ctx context.Context) error                      // turn on the Tailscale listener the app connects to
+	Done() <-chan struct{}                                       // closed when the connection to the daemon is lost
 }
 
 // WithDaemon runs sessions in the daemon and shows all of its sessions.

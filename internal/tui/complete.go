@@ -51,6 +51,7 @@ var localCommands = []suggestion{
 	{label: "/diff", desc: "side-by-side or unified diffs"},
 	{label: "/session", desc: "show session id and cwd"},
 	{label: "/daemon", desc: "daemon status, and whether it keeps running"},
+	{label: "/pair", desc: "QR code to pair the iPhone app"},
 	{label: "/quit", desc: "exit claudewitz"},
 }
 

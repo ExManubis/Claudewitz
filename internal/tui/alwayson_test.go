@@ -57,11 +57,11 @@ func TestAlwaysOnPaletteFollowsState(t *testing.T) {
 	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle))
 	a := &fakeAlwaysOn{}
 	m := daemonModel(t, d).WithAlwaysOn(a)
-	if got := strings.Join(paletteLabels(&m), ","); got != "Keep daemon running at login,Daemon status" {
+	if got := strings.Join(paletteLabels(&m), ","); got != "Pair an iPhone…,Keep daemon running at login,Daemon status" {
 		t.Fatalf("not installed: %s", got)
 	}
 	a.installed = true
-	if got := strings.Join(paletteLabels(&m), ","); got != "Stop keeping daemon running,Daemon status" {
+	if got := strings.Join(paletteLabels(&m), ","); got != "Pair an iPhone…,Stop keeping daemon running,Daemon status" {
 		t.Fatalf("installed: %s", got)
 	}
 	m = runPaletteAction(t, m, "Stop keeping daemon running")
@@ -70,10 +70,11 @@ func TestAlwaysOnPaletteFollowsState(t *testing.T) {
 	}
 
 	a.unsupported = true
-	if got := paletteLabels(&m); len(got) != 0 {
+	// Pairing doesn't depend on keeping the daemon running.
+	if got := strings.Join(paletteLabels(&m), ","); got != "Pair an iPhone…" {
 		t.Fatalf("unsupported: %v", got)
 	}
-	m.alwaysOn = nil
+	m.alwaysOn, m.daemon = nil, nil
 	if got := paletteLabels(&m); len(got) != 0 {
 		t.Fatalf("without the daemon: %v", got)
 	}
