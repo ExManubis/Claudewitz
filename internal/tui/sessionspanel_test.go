@@ -232,3 +232,38 @@ func TestPanelScrollsToFocusedBox(t *testing.T) {
 		t.Fatalf("click on the second visible box picked %q, want %q", id, m.rows()[start+1].ID)
 	}
 }
+
+// dialogSpan finds a dialog on screen by its top border, a "╭───╮" run
+// exactly as wide as the dialog, and returns its first and last column.
+func dialogSpan(screen, dialog string) (left, right int) {
+	want := ansi.StringWidth(strings.SplitN(ansi.Strip(dialog), "\n", 2)[0])
+	for _, line := range strings.Split(ansi.Strip(screen), "\n") {
+		r := []rune(line)
+		for i := 0; i+want <= len(r); i++ {
+			if r[i] == '╭' && r[i+want-1] == '╮' && strings.Trim(string(r[i+1:i+want-1]), "─") == "" {
+				return i, i + want - 1
+			}
+		}
+	}
+	return -1, -1
+}
+
+// Dialogs centre on the whole terminal, not on the area beside the
+// sessions panel.
+func TestDialogsCentreOnTheWholeScreen(t *testing.T) {
+	m := withSessions(t, 160, sum("a", "/x/one", daemon.StateIdle), sum("b", "/x/two", daemon.StateIdle))
+	for name, open := range map[string]func(m *Model) string{
+		"palette": func(m *Model) string { m.openPalette(); return m.palette.view(m.termW) },
+		"help":    func(m *Model) string { m.showHelp = true; return helpDialog(m.termW-4, true) },
+	} {
+		mm := m
+		dialog := open(&mm)
+		left, right := dialogSpan(mm.View(), dialog)
+		if left < 0 {
+			t.Fatalf("%s: nothing drawn", name)
+		}
+		if gap := left - (m.termW - 1 - right); gap < -2 || gap > 2 {
+			t.Errorf("%s not centred: columns %d-%d of %d", name, left, right, m.termW)
+		}
+	}
+}
