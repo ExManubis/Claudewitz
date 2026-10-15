@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -190,5 +191,20 @@ func TestResumeLiveSessionFocusesIt(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("%d views for s_2", n)
+	}
+}
+
+// A background session's toasts say which session they're about, and its
+// exit doesn't suggest /new (that would act on the focused one).
+func TestBackgroundToastsNameTheirSession(t *testing.T) {
+	d := newFakeDaemon(sum("s_1", "/x/api", daemon.StateIdle), sum("s_2", "/x/web", daemon.StateIdle))
+	m := daemonModel(t, d)
+	m.proc = newFakeSession()
+	m = run(t, m, m.focusSession("s_2"))
+	bg := m.viewByID("s_1").proc.(*fakeSession)
+	bg.emit(claude.Event{Exited: true, Err: errors.New("killed")})
+	m = run(t, m, waitEvent(bg))
+	if len(m.toasts) != 1 || m.toasts[0].title != "api · Claude Code exited" || strings.Contains(m.toasts[0].body, "/new") {
+		t.Fatalf("toasts %+v", m.toasts)
 	}
 }

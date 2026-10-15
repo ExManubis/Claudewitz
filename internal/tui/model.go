@@ -65,6 +65,7 @@ type Model struct {
 	dragBar   bool // dragging the scrollbar
 
 	toasts       []toast
+	toastFrom    string // the background session raising toasts, named in their titles
 	toastID      int
 	toastTicking bool
 	limitWarned  map[string]int // usage window -> highest % already warned about
@@ -335,7 +336,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if v != m.sessionView {
 			var cmd tea.Cmd
+			m.toastFrom = m.viewLabel(v)
 			m.inView(v, func() { cmd = m.handleEvent(msg.ev) })
+			m.toastFrom = ""
 			cmds = append(cmds, cmd)
 			if v.proc != nil && !msg.ev.Exited {
 				cmds = append(cmds, waitEvent(v.proc))
@@ -878,6 +881,9 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 			m.chat.error("claude exited: %v", ev.Err)
 			if m.daemonLost() {
 				return nil // the lost-daemon notice covers every session
+			}
+			if m.toastFrom != "" {
+				return m.notify(toastError, "Claude Code exited", ev.Err.Error())
 			}
 			return m.notify(toastError, "Claude Code exited", "/new to start a fresh session")
 		} else {

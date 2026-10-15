@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"path/filepath"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
@@ -26,6 +28,15 @@ func (m *Model) inView(v *sessionView, f func()) {
 	m.sessionView = v
 	defer func() { m.sessionView = focused }()
 	f()
+}
+
+// viewLabel names v's session for toasts: its folder label in the panel,
+// else its folder's name.
+func (m *Model) viewLabel(v *sessionView) string {
+	if l := folderLabels(m.live)[v.id]; l != "" {
+		return l
+	}
+	return filepath.Base(v.dir())
 }
 
 // spaceFor returns dir's workspace, creating it (and reporting so) when no
