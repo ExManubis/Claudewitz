@@ -111,6 +111,7 @@ func (d *fakeDaemon) List(context.Context) ([]daemon.SessionSummary, error) {
 }
 
 func (d *fakeDaemon) Overview() <-chan daemon.Frame { return d.overview }
+func (d *fakeDaemon) Done() <-chan struct{}         { return d.done }
 
 // run feeds cmd's messages (and those they lead to) through m, without
 // blocking on commands that wait for events.

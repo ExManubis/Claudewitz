@@ -22,6 +22,7 @@ type Daemon interface {
 	List(ctx context.Context) ([]daemon.SessionSummary, error)
 	Overview() <-chan daemon.Frame
 	Kill(ctx context.Context, id string) error
+	Done() <-chan struct{} // closed when the connection to the daemon is lost
 }
 
 // WithDaemon runs sessions in the daemon and shows all of its sessions.
@@ -152,6 +153,29 @@ func waitOverview(ch <-chan daemon.Frame) tea.Cmd {
 			return nil
 		}
 		return overviewMsg(f)
+	}
+}
+
+type daemonLostMsg struct{}
+
+// waitDaemon reports when the connection to the daemon is lost.
+func waitDaemon(d Daemon) tea.Cmd {
+	return func() tea.Msg {
+		<-d.Done()
+		return daemonLostMsg{}
+	}
+}
+
+// daemonLost is true once the connection to the daemon is gone.
+func (m *Model) daemonLost() bool {
+	if m.daemon == nil {
+		return false
+	}
+	select {
+	case <-m.daemon.Done():
+		return true
+	default:
+		return false
 	}
 }
 

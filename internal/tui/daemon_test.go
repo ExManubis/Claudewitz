@@ -2,8 +2,12 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/exmanubis/claudewitz/internal/claude"
 
 	"github.com/exmanubis/claudewitz/internal/daemon"
 )
@@ -109,5 +113,30 @@ func TestApplyOverview(t *testing.T) {
 	m.applyOverview(frame(daemon.EventSessionClosed, daemon.SessionClosedParams{Session: "s_1", LastError: ptr("boom")}))
 	if len(m.live) != 1 || m.live[0].State != daemon.StateExited || stateOf(m.live[0], false) != stError {
 		t.Fatalf("errored session: %+v", m.live)
+	}
+}
+
+// Losing the daemon clears the panel and says so once; the sessions'
+// exits that follow don't each raise their own toast.
+func TestDaemonLost(t *testing.T) {
+	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle), sum("s_2", "/x/b", daemon.StateIdle))
+	m := daemonModel(t, d)
+	m.proc = newFakeSession()
+	m = run(t, m, m.focusSession("s_2"))
+	bg := m.viewByID("s_1").proc.(*fakeSession)
+	close(d.done)
+	m = run(t, m, waitDaemon(d))
+	if len(m.live) != 0 || m.panelMode != sessionsNone {
+		t.Fatalf("live %d panel %v", len(m.live), m.panelMode)
+	}
+	if len(m.toasts) != 1 || !strings.Contains(m.toasts[0].title, "Lost the claudewitz daemon") {
+		t.Fatalf("toasts %+v", m.toasts)
+	}
+	bg.emit(claude.Event{Exited: true, Err: errors.New("lost the connection to the claudewitz daemon")})
+	m = run(t, m, waitEvent(bg))
+	m.proc.(*fakeSession).emit(claude.Event{Exited: true, Err: errors.New("lost the connection to the claudewitz daemon")})
+	m = run(t, m, waitEvent(m.proc))
+	if len(m.toasts) != 1 {
+		t.Fatalf("exit toasts after the loss: %+v", m.toasts)
 	}
 }

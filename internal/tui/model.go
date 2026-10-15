@@ -170,7 +170,7 @@ func (m Model) Init() tea.Cmd {
 		if m.opts.Resume != "" || m.opts.Continue {
 			cmds = append(cmds, listCmd(m.daemon))
 		}
-		cmds = append(cmds, waitOverview(m.daemon.Overview()))
+		cmds = append(cmds, waitOverview(m.daemon.Overview()), waitDaemon(m.daemon))
 	}
 	return tea.Batch(cmds...)
 }
@@ -287,6 +287,20 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ready && m.sessionsMode() != m.panelMode {
 			m.resize()
 		}
+
+	case daemonLostMsg:
+		// Every session went with the connection; one notice says so
+		// instead of each session's exit.
+		m.live = nil
+		m.done = map[string]bool{}
+		m.since = map[string]time.Time{}
+		m.lastState = map[string]rowState{}
+		m.killed = map[string]bool{}
+		m.chat.error("lost the claudewitz daemon — restart claudewitz")
+		if m.ready {
+			m.resize()
+		}
+		return m, m.notify(toastError, "Lost the claudewitz daemon", "restart claudewitz")
 
 	case launchListMsg:
 		return m, m.launch(msg)
@@ -862,6 +876,9 @@ func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
 		m.proc = nil
 		if ev.Err != nil {
 			m.chat.error("claude exited: %v", ev.Err)
+			if m.daemonLost() {
+				return nil // the lost-daemon notice covers every session
+			}
 			return m.notify(toastError, "Claude Code exited", "/new to start a fresh session")
 		} else {
 			m.chat.info("claude exited — /new to start again")
