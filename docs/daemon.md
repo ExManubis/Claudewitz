@@ -182,6 +182,7 @@ Management methods, all local only, used by the `claudewitz` CLI:
 |---|---|---|
 | `sessions.list` | `{}` | `{sessions: [SessionSummary]}`, live sessions only |
 | `sessions.history` | `{cwd?, limit?}` | `{sessions: [PastSession]}`, from transcripts on disk (`sessions.ListAll`); local only |
+| `recap.day` | `{date?, tz?}` | a `Recap` of the day (`date` YYYY-MM-DD, default today, in the IANA zone `tz`, default the daemon's), tallied from the transcripts on disk (`internal/recap`); the phone's recap card |
 
 After `hello` the daemon pushes `session.updated` whenever any live session's summary changes, and
 `session.closed` when one ends, so a client can keep an overview of every project current without
@@ -198,6 +199,32 @@ on the remote listener with `error.code = "local_only"`; so are the CLI's manage
 (see below). (Decided 2026-10-15: live only for now.
 Resuming or starting from the phone would need a way to pick a cwd, recent projects from
 transcripts or configured roots, and `session.start` opened up on the remote listener.)
+
+`recap.day` reads Claude Code's transcripts from the last five weeks (`~/.claude/projects`, sub-agents
+included) and keeps what it read, so later calls only read what was appended. Only prompts you typed
+count as prompts; Claude's working time is the time between a prompt and Claude's last step on it,
+leaving out pauses over ten minutes (a permission prompt waiting for you). Commits, pull requests,
+merges, releases and test runs come from the shell commands Claude ran and their output (`git commit`,
+`gh pr create`, `gh pr merge`, a pushed `v1.2.3` tag, `go test`, `npm test`, `pytest`, …).
+
+```jsonc
+// Recap
+{
+  "date": "2026-10-15", "prompts": 270, "sessions": 21, "workingSeconds": 26780,
+  "first": "2026-10-15T00:16:02+02:00", "last": "2026-10-15T21:45:51+02:00",
+  "toolCalls": 2797, "outputTokens": 1700000,
+  "filesEdited": 81, "linesAdded": 15156, "linesRemoved": 57,
+  "commits": 70, "prsOpened": 18, "prsMerged": 10, "releases": 6, "testsPassed": 174, "testsFailed": 57,
+  "hours": [39, 0, …],             // seconds Claude worked in each local hour, 24 of them
+  "projects": [{"name": "claudewitz", "prompts": 115, "workingSeconds": 13613}],
+  "moments": [{"at": "…", "kind": "release", "text": "v0.3.5", "project": "claudewitz"}],
+                                    // commit | pr | merge | release, in order
+  "longest": {"at": "…", "seconds": 3120, "prompt": "…", "project": "…"},
+  "badges": [{"id": "shipper", "name": "Shipper", "detail": "2 pull requests merged"}],
+  "week": [{"date": "2026-10-09", "prompts": 120, "workingSeconds": 9000}],  // 7 days ending on date
+  "streak": 11                      // days in a row with prompts, up to date
+}
+```
 
 ```jsonc
 // SessionSummary

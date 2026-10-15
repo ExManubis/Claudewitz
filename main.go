@@ -45,6 +45,9 @@ func main() {
 		case "devices":
 			runDevices(os.Args[2:])
 			return
+		case "recap":
+			runRecap(os.Args[2:])
+			return
 		}
 	}
 	var opts claude.Options

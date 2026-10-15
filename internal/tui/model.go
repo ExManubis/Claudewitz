@@ -18,6 +18,7 @@ import (
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
 	"github.com/exmanubis/claudewitz/internal/daemon"
+	"github.com/exmanubis/claudewitz/internal/recap"
 	"github.com/exmanubis/claudewitz/internal/safetext"
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
@@ -83,6 +84,8 @@ type Model struct {
 	kill        *killState
 	alwaysOnAsk *alwaysOnState
 	pair        *pairState // the "Pair an iPhone" dialog
+	recapView   *recapState
+	recaps      *recap.Scanner // made on the first recap, then kept warm
 	folders     *folderPicker
 	notice      string // shown in the chat at startup
 	spin        spinner.Model
@@ -290,6 +293,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pairCodeMsg:
 		m.gotPairCode(msg)
+		return m, nil
+
+	case recapMsg:
+		m.gotRecap(msg)
 		return m, nil
 
 	case daemonStatusMsg:
@@ -535,6 +542,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.pair != nil {
 			return m, m.handlePairKey(msg)
+		}
+		if m.recapView != nil {
+			return m, m.handleRecapKey(msg)
 		}
 		if m.folders != nil {
 			return m, m.handleFoldersKey(msg)
@@ -1505,6 +1515,8 @@ func (m *Model) slash(text string) (tea.Cmd, bool) {
 		m.chat.info("session %s\ncwd %s", m.sessionID, m.cwd())
 	case "/daemon":
 		return m.daemonStatus(), true
+	case "/recap":
+		return m.openRecap(), true
 	case "/pair":
 		if m.daemon == nil {
 			m.chat.info("Pairing needs the daemon: start claudewitz without -no-daemon")
@@ -1684,6 +1696,9 @@ func (m Model) View() string {
 	}
 	if m.pair != nil {
 		screen = center(screen, m.pairView(), m.termW, m.termH-1)
+	}
+	if m.recapView != nil {
+		screen = center(screen, m.recapDialog(), m.termW, m.termH-1)
 	}
 	if m.folders != nil {
 		screen = center(screen, m.folders.view(m.termW, m.termH), m.termW, m.termH-1)

@@ -154,6 +154,10 @@ func (m *Model) actions() []action {
 		add("Mode", pm, modeDescs[pm], cur, func(m *Model) tea.Cmd { return m.setPermissionMode(pm) })
 	}
 
+	add("Recap", "Today's recap…", "your day with Claude: prompts, commits, PRs, tests", "/recap", func(m *Model) tea.Cmd {
+		return m.openRecap()
+	})
+
 	add("Git", "Review changes…", "changed files as diffs against HEAD", "ctrl+s", func(m *Model) tea.Cmd {
 		return m.openChanges("")
 	})

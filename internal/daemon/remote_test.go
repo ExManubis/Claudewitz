@@ -478,6 +478,44 @@ func TestRemoteIsLiveSessionsOnly(t *testing.T) {
 	}
 }
 
+// The phone gets the day's recap, tallied from the transcripts on the Mac.
+func TestRecapOverRemote(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	dir := filepath.Join(os.Getenv("CLAUDE_CONFIG_DIR"), "projects", "-x-app")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"user","uuid":"11111111-1111-1111-1111-111111111111","timestamp":"2026-10-15T08:00:00Z","cwd":"/x/app","message":{"role":"user","content":"Add a recap"}}`
+	if err := os.WriteFile(filepath.Join(dir, "s1.jsonl"), []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := startRemoteDaemon(t, "")
+	local := h.local(t)
+	addr := remoteOn(t, local)
+	token := pairDevice(t, h, local, addr, "phone")
+	r, _ := h.dialRemote(t, addr, bearer(token))
+	r.hello()
+
+	var day struct {
+		Date     string `json:"date"`
+		Prompts  int    `json:"prompts"`
+		Projects []struct {
+			Name string `json:"name"`
+		} `json:"projects"`
+	}
+	r.ok("recap.day", RecapParams{Date: "2026-10-15", TZ: "Europe/Copenhagen"}, &day)
+	if day.Date != "2026-10-15" || day.Prompts != 1 || len(day.Projects) != 1 || day.Projects[0].Name != "app" {
+		t.Fatalf("recap %+v", day)
+	}
+	r.ok("recap.day", RecapParams{Date: "2026-10-14", TZ: "Europe/Copenhagen"}, &day)
+	if day.Prompts != 0 {
+		t.Fatalf("the day before: %+v", day)
+	}
+	if c := r.fails("recap.day", RecapParams{TZ: "Mars/Olympus"}); c != CodeBadRequest {
+		t.Fatalf("bad zone: %s", c)
+	}
+}
+
 func TestPairCodeNeedsRemote(t *testing.T) {
 	h := startRemoteDaemon(t, "")
 	local := h.local(t)
