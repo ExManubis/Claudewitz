@@ -22,7 +22,15 @@ import (
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
 
-var permissionModes = []string{"default", "acceptEdits", "plan"}
+var permissionModes = []string{"auto", "default", "acceptEdits", "plan"}
+
+// modeDescs say what each permission mode does, for the palette and /mode.
+var modeDescs = map[string]string{
+	"auto":        "approve safe actions, ask about risky ones",
+	"default":     "ask before edits and commands",
+	"acceptEdits": "auto-approve file edits",
+	"plan":        "read-only planning",
+}
 
 // Model is the root Bubble Tea model.
 type Model struct {
@@ -1230,6 +1238,7 @@ func (m *Model) cyclePermissionMode() tea.Cmd {
 }
 
 var modeToast = map[string][2]string{
+	"auto":              {"Auto mode", "Safe actions are approved without asking"},
 	"default":           {"Default mode", "Claude asks before edits and commands"},
 	"acceptEdits":       {"Accept edits", "File edits are approved automatically"},
 	"plan":              {"Plan mode", "Claude plans without changing anything"},
@@ -1855,6 +1864,8 @@ func (m Model) statusView() string {
 	var parts []string
 	mode := mutedStyle.Render("● default")
 	switch m.permMode {
+	case "auto":
+		mode = lipgloss.NewStyle().Foreground(currentTheme().second).Render(icons.modeAuto + " auto mode")
 	case "acceptEdits":
 		mode = okStyle.Render(icons.modeEdits + " accept edits")
 	case "plan":

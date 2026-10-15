@@ -189,9 +189,8 @@ func (m *Model) argSuggestions(cmd string) []suggestion {
 			}
 		}
 	case "/mode":
-		desc := map[string]string{"default": "ask before edits and commands", "acceptEdits": "auto-approve file edits", "plan": "read-only planning"}
 		for _, pm := range permissionModes {
-			out = append(out, suggestion{label: pm, insert: pm, desc: desc[pm]})
+			out = append(out, suggestion{label: pm, insert: pm, desc: modeDescs[pm]})
 		}
 	case "/image":
 		for _, f := range m.files {

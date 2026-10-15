@@ -10,7 +10,7 @@ import (
 // characters (borders, bars, ellipses, key hints) stay plain Unicode.
 type iconSet struct {
 	branch, image, search                                             string
-	modeEdits, modePlan, modeBypass                                   string
+	modeAuto, modeEdits, modePlan, modeBypass                         string
 	queued, todos, agents, reset                                      string
 	ahead, behind                                                     string
 	conflict, staged, changed, clean                                  string
@@ -24,6 +24,7 @@ var nerdIcons = iconSet{
 	branch:       "\uec6f", // nf-cod-git_branch
 	image:        "\ueaea", // nf-cod-file_media
 	search:       "\uea6d", // nf-cod-search
+	modeAuto:     "\uec10", // nf-cod-sparkle
 	modeEdits:    "\uea73", // nf-cod-edit
 	modePlan:     "\uead1", // nf-cod-debug_pause
 	modeBypass:   "\uea6c", // nf-cod-warning
@@ -53,6 +54,7 @@ var unicodeIcons = iconSet{
 	branch:       "⎇",
 	image:        "▣",
 	search:       "⌕",
+	modeAuto:     "✦",
 	modeEdits:    "⏵⏵",
 	modePlan:     "⏸",
 	modeBypass:   "⚠",
