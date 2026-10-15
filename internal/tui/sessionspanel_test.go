@@ -267,3 +267,17 @@ func TestDialogsCentreOnTheWholeScreen(t *testing.T) {
 		}
 	}
 }
+
+// The key hints sit on the panel's last two rows, however few sessions
+// there are, and name alt+↑↓.
+func TestPanelHintsPinnedToBottom(t *testing.T) {
+	m := withSessions(t, 160, sum("a", "/x/a", daemon.StateIdle), sum("b", "/x/b", daemon.StateIdle))
+	lines := strings.Split(ansi.Strip(m.sessionsView(40)), "\n")
+	if len(lines) != 40 {
+		t.Fatalf("%d lines", len(lines))
+	}
+	if !strings.Contains(lines[38], "alt+↑↓ switch") || !strings.Contains(lines[38], "ctrl+] next waiting") ||
+		!strings.Contains(lines[39], "ctrl+q kill") {
+		t.Fatalf("last rows:\n%s\n%s", lines[38], lines[39])
+	}
+}

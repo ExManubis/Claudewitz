@@ -17,7 +17,7 @@ const (
 	panelMinTerm = 140 // narrower terminals get the tab strip
 	panelTop     = 2   // rows above the first session box: header, blank
 	boxHeight    = 4   // a session box: border, title, folder, border
-	panelFooter  = 3   // rows below the boxes: "+n more" (or blank), blank, hint
+	panelFooter  = 4   // rows below the boxes: "+n more" (or blank), blank, two hint lines
 )
 
 type sessionsMode int
@@ -100,14 +100,18 @@ func (m Model) sessionsView(height int) string {
 	for _, s := range rows[first : first+shown] {
 		lines = append(lines, strings.Split(m.sessionBox(s, inner), "\n")...)
 	}
-	hidden := ""
 	if n := len(rows) - shown; n > 0 {
-		hidden = mutedStyle.Render(fmt.Sprintf("+%d more · alt+↑↓", n))
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("+%d more", n)))
 	}
-	lines = append(lines, hidden, "", mutedStyle.Render("ctrl+] next waiting · ctrl+q kill"))
-	for len(lines) < height {
+	// The hints sit on the panel's last rows, however few boxes there are.
+	hints := []string{
+		helpLine([][2]string{{"alt+↑↓", "switch"}, {"ctrl+]", "next waiting"}}, inner),
+		helpLine([][2]string{{"ctrl+q", "kill"}, {"alt+s", "hide"}}, inner),
+	}
+	for len(lines) < height-len(hints) {
 		lines = append(lines, "")
 	}
+	lines = append(lines[:min(len(lines), max(0, height-len(hints)))], hints...)
 	body := strings.Join(lines[:min(len(lines), height)], "\n")
 	return lipgloss.NewStyle().Width(panelWidth-1).Height(height).
 		Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(th.subtle).
