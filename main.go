@@ -13,6 +13,7 @@ import (
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
+	"github.com/exmanubis/claudewitz/internal/daemon/client"
 	"github.com/exmanubis/claudewitz/internal/tui"
 )
 
@@ -32,6 +33,10 @@ func versionString() string {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "daemon" {
+		runDaemon(os.Args[2:])
+		return
+	}
 	var opts claude.Options
 	flag.StringVar(&opts.Binary, "claude", "claude", "path to the claude CLI")
 	flag.StringVar(&opts.Model, "model", "", "model alias or full name (opus, sonnet, haiku, …)")
@@ -41,6 +46,7 @@ func main() {
 	flag.BoolVar(&opts.Continue, "continue", false, "continue the most recent session in this directory")
 	flag.StringVar(&opts.CWD, "cwd", "", "working directory (defaults to current)")
 	theme := flag.String("theme", "", "colour theme for this run (overrides the saved one)")
+	useDaemon := flag.Bool("daemon", false, "experimental: run the session in the claudewitz daemon")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -70,7 +76,18 @@ func main() {
 		cfg.Theme = *theme
 	}
 
-	p := tea.NewProgram(tui.New(ctx, opts, cfg, nil), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
+	var start tui.Starter // nil: run claude directly
+	if *useDaemon {
+		c, err := connectDaemon(ctx, opts.Binary)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "claudewitz: %v\n", err)
+			os.Exit(1)
+		}
+		defer c.Close()
+		start = client.Starter(c)
+	}
+
+	p := tea.NewProgram(tui.New(ctx, opts, cfg, start), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
