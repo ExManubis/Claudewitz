@@ -51,7 +51,7 @@ func main() {
 	flag.StringVar(&opts.Binary, "claude", "claude", "path to the claude CLI")
 	flag.StringVar(&opts.Model, "model", "", "model alias or full name (opus, sonnet, haiku, …)")
 	flag.StringVar(&opts.Effort, "effort", "", "effort level (low, medium, high, xhigh, max)")
-	flag.StringVar(&opts.PermissionMode, "mode", "", "initial permission mode (default, acceptEdits, plan)")
+	flag.StringVar(&opts.PermissionMode, "mode", "auto", "initial permission mode (auto, default, acceptEdits, plan)")
 	flag.StringVar(&opts.Resume, "resume", "", "resume a session by id")
 	flag.BoolVar(&opts.Continue, "continue", false, "continue the most recent session in this directory")
 	flag.StringVar(&opts.CWD, "cwd", "", "working directory (defaults to current)")

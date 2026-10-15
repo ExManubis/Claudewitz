@@ -142,14 +142,13 @@ func (m *Model) actions() []action {
 		}
 	}
 
-	modeDesc := map[string]string{"default": "ask before edits and commands", "acceptEdits": "auto-approve file edits", "plan": "read-only planning"}
 	for _, pm := range permissionModes {
 		pm := pm
 		cur := ""
 		if pm == m.permMode {
 			cur = "current"
 		}
-		add("Mode", pm, modeDesc[pm], cur, func(m *Model) tea.Cmd { return m.setPermissionMode(pm) })
+		add("Mode", pm, modeDescs[pm], cur, func(m *Model) tea.Cmd { return m.setPermissionMode(pm) })
 	}
 
 	add("Git", "Review changes…", "changed files as diffs against HEAD", "ctrl+s", func(m *Model) tea.Cmd {
