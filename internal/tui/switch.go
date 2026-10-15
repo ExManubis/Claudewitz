@@ -106,6 +106,8 @@ func (m *Model) handleSessionKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	rows := m.rows()
 	at := slices.IndexFunc(rows, func(r daemon.SessionSummary) bool { return r.ID == m.sessionView.id })
 	switch {
+	case s == "alt+n":
+		return m.openFolders(), true
 	case s == "alt+s":
 		m.panelOn = !m.panelOn
 		m.resize()

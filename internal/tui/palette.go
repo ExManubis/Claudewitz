@@ -84,6 +84,7 @@ func (m *Model) actions() []action {
 			cmd, _ := m.handleSessionKey(tea.KeyMsg{Type: tea.KeyCtrlCloseBracket})
 			return cmd
 		})
+		add("Sessions", "New session…", "start one in any folder", "alt+n", func(m *Model) tea.Cmd { return m.openFolders() })
 		add("Sessions", "Kill session", "end the focused session", "ctrl+q", func(m *Model) tea.Cmd { return m.openKill() })
 		labels := folderLabels(m.live)
 		for i, r := range m.rows() {

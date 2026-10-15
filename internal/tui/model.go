@@ -71,6 +71,7 @@ type Model struct {
 
 	showHelp  bool
 	kill      *killState
+	folders   *folderPicker
 	quitAsk   bool   // asking whether to leave a daemon session running
 	notice    string // shown in the chat at startup
 	spin      spinner.Model
@@ -262,6 +263,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		m.resize()
 
+	case foldersLoadedMsg:
+		if m.folders != nil {
+			m.folders.setRecent(msg)
+		}
 	case noticeMsg:
 		m.chat.info("%s", string(msg))
 		m.refresh()
@@ -483,6 +488,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.kill != nil {
 			return m, m.handleKillKey(msg)
+		}
+		if m.folders != nil {
+			return m, m.handleFoldersKey(msg)
 		}
 		if m.changes != nil {
 			return m, m.handleChangesKey(msg)
@@ -1597,6 +1605,9 @@ func (m Model) View() string {
 	}
 	if m.kill != nil {
 		screen = center(screen, m.killView(), m.termW, m.termH-1)
+	}
+	if m.folders != nil {
+		screen = center(screen, m.folders.view(m.termW, m.termH), m.termW, m.termH-1)
 	}
 	// Strip any control sequence that slipped in with file contents, tool
 	// output or the like; only colours and text attributes get through.
