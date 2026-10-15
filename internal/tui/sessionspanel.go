@@ -234,5 +234,3 @@ func (m *Model) sessionsMouse(msg *tea.MouseMsg) (id string, handled bool) {
 	}
 	return "", false
 }
-
-func (m *Model) focusSession(id string) tea.Cmd { return nil }

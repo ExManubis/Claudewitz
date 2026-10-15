@@ -88,6 +88,7 @@ func main() {
 
 	var start tui.Starter // nil: run claude directly
 	var notice string
+	var hub client.Hub
 	if *useDaemon {
 		c, note, err := connectDaemon(ctx, opts.Binary)
 		if err != nil {
@@ -95,11 +96,16 @@ func main() {
 		} else {
 			defer c.Close()
 			start = client.Starter(c)
+			hub = client.Hub{C: c}
 			notice = strings.TrimSpace(note + "\n" + liveNote(ctx, c))
 		}
 	}
 
-	p := tea.NewProgram(tui.New(ctx, opts, cfg, start).WithNotice(notice), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
+	model := tui.New(ctx, opts, cfg, start).WithNotice(notice)
+	if hub.C != nil {
+		model = model.WithDaemon(hub)
+	}
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

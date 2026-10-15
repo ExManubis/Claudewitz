@@ -151,7 +151,11 @@ func (m Model) WithNotice(msg string) Model {
 type noticeMsg string
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, m.startCmd(m.sessionView, m.opts), indexFiles(m.opts.CWD), m.refreshGit(), gitPoll(), loadHistory(m.opts.CWD)}
+	first := m.startCmd(m.sessionView, m.opts)
+	if m.daemon != nil && m.opts.Resume == "" && !m.opts.Continue {
+		first = launchListCmd(m.daemon) // lists the sessions, then attaches or starts
+	}
+	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, first, indexFiles(m.opts.CWD), m.refreshGit(), gitPoll(), loadHistory(m.opts.CWD)}
 	if m.notice != "" {
 		notice := m.notice
 		cmds = append(cmds, func() tea.Msg { return noticeMsg(notice) })
@@ -160,7 +164,10 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, loadTranscript(m.sessionView, m.opts.CWD, m.opts.Resume))
 	}
 	if m.daemon != nil {
-		cmds = append(cmds, listCmd(m.daemon), waitOverview(m.daemon.Overview()))
+		if m.opts.Resume != "" || m.opts.Continue {
+			cmds = append(cmds, listCmd(m.daemon))
+		}
+		cmds = append(cmds, waitOverview(m.daemon.Overview()))
 	}
 	return tea.Batch(cmds...)
 }
@@ -173,6 +180,9 @@ type startedMsg struct {
 }
 
 func (m *Model) startCmd(v *sessionView, opts claude.Options) tea.Cmd {
+	if m.daemon != nil {
+		return daemonStart(m.daemon, v, opts)
+	}
 	ctx, start := m.ctx, m.start
 	return func() tea.Msg {
 		p, err := start(ctx, opts)
@@ -270,6 +280,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 		}
 
+	case launchListMsg:
+		return m, m.launch(msg)
 	case startedMsg:
 		v := msg.view
 		if msg.err != nil {
@@ -474,6 +486,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.picker != nil {
 			return m, m.handlePickerKey(msg)
+		}
+		if cmd, ok := m.handleSessionKey(msg); ok {
+			return m, cmd
 		}
 		if len(m.pending) > 0 {
 			return m, m.handlePermissionKey(msg)
