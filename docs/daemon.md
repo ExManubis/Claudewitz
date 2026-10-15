@@ -196,6 +196,8 @@ transcripts or configured roots, and `session.start` opened up on the remote lis
   "lastTurnEndedAt": "2026-10-14T13:58:40Z", // null until a turn ends; "done · 14m" in overviews
   "lastError": null,              // why the session exited, when state=exited after a failure
   "clients": 2,                   // clients subscribed right now
+  "repo": "/Users/mikkel/Developer/claudewitz", // the repository's main worktree; null outside git
+  "worktree": null,               // a linked worktree's folder name, e.g. "ring-tests"
   "git": {"branch": "main", "dirty": 3, "added": 120, "removed": 14}
 }
 ```

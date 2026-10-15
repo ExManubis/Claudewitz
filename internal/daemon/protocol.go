@@ -127,6 +127,11 @@ type SessionSummary struct {
 	LastTurnEndedAt *time.Time `json:"lastTurnEndedAt"`
 	LastError       *string    `json:"lastError"`
 	Clients         int        `json:"clients"`
+	// Repo is the main worktree of the repository CWD is in; nil outside
+	// git. Worktree is the linked worktree's folder name when CWD is in
+	// one, for labels like "claudewitz ⎇ ring-tests".
+	Repo     *string `json:"repo"`
+	Worktree *string `json:"worktree"`
 }
 
 // Waiting is the request a waiting session needs answered.

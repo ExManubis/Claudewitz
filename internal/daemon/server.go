@@ -584,6 +584,7 @@ func (s *Server) start(p StartParams) (SessionSummary, bool, error) {
 	if sum.PermissionMode == "" {
 		sum.PermissionMode = "default"
 	}
+	sum.Repo, sum.Worktree = repoOf(p.CWD)
 	if p.Resume != "" {
 		id := p.Resume
 		sum.ClaudeSessionID = &id
