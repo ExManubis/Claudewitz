@@ -12,13 +12,11 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
-	"github.com/exmanubis/claudewitz/internal/gitstatus"
 	"github.com/exmanubis/claudewitz/internal/safetext"
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
@@ -27,13 +25,16 @@ var permissionModes = []string{"default", "acceptEdits", "plan"}
 
 // Model is the root Bubble Tea model.
 type Model struct {
-	opts  claude.Options
+	*sessionView // the focused session
+	*workspace   // the focused session's folder
+
+	views  []*sessionView        // every opened session, the focused one included
+	spaces map[string]*workspace // by folder
+	base   claude.Options        // flags every new session starts from
+
 	ctx   context.Context
 	start Starter
-	proc  claude.Session
 
-	chat      *chat
-	track     *tracker
 	comp      *completer
 	picker    *picker
 	palette   *palette
@@ -42,57 +43,33 @@ type Model struct {
 	changes   *changesView // the changes viewer, when open
 	cfg       config.Config
 
-	hist   *history
-	queued []queuedMsg // sent mid-turn; shown as a pill until the CLI takes them
-
-	attachments []attachment // images for the next message
-	focused     bool         // terminal focus, when the terminal reports it
-	lastInput   time.Time    // last key, click or focus, for pausing the idle bop
-	gitPolls    int          // poll ticks so far, for reading less often while idle
+	focused   bool      // terminal focus, when the terminal reports it
+	lastInput time.Time // last key, click or focus, for pausing the idle bop
 
 	sparks       *sparkField // working indicator at the foot of the sidebar
 	sparkTicking bool
 	sparkID      int
 	sparkLast    time.Time
-	bottomH      int           // height of the input area at the last layout
-	lastTurn     time.Duration // how long the last turn took, for "Done in …"
-	lastTurnAt   time.Time
+	bottomH      int // height of the input area at the last layout
 
-	suggestion string // predicted next prompt, shown in the empty input
-
-	chatFocus   bool // keys drive the transcript instead of the input
-	textSel     *textSelection
-	mouseDown   bool   // left button held in the transcript
-	dragBar     bool   // dragging the scrollbar
-	chatContent string // last rendered transcript, for copying selections
-	scrollToSel bool   // bring the selected entry into view on next refresh
+	textSel   *textSelection
+	mouseDown bool // left button held in the transcript
+	dragBar   bool // dragging the scrollbar
 
 	toasts       []toast
 	toastID      int
 	toastTicking bool
 	limitWarned  map[string]int // usage window -> highest % already warned about
 
-	git       gitstatus.Status
-	gitLoaded bool
-	gitBusy   bool
 	showHelp  bool
 	quitAsk   bool   // asking whether to leave a daemon session running
 	notice    string // shown in the chat at startup
-	files     []string
-	vp        viewport.Model
-	input     textarea.Model
 	spin      spinner.Model
 	width     int
 	height    int
 	ready     bool
-	follow    bool // keep viewport pinned to bottom
-	busy      bool
-	stopped   bool // user interrupted the current turn
 	sidebarOn bool
 	drawer    bool // sidebar open over the chat, below sidebarMinWidth
-	status    string
-	activity  string // what the live turn is doing, for the shimmer label
-	turnFrom  time.Time
 	ticks     int
 	animFrame int
 	animID    int // generation of the running shimmer tick loop
@@ -102,25 +79,7 @@ type Model struct {
 	revealID      int
 	revealLast    time.Time
 
-	// session state
-	init         *claude.InitEvent
-	initResp     *claude.InitializeResponse
-	sessionID    string
-	sessionTitle string
-	model        string
-	permMode     string
-	costUSD      float64
-	lastUsage    claude.Usage
-	ctxWindow    int
-	limits       map[string]claude.RateLimitWindow
-
-	// permissions
-	pending     []*claude.PermissionRequest
-	alwaysAllow map[string]bool
-	question    *questionState // AskUserQuestion at the head of pending
-	plan        *planState     // ExitPlanMode at the head of pending
-	editPanel   *editPanel     // Edit, MultiEdit or Write at the head of pending
-	diffView    *editPanel     // a transcript edit's diff, opened read-only
+	limits map[string]claude.RateLimitWindow // account-wide usage windows
 }
 
 const inputPlaceholder = "Ask Claude anything…  / for commands · @ to mention files"
@@ -146,46 +105,24 @@ func New(ctx context.Context, opts claude.Options, cfg config.Config, start Star
 	if opts.CWD == "" {
 		opts.CWD, _ = os.Getwd()
 	}
-	ta := textarea.New()
-	ta.Placeholder = inputPlaceholder
-	ta.ShowLineNumbers = false
-	ta.Prompt = ""
-	ta.CharLimit = 0
-	ta.SetHeight(3)
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.FocusedStyle.Placeholder = mutedStyle
-	ta.BlurredStyle.Placeholder = mutedStyle
-	ta.KeyMap.InsertNewline.SetKeys("ctrl+j", "alt+enter")
-	ta.Focus()
-
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(lipgloss.NewStyle().Foreground(currentTheme().accent)))
-
-	pm := opts.PermissionMode
-	if pm == "" {
-		pm = "default"
-	}
-	tr := newTracker()
-	c := newChat(tr)
-	c.cwd = opts.CWD
+	v := newSessionView(opts)
+	ws := newWorkspace(opts.CWD)
 	return Model{
-		opts:        opts,
+		sessionView: v,
+		workspace:   ws,
+		views:       []*sessionView{v},
+		spaces:      map[string]*workspace{ws.dir: ws},
+		base:        opts,
 		ctx:         ctx,
-		chat:        c,
-		track:       tr,
 		comp:        &completer{},
-		input:       ta,
 		spin:        sp,
-		follow:      true,
 		sidebarOn:   true,
-		permMode:    pm,
-		model:       opts.Model,
 		limits:      map[string]claude.RateLimitWindow{},
 		limitWarned: map[string]int{},
-		hist:        newHistory(opts.CWD),
 		sparks:      newSparkField(sidebarWidth-3, sparkMinRows),
 		focused:     true,
 		lastInput:   time.Now(),
-		alwaysAllow: map[string]bool{},
 		cfg:         cfg,
 		start:       start,
 	}
@@ -1526,12 +1463,7 @@ func (m *Model) layout() {
 		bottom++
 	}
 	h := max(3, m.height-bottom)
-	if !m.ready {
-		m.vp = viewport.New(m.chatWidth(), h)
-		m.vp.MouseWheelEnabled = true
-	} else {
-		m.vp.Width, m.vp.Height = m.chatWidth(), h
-	}
+	m.vp.Width, m.vp.Height = m.chatWidth(), h
 }
 
 func (m *Model) refresh() {
