@@ -156,6 +156,9 @@ type StartParams struct {
 	Continue       bool   `json:"continue,omitempty"`
 	// ExtraArgs are passed on to the CLI (the TUI's trailing arguments).
 	ExtraArgs []string `json:"extraArgs,omitempty"`
+	// Env is the client's environment, for the CLI ("KEY=value"); empty
+	// means the daemon's own.
+	Env []string `json:"env,omitempty"`
 }
 
 type StartResult struct {

@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,10 @@ type Options struct {
 	Continue       bool
 	CWD            string
 	ExtraArgs      []string
+	// Env is the CLI's environment; nil means this process's. The daemon
+	// passes the starting client's, so a session gets its terminal's PATH,
+	// API keys and direnv settings rather than the daemon's.
+	Env []string
 }
 
 // Event is anything parsed off the CLI's stdout. Exactly one field is set.
@@ -138,9 +143,16 @@ func Start(ctx context.Context, opts Options) (*Process, error) {
 	}
 	args = append(args, opts.ExtraArgs...)
 
+	env := opts.Env
+	if env == nil {
+		env = os.Environ()
+	}
+	if opts.Env != nil {
+		bin = lookPathIn(bin, env)
+	}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = opts.CWD
-	cmd.Env = childEnv(os.Environ())
+	cmd.Env = childEnv(env)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -478,6 +490,30 @@ var sessionVars = map[string]bool{
 	"CLAUDE_CODE_CHILD_SESSION":     true,
 	"CLAUDE_CODE_REMOTE_SESSION_ID": true,
 	"CLAUDE_PID":                    true,
+}
+
+// lookPathIn finds bin on env's PATH rather than this process's; bin is
+// returned as is when it has a path or isn't found there.
+func lookPathIn(bin string, env []string) string {
+	if strings.ContainsRune(bin, filepath.Separator) {
+		return bin
+	}
+	path := ""
+	for _, kv := range env {
+		if k, v, _ := strings.Cut(kv, "="); k == "PATH" {
+			path = v
+		}
+	}
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			continue
+		}
+		p := filepath.Join(dir, bin)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
+			return p
+		}
+	}
+	return bin
 }
 
 func childEnv(env []string) []string {

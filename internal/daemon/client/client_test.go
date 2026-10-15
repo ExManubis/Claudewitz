@@ -28,6 +28,11 @@ type fakeProc struct {
 	calls  []string
 	resp   []claude.PermissionDecision
 	closed bool
+	// lingering makes Stop not exit, like a CLI that takes a while.
+	lingering bool
+	// sendGate, when set, holds SendWithImages until it is closed, like a
+	// CLI that isn't reading stdin.
+	sendGate chan struct{}
 }
 
 func newFake(opts claude.Options) *fakeProc {
@@ -64,6 +69,9 @@ func (f *fakeProc) Decisions() []claude.PermissionDecision {
 func (f *fakeProc) Events() <-chan claude.Event { return f.events }
 func (f *fakeProc) Send(text string) error      { f.record("send " + text); return nil }
 func (f *fakeProc) SendWithImages(text string, imgs []claude.Image) error {
+	if f.sendGate != nil {
+		<-f.sendGate
+	}
 	f.record(fmt.Sprintf("send %s +%d", text, len(imgs)))
 	return nil
 }
@@ -85,6 +93,10 @@ func (f *fakeProc) SetPermissionMode(m string) error { f.record("mode " + m); re
 func (f *fakeProc) Stop() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.lingering {
+		f.calls = append(f.calls, "stop")
+		return
+	}
 	if !f.closed {
 		f.closed = true
 		f.events <- claude.Event{Exited: true}
@@ -104,6 +116,8 @@ func (f *fakeProc) exit(err error) {
 type harness struct {
 	sock  string
 	procs chan *fakeProc
+	// prepare, if set, adjusts each fake before it is handed out.
+	prepare func(*fakeProc)
 }
 
 func startDaemon(t *testing.T) *harness {
@@ -124,6 +138,9 @@ func startDaemon(t *testing.T) *harness {
 		Log:     log.New(io.Discard, "", 0),
 		Launch: func(_ context.Context, opts claude.Options) (claude.Session, error) {
 			f := newFake(opts)
+			if h.prepare != nil {
+				h.prepare(f)
+			}
 			h.procs <- f
 			return f, nil
 		},
@@ -279,6 +296,10 @@ func TestSessionStreamAndSummary(t *testing.T) {
 	if f.opts.Model != "opus" || f.opts.Effort != "high" || f.opts.CWD == "" {
 		t.Fatalf("launch opts: %+v", f.opts)
 	}
+	// The CLI gets the client's environment, not the daemon's.
+	if len(f.opts.Env) == 0 || len(f.opts.Env) != len(os.Environ()) {
+		t.Fatalf("env: %d vars, want the client's %d", len(f.opts.Env), len(os.Environ()))
+	}
 	if sum := summary(t, c, s.ID); sum.State != daemon.StateStarting || sum.Clients != 1 {
 		t.Fatalf("new session: %+v", sum)
 	}
@@ -295,7 +316,7 @@ func TestSessionStreamAndSummary(t *testing.T) {
 	if sum.State != daemon.StateWorking || sum.Title != "run the tests" {
 		t.Fatalf("working: %+v", sum)
 	}
-	if sum.Activity == nil || sum.Activity.Kind != "tool" || sum.Activity.Text != `Grep "claimAmount" in src/` {
+	if sum.Activity == nil || sum.Activity.Kind != "tool" || sum.Activity.Text != `Grep claimAmount in src/` {
 		t.Fatalf("activity: %+v", sum.Activity)
 	}
 	if sum.ContextUsed != 41210 || sum.ClaudeSessionID == nil || *sum.ClaudeSessionID != "cs-1" {
@@ -608,5 +629,138 @@ func TestStartRejectsRelativeCWD(t *testing.T) {
 	var e *daemon.Error
 	if _, err := c.Start(context.Background(), daemon.StartParams{CWD: "rel"}); !errors.As(err, &e) || e.Code != daemon.CodeBadRequest {
 		t.Fatalf("relative cwd: %v", err)
+	}
+}
+
+// A turn that ends with a request still open (an interrupt while it was
+// shown) takes the request with it; a sub-agent's request stays.
+func TestTurnEndClearsPending(t *testing.T) {
+	h := startDaemon(t)
+	c := h.dial(t, "tui")
+	s, f := startSession(t, h, c)
+	f.line(t, bashRequest)
+	f.line(t, `{"type":"control_request","request_id":"r9","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"agent_id":"a1"}}`)
+	ev := next(t, s, "permission", func(ev claude.Event) bool { return ev.Permission != nil && ev.Permission.RequestID == "r1" })
+	next(t, s, "agent permission", func(ev claude.Event) bool { return ev.Permission != nil && ev.Permission.RequestID == "r9" })
+	if err := s.Interrupt(); err != nil {
+		t.Fatal(err)
+	}
+	f.line(t, resultLine)
+	next(t, s, "resolved", func(ev claude.Event) bool { return ev.PermissionResolved == "r1" })
+	sum := summary(t, c, s.ID)
+	if sum.Waiting == nil || sum.Waiting.RequestID != "r9" {
+		t.Fatalf("waiting: %+v", sum.Waiting)
+	}
+	var e *daemon.Error
+	if err := s.Respond(ev.Permission, claude.PermissionDecision{Behavior: "allow"}); !errors.As(err, &e) || e.Code != daemon.CodeNotFound {
+		t.Fatalf("answer after turn end: %v", err)
+	}
+	if got := f.Calls(); fmt.Sprint(got) != "[interrupt]" {
+		t.Fatalf("calls: %q", got)
+	}
+}
+
+// A replay bigger than a client's outbox is paced, not cut off.
+func TestLongReplayIsPaced(t *testing.T) {
+	h := startDaemon(t)
+	c := h.dial(t, "tui")
+	s, f := startSession(t, h, c)
+	const n = 9000 // more than the daemon's outbox; one turn, so none evicted
+	go func() {
+		for i := 0; i < n; i++ {
+			f.line(t, `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"x"}},"parent_tool_use_id":null}`)
+		}
+		f.line(t, initLine)
+	}()
+	for wait := time.After(15 * time.Second); ; {
+		select {
+		case ev := <-s.Events():
+			if ev.Exited {
+				t.Fatalf("live client dropped: %v", ev.Err)
+			}
+		case <-wait:
+			t.Fatal("timed out feeding events")
+		}
+		if s.LastSeq() >= n+1 {
+			break
+		}
+	}
+
+	late := h.dial(t, "ios")
+	ls, _, err := late.Subscribe(context.Background(), s.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := 0
+	timeout := time.After(15 * time.Second)
+	for got < n {
+		select {
+		case ev, ok := <-ls.Events():
+			if !ok || ev.Exited {
+				t.Fatalf("dropped after %d events", got)
+			}
+			if ev.Stream != nil {
+				got++
+			}
+		case <-timeout:
+			t.Fatalf("replayed %d of %d", got, n)
+		}
+	}
+	// And live events still follow the replay.
+	f.line(t, resultLine)
+	next(t, ls, "live result", func(ev claude.Event) bool { return ev.Result != nil })
+}
+
+// A write the CLI isn't reading doesn't stop the daemon from reading the
+// CLI's output or answering other requests.
+func TestBlockedWriteDoesNotStallSession(t *testing.T) {
+	h := startDaemon(t)
+	gate := make(chan struct{})
+	h.prepare = func(f *fakeProc) { f.sendGate = gate }
+	c := h.dial(t, "tui")
+	s, f := startSession(t, h, c)
+	sent := make(chan error, 1)
+	go func() { sent <- s.Send("big image") }()
+	time.Sleep(50 * time.Millisecond)
+
+	other := h.dial(t, "ios")
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 300; i++ { // more than the process's event buffer
+			f.line(t, `{"type":"stream_event","event":{"type":"ping"},"parent_tool_use_id":null}`)
+		}
+		_, _ = other.List(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the session stalled behind a blocked write")
+	}
+	close(gate)
+	if err := <-sent; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Resuming a session that is being stopped starts a new process rather
+// than handing back the dying one.
+func TestResumeSkipsStoppingSession(t *testing.T) {
+	h := startDaemon(t)
+	h.prepare = func(f *fakeProc) { f.lingering = true }
+	c := h.dial(t, "tui")
+	s, f := startSession(t, h, c)
+	f.line(t, initLine)
+	next(t, s, "init", func(ev claude.Event) bool { return ev.Init != nil })
+	s.Stop()
+	r, err := c.Start(context.Background(), daemon.StartParams{CWD: f.opts.CWD, Resume: "cs-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Attached || r.Session.ID == s.ID {
+		t.Fatalf("attached to the stopping session: %+v", r)
+	}
+	if f2 := h.proc(t); f2.opts.Resume != "cs-1" {
+		t.Fatalf("new process opts: %+v", f2.opts)
 	}
 }

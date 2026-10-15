@@ -3,6 +3,7 @@ package daemon
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 func seqs(b *buffer) string {
@@ -71,11 +72,28 @@ func TestBufferSince(t *testing.T) {
 	}
 }
 
-func TestSummarizeAndActivity(t *testing.T) {
-	if got := summarize("Bash", []byte(`{"command":"go test ./...\necho done"}`), 100); got != "go test ./..." {
-		t.Fatalf("bash: %q", got)
-	}
+func TestFirstLine(t *testing.T) {
 	if got := firstLine("  \n  "+string(make([]rune, 0))+"abcdefghij", 5); got != "abcd…" {
 		t.Fatalf("cut: %q", got)
+	}
+}
+
+func TestSameSummary(t *testing.T) {
+	id1, id2 := "a", "a"
+	a := SessionSummary{ID: "s_1", ClaudeSessionID: &id1, Activity: &Activity{"tool", "ls"}, LastActivity: now()}
+	b := a
+	b.ClaudeSessionID, b.Activity = &id2, &Activity{"tool", "ls"}
+	b.LastActivity = a.LastActivity.Add(time.Minute)
+	if !sameSummary(a, b) {
+		t.Fatal("equal values behind different pointers, or only lastActivity, should match")
+	}
+	b.Activity = &Activity{"tool", "pwd"}
+	if sameSummary(a, b) {
+		t.Fatal("a different activity should not match")
+	}
+	b = a
+	b.CostUSD = 1
+	if sameSummary(a, b) {
+		t.Fatal("a different cost should not match")
 	}
 }

@@ -48,6 +48,15 @@ func (c *conn) close() {
 	})
 }
 
+func (c *conn) isClosed() bool {
+	select {
+	case <-c.done:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *conn) ready() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -63,6 +72,16 @@ func (c *conn) send(frame []byte) {
 	default:
 		c.srv.logf("client %s fell behind; disconnecting", c.client)
 		c.close()
+	}
+}
+
+// sendWait queues a frame, waiting for room; false once c is closed.
+func (c *conn) sendWait(frame []byte) bool {
+	select {
+	case <-c.done:
+		return false
+	case c.out <- frame:
+		return true
 	}
 }
 

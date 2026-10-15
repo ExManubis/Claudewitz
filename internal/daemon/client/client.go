@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +23,9 @@ import (
 
 // callTimeout bounds a request that has no deadline of its own.
 const callTimeout = 15 * time.Second
+
+// startTimeout bounds session.start, which launches the CLI.
+const startTimeout = time.Minute
 
 // ErrClosed is returned once the connection to the daemon is gone.
 var ErrClosed = errors.New("lost the connection to the claudewitz daemon")
@@ -271,7 +275,14 @@ func (c *Client) subscribe(ctx context.Context, p daemon.SubscribeParams) (*Sess
 // replay: the TUI shows the history from the transcript on disk.
 func Starter(c *Client) func(ctx context.Context, opts claude.Options) (claude.Session, error) {
 	return func(ctx context.Context, opts claude.Options) (claude.Session, error) {
-		r, err := c.Start(ctx, daemon.StartParams{
+		env := opts.Env
+		if env == nil {
+			env = os.Environ()
+		}
+		sctx, cancel := context.WithTimeout(ctx, startTimeout)
+		defer cancel()
+		r, err := c.Start(sctx, daemon.StartParams{
+			Env:            env,
 			CWD:            opts.CWD,
 			Model:          opts.Model,
 			Effort:         opts.Effort,
@@ -291,6 +302,10 @@ func Starter(c *Client) func(ctx context.Context, opts claude.Options) (claude.S
 		}
 		s, _, err := subscribe(ctx, r.Session.ID, nil)
 		if err != nil {
+			if !r.Attached {
+				// Don't leave a session nobody will see behind.
+				_ = c.Call(context.Background(), "session.stop", daemon.SessionParams{Session: r.Session.ID}, nil)
+			}
 			return nil, err
 		}
 		return s, nil

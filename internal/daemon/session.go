@@ -1,9 +1,7 @@
 package daemon
 
 import (
-	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -36,10 +34,22 @@ type session struct {
 	buf     *buffer
 	pending []*pendingRequest
 	rules   map[string]bool // tools allowed for the rest of the session
-	subs    map[*conn]bool
+	subs    map[*conn]*subscriber
+	// stopping is set by session.stop: the process is on its way out, so
+	// resuming its transcript starts a new one rather than attaching.
+	stopping bool
 
 	pushed   SessionSummary // last summary pushed to clients
 	pushedAt time.Time
+
+	w writer
+}
+
+// subscriber is one client's subscription. While its replay is being
+// sent, live frames are held back so they arrive after it.
+type subscriber struct {
+	replaying bool
+	held      [][]byte
 }
 
 type pendingRequest struct {
@@ -55,12 +65,14 @@ func newSession(srv *Server, id string, proc claude.Session, sum SessionSummary)
 		sum:   sum,
 		buf:   newBuffer(),
 		rules: map[string]bool{},
-		subs:  map[*conn]bool{},
+		subs:  map[*conn]*subscriber{},
 	}
 }
 
 // run reads the process's events until it exits.
 func (s *session) run() {
+	go s.w.loop()
+	defer s.w.close()
 	for ev := range s.proc.Events() {
 		s.handle(ev)
 		if ev.Exited {
@@ -138,6 +150,16 @@ func (s *session) observe(ev claude.Event) {
 	case ev.Result != nil:
 		r := ev.Result
 		s.busy = false
+		// The turn is over, so the CLI no longer waits on its requests (an
+		// interrupt, say, while one was open). Sub-agents' requests stay:
+		// a background agent can still be waiting after the turn ends.
+		for i := 0; i < len(s.pending); {
+			if s.pending[i].req.AgentID == "" {
+				s.resolve(i, "turn-ended")
+				continue
+			}
+			i++
+		}
 		t := now()
 		s.sum.LastTurnEndedAt = &t
 		s.sum.CostUSD += r.TotalCostUSD
@@ -196,16 +218,24 @@ func (s *session) emit(event string, params func(seq int64) any) {
 }
 
 func (s *session) toSubscribers(frame []byte) {
-	for c := range s.subs {
-		c.send(frame)
+	for c, sub := range s.subs {
+		if sub.replaying {
+			sub.held = append(sub.held, frame)
+		} else {
+			c.send(frame)
+		}
 	}
 }
 
 func (s *session) permission(req *claude.PermissionRequest) {
 	if s.rules[req.ToolName] && !interactiveTools[req.ToolName] {
-		if err := s.proc.Respond(req, claude.PermissionDecision{Behavior: "allow"}); err != nil {
-			s.srv.logf("session %s: auto-allow %s: %v", s.id, req.ToolName, err)
-		}
+		// Queued, not written here: the event loop must never wait on stdin.
+		s.w.async(func() error {
+			if err := s.proc.Respond(req, claude.PermissionDecision{Behavior: "allow"}); err != nil {
+				s.srv.logf("session %s: auto-allow %s: %v", s.id, req.ToolName, err)
+			}
+			return nil
+		})
 		return
 	}
 	s.pending = append(s.pending, &pendingRequest{req: req, since: now()})
@@ -214,12 +244,14 @@ func (s *session) permission(req *claude.PermissionRequest) {
 	})
 }
 
-// respond answers a pending request on behalf of client by.
+// respond answers a pending request on behalf of client by. The request
+// is claimed under s.mu, so the first answer wins; the answer is written
+// to the CLI after releasing it.
 func (s *session) respond(p RespondParams, by string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	i := s.pendingIndex(p.RequestID)
 	if i < 0 {
+		s.mu.Unlock()
 		return &Error{CodeNotFound, fmt.Sprintf("no pending request %s", p.RequestID)}
 	}
 	req := s.pending[i].req
@@ -234,21 +266,13 @@ func (s *session) respond(p RespondParams, by string) error {
 			rule = req.ToolName
 		}
 	}
-	var err error
-	if p.Interrupt {
-		err = s.proc.RespondAndInterrupt(req, d)
-	} else {
-		err = s.proc.Respond(req, d)
-	}
-	if err != nil {
-		return &Error{CodeFailed, err.Error()}
-	}
 	s.resolve(i, by)
 	// The new rule answers anything else already waiting on that tool.
+	var also []*claude.PermissionRequest
 	if rule != "" {
 		for j := 0; j < len(s.pending); {
 			if r := s.pending[j].req; r.ToolName == rule {
-				_ = s.proc.Respond(r, claude.PermissionDecision{Behavior: "allow"})
+				also = append(also, r)
 				s.resolve(j, "rule")
 				continue
 			}
@@ -256,7 +280,22 @@ func (s *session) respond(p RespondParams, by string) error {
 		}
 	}
 	s.changed()
-	return nil
+	s.mu.Unlock()
+
+	return wrap(s.w.do(func() error {
+		var err error
+		if p.Interrupt {
+			err = s.proc.RespondAndInterrupt(req, d)
+		} else {
+			err = s.proc.Respond(req, d)
+		}
+		for _, r := range also {
+			if err == nil {
+				err = s.proc.Respond(r, claude.PermissionDecision{Behavior: "allow"})
+			}
+		}
+		return err
+	}))
 }
 
 func (s *session) pendingIndex(id string) int {
@@ -300,7 +339,7 @@ func (s *session) refresh() {
 		s.sum.Waiting = &Waiting{
 			RequestID: p.req.RequestID,
 			Tool:      p.req.ToolName,
-			Summary:   summarize(p.req.ToolName, p.req.Input, 120),
+			Summary:   claude.SummarizeInput(p.req.ToolName, p.req.Input, 120),
 			Since:     p.since,
 		}
 	case s.busy:
@@ -321,37 +360,46 @@ func (s *session) summary() SessionSummary {
 
 // changed pushes the summary to every client if it changed: at once for
 // real changes, at most every activityPushEvery for lastActivity alone.
+// It runs on every event, stream deltas included, so it compares fields
+// rather than encoding anything.
 func (s *session) changed() {
 	sum := s.summary()
-	a, b := sum, s.pushed
-	a.LastActivity, b.LastActivity = time.Time{}, time.Time{}
-	if summaryEqual(a, b) && time.Since(s.pushedAt) < activityPushEvery {
-		return
-	}
-	if summaryEqual(sum, s.pushed) {
+	if sameSummary(sum, s.pushed) &&
+		(sum.LastActivity.Equal(s.pushed.LastActivity) || time.Since(s.pushedAt) < activityPushEvery) {
 		return
 	}
 	s.pushed, s.pushedAt = sum, time.Now()
 	s.srv.broadcast(push(EventSessionUpdated, SessionUpdatedParams{Summary: sum}))
 }
 
-func summaryEqual(a, b SessionSummary) bool {
-	ja, _ := json.Marshal(a)
-	jb, _ := json.Marshal(b)
-	return string(ja) == string(jb)
+// sameSummary compares everything but LastActivity.
+func sameSummary(a, b SessionSummary) bool {
+	if !ptrEqual(a.ClaudeSessionID, b.ClaudeSessionID) || !ptrEqual(a.Waiting, b.Waiting) ||
+		!ptrEqual(a.Activity, b.Activity) || !ptrEqual(a.LastTurnEndedAt, b.LastTurnEndedAt) ||
+		!ptrEqual(a.LastError, b.LastError) {
+		return false
+	}
+	a.ClaudeSessionID, a.Waiting, a.Activity, a.LastTurnEndedAt, a.LastError = nil, nil, nil, nil, nil
+	b.ClaudeSessionID, b.Waiting, b.Activity, b.LastTurnEndedAt, b.LastError = nil, nil, nil, nil, nil
+	a.LastActivity, b.LastActivity = time.Time{}, time.Time{}
+	return a == b
+}
+
+func ptrEqual[T comparable](a, b *T) bool {
+	return a == b || a != nil && b != nil && *a == *b
 }
 
 // send submits a prompt from a client.
 func (s *session) send(text string, images []Image) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	imgs := make([]claude.Image, len(images))
 	for i, img := range images {
 		imgs[i] = claude.Image{MediaType: img.MediaType, Data: img.Data}
 	}
-	if err := s.proc.SendWithImages(text, imgs); err != nil {
-		return &Error{CodeFailed, err.Error()}
+	if err := s.w.do(func() error { return s.proc.SendWithImages(text, imgs) }); err != nil {
+		return wrap(err)
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.busy = true
 	if s.sum.Title == "" {
 		s.sum.Title = firstLine(text, 80)
@@ -362,55 +410,92 @@ func (s *session) send(text string, images []Image) error {
 }
 
 func (s *session) configure(p ConfigureParams) error {
+	err := s.w.do(func() error {
+		if p.Model != "" {
+			if err := s.proc.SetModel(p.Model); err != nil {
+				return err
+			}
+		}
+		if p.Effort != "" {
+			if err := s.proc.SetEffort(p.Effort); err != nil {
+				return err
+			}
+		}
+		if p.PermissionMode != "" {
+			return s.proc.SetPermissionMode(p.PermissionMode)
+		}
+		return nil
+	})
+	if err != nil {
+		return wrap(err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if p.Model != "" {
-		if err := s.proc.SetModel(p.Model); err != nil {
-			return &Error{CodeFailed, err.Error()}
-		}
 		s.sum.Model = p.Model
 	}
 	if p.Effort != "" {
-		if err := s.proc.SetEffort(p.Effort); err != nil {
-			return &Error{CodeFailed, err.Error()}
-		}
 		s.sum.Effort = p.Effort
 	}
 	if p.PermissionMode != "" {
-		if err := s.proc.SetPermissionMode(p.PermissionMode); err != nil {
-			return &Error{CodeFailed, err.Error()}
-		}
 		s.sum.PermissionMode = p.PermissionMode
 	}
 	s.changed()
 	return nil
 }
 
-// subscribe replies to c and replays the buffer under one lock, so nothing
-// lands between the replay and the live stream.
+func (s *session) interrupt() error {
+	return wrap(s.w.do(s.proc.Interrupt))
+}
+
+// stop ends the process; it may take a moment to exit.
+func (s *session) stop() {
+	s.mu.Lock()
+	s.stopping = true
+	s.mu.Unlock()
+	s.proc.Stop()
+}
+
+// subscribe replies to c, then replays the buffer. The replay waits for
+// room in c's outbox rather than overflowing it (a long turn can hold more
+// events than the outbox), and live events that arrive meanwhile are held
+// and sent after it, so c sees them in order.
 func (s *session) subscribe(c *conn, id int64, since *int64, live bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	frames, from := s.buf.since(since, s.seq+1)
 	if live {
 		frames, from = s.buf.sticky(), s.seq+1
 	}
-	s.subs[c] = true
+	sub := &subscriber{replaying: len(frames) > 0}
+	s.subs[c] = sub
 	res := SubscribeResult{Summary: s.summary(), Pending: []Permission{}, FromSeq: from}
 	for _, p := range s.pending {
 		res.Pending = append(res.Pending, Permission{RequestID: p.req.RequestID, Request: p.req})
 	}
 	c.reply(id, res)
+	s.changed() // clients count
+	s.mu.Unlock()
+	if !sub.replaying {
+		return
+	}
+
 	for _, f := range frames {
+		if !c.sendWait(f) {
+			return
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, f := range sub.held {
 		c.send(f)
 	}
-	s.changed() // clients count
+	sub.replaying, sub.held = false, nil
 }
 
 func (s *session) unsubscribe(c *conn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.subs[c] {
+	if s.subs[c] == nil {
 		return
 	}
 	delete(s.subs, c)
@@ -426,7 +511,7 @@ func activityOf(blocks []claude.ContentBlock) *Activity {
 		b := blocks[i]
 		switch b.Type {
 		case "tool_use":
-			return &Activity{Kind: "tool", Text: strings.TrimSpace(b.Name + " " + summarize(b.Name, b.Input, 100))}
+			return &Activity{Kind: "tool", Text: strings.TrimSpace(b.Name + " " + claude.SummarizeInput(b.Name, b.Input, 100))}
 		case "text":
 			if t := firstLine(b.Text, 120); t != "" {
 				return &Activity{Kind: "text", Text: t}
@@ -438,48 +523,6 @@ func activityOf(blocks []claude.ContentBlock) *Activity {
 		}
 	}
 	return nil
-}
-
-// summarize is a tool call's main argument on one line.
-func summarize(tool string, raw json.RawMessage, max int) string {
-	var m map[string]any
-	if json.Unmarshal(raw, &m) != nil {
-		return ""
-	}
-	str := func(k string) string { s, _ := m[k].(string); return s }
-	var s string
-	switch tool {
-	case "Bash":
-		s = str("command")
-	case "Read", "Write", "Edit", "MultiEdit", "NotebookEdit":
-		s = filepath.Base(str("file_path") + str("notebook_path"))
-	case "Glob", "Grep":
-		s = fmt.Sprintf("%q", str("pattern"))
-		if p := str("path"); p != "" {
-			s += " in " + p
-		}
-	case "WebFetch":
-		s = str("url")
-	case "WebSearch":
-		s = str("query")
-	case "Task", "Agent":
-		s = str("description")
-	case "Skill":
-		s = str("skill")
-	case "AskUserQuestion":
-		if qs, err := claude.ParseQuestions(raw); err == nil && len(qs) > 0 {
-			s = qs[0].Question
-		}
-	case "ExitPlanMode":
-		s = "plan ready for review"
-	default:
-		for _, k := range []string{"description", "command", "file_path", "path", "pattern", "query", "url"} {
-			if s = str(k); s != "" {
-				break
-			}
-		}
-	}
-	return firstLine(s, max)
 }
 
 // firstLine is s's first non-blank line, cut to max runes.

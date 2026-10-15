@@ -3,8 +3,6 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/safetext"
 )
 
@@ -661,67 +660,7 @@ func filePathOf(raw json.RawMessage) string {
 
 // summarizeInput produces a one-line description of a tool call.
 func summarizeInput(tool string, raw json.RawMessage, max int) string {
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil || len(m) == 0 {
-		return ""
-	}
-	var s string
-	switch tool {
-	case "Bash":
-		s = str(m, "command")
-	case "Read", "Write", "Edit", "MultiEdit", "NotebookEdit":
-		s = filepath.Base(firstNonEmpty(str(m, "file_path"), str(m, "notebook_path")))
-	case "Glob", "Grep":
-		s = str(m, "pattern")
-		if p := str(m, "path"); p != "" {
-			s += " in " + p
-		}
-	case "WebFetch":
-		s = str(m, "url")
-	case "WebSearch":
-		s = str(m, "query")
-	case "Task", "Agent":
-		s = firstNonEmpty(str(m, "description"), str(m, "prompt"))
-		if t := str(m, "subagent_type"); t != "" {
-			s = t + " · " + s
-		}
-	case "TodoWrite":
-		items, _ := m["todos"].([]any)
-		s = fmt.Sprintf("%d items", len(items))
-	case "TaskCreate", "TaskUpdate":
-		s = firstNonEmpty(str(m, "subject"), str(m, "status"))
-	case "Skill":
-		s = str(m, "skill")
-	case toolAskUser:
-		var qs []map[string]any
-		if raw, err := json.Marshal(m["questions"]); err == nil {
-			_ = json.Unmarshal(raw, &qs)
-		}
-		if len(qs) > 0 {
-			s = str(qs[0], "question")
-			if len(qs) > 1 {
-				s += fmt.Sprintf(" (+%d more)", len(qs)-1)
-			}
-		}
-	case toolExitPlan:
-		s = "plan ready for review"
-	default:
-		keys := make([]string, 0, len(m))
-		for k := range m {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		parts := []string{}
-		for _, k := range keys {
-			parts = append(parts, fmt.Sprintf("%s=%v", k, m[k]))
-		}
-		s = strings.Join(parts, " ")
-	}
-	s = strings.ReplaceAll(s, "\n", " ⏎ ")
-	if max > 10 {
-		s = truncate(s, max)
-	}
-	return s
+	return claude.SummarizeInput(tool, raw, max)
 }
 
 // toolResultText flattens a tool_result content field to text that is

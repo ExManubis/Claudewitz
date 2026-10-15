@@ -105,25 +105,25 @@ func (s *Server) idle() bool {
 // A socket left behind by a daemon that died is removed; one that answers
 // means a daemon is already running.
 func Listen(path string) (net.Listener, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	if _, err := os.Stat(path); err == nil {
+	// Anyone who can connect gets a shell (Bash, as this user), so the
+	// folder is made private even if it already existed with looser
+	// permissions, and the socket is created private (see listenPrivate)
+	// rather than tightened after the fact.
+	if err := privateDir(dir); err != nil {
+		return nil, err
+	}
+	if _, err := os.Lstat(path); err == nil {
 		if c, err := net.DialTimeout("unix", path, time.Second); err == nil {
 			c.Close()
 			return nil, fmt.Errorf("a daemon is already listening on %s", path)
 		}
 		_ = os.Remove(path)
 	}
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		ln.Close()
-		return nil, err
-	}
-	return ln, nil
+	return listenPrivate(path)
 }
 
 func (s *Server) logf(format string, args ...any) {
@@ -288,6 +288,13 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		// A client that gave up waiting won't subscribe or stop it.
+		if !attached && c.isClosed() {
+			if ss, err := s.lookup(sum.ID); err == nil {
+				ss.stop()
+			}
+			return nil, handled
+		}
 		return StartResult{Session: sum, Attached: attached}, nil
 
 	case "session.subscribe":
@@ -326,7 +333,7 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 		if err := decode(&p); err != nil {
 			return nil, err
 		}
-		return withSession(p.Session, func(ss *session) error { return wrap(ss.proc.Interrupt()) })
+		return withSession(p.Session, func(ss *session) error { return ss.interrupt() })
 
 	case "session.respond":
 		var p RespondParams
@@ -347,7 +354,7 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 		if err := decode(&p); err != nil {
 			return nil, err
 		}
-		return withSession(p.Session, func(ss *session) error { ss.proc.Stop(); return nil })
+		return withSession(p.Session, func(ss *session) error { ss.stop(); return nil })
 	}
 	return nil, &Error{CodeUnknownMethod, "unknown method " + req.Method}
 }
@@ -375,6 +382,27 @@ func (s *Server) list() []SessionSummary {
 	return out
 }
 
+// findLive is the live session on Claude Code session id, unless it is
+// being stopped (a TUI restarting onto the same transcript stops the old
+// process first, and must not get the dying one back).
+func (s *Server) findLive(claudeID string) (SessionSummary, bool) {
+	s.mu.RLock()
+	all := make([]*session, 0, len(s.sessions))
+	for _, ss := range s.sessions {
+		all = append(all, ss)
+	}
+	s.mu.RUnlock()
+	for _, ss := range all {
+		ss.mu.Lock()
+		sum, stopping := ss.summary(), ss.stopping
+		ss.mu.Unlock()
+		if !stopping && sum.ClaudeSessionID != nil && *sum.ClaudeSessionID == claudeID {
+			return sum, true
+		}
+	}
+	return SessionSummary{}, false
+}
+
 func (s *Server) start(p StartParams) (SessionSummary, bool, error) {
 	if !filepath.IsAbs(p.CWD) {
 		return SessionSummary{}, false, &Error{CodeBadRequest, "cwd must be an absolute path"}
@@ -391,10 +419,8 @@ func (s *Server) start(p StartParams) (SessionSummary, bool, error) {
 		}
 	}
 	if target != "" {
-		for _, sum := range s.list() {
-			if sum.ClaudeSessionID != nil && *sum.ClaudeSessionID == target {
-				return sum, true, nil
-			}
+		if sum, ok := s.findLive(target); ok {
+			return sum, true, nil
 		}
 	}
 
@@ -402,6 +428,9 @@ func (s *Server) start(p StartParams) (SessionSummary, bool, error) {
 	opts.CWD = p.CWD
 	opts.Resume, opts.Continue = p.Resume, p.Continue
 	opts.ExtraArgs = append(append([]string(nil), s.Base.ExtraArgs...), p.ExtraArgs...)
+	if len(p.Env) > 0 {
+		opts.Env = p.Env
+	}
 	if p.Model != "" {
 		opts.Model = p.Model
 	}
