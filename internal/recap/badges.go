@@ -49,8 +49,11 @@ func badges(d Day, files map[string]bool) []Badge {
 
 // duration is "1h 9m" or "52m".
 func duration(sec int) string {
-	if sec >= 3600 {
+	if sec >= 3600 && sec%3600 >= 60 {
 		return fmt.Sprintf("%dh %dm", sec/3600, sec%3600/60)
+	}
+	if sec >= 3600 {
+		return fmt.Sprintf("%dh", sec/3600)
 	}
 	return fmt.Sprintf("%dm", sec/60)
 }

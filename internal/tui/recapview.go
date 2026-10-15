@@ -566,9 +566,11 @@ func recapMarkdown(d recap.Day) string {
 	return b.String()
 }
 
-// hoursMinutes is "7h 26m", "26m" or "45s".
+// hoursMinutes is "7h 26m", "6h", "26m" or "45s".
 func hoursMinutes(sec int) string {
 	switch {
+	case sec >= 3600 && sec%3600 < 60:
+		return fmt.Sprintf("%dh", sec/3600)
 	case sec >= 3600:
 		return fmt.Sprintf("%dh %dm", sec/3600, sec%3600/60)
 	case sec >= 60:
