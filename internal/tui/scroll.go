@@ -183,6 +183,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		if msg.Button != tea.MouseButtonLeft {
 			return nil
 		}
+		// A release can go missing (outside the window, or sent to a panel
+		// that opened mid-drag), so every press starts afresh.
+		m.mouseDown, m.dragBar = false, false
 		switch {
 		case m.onScrollbar(msg.X, msg.Y):
 			m.dragBar = true
@@ -223,7 +226,8 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			m.dragBar = false
 			return nil
 		}
-		if !m.mouseDown {
+		if !m.mouseDown || m.textSel == nil {
+			m.mouseDown = false
 			return nil
 		}
 		m.mouseDown = false

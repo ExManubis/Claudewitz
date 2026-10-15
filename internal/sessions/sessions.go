@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
+	"github.com/exmanubis/claudewitz/internal/safetext"
 )
 
 // Info summarises one session file.
@@ -224,7 +225,7 @@ func promptText(raw json.RawMessage) string {
 }
 
 func oneLine(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
+	s = strings.Join(strings.Fields(safetext.Line(s)), " ")
 	if r := []rune(s); len(r) > 200 {
 		s = string(r[:200])
 	}
@@ -291,7 +292,7 @@ func load(path string, sidechain bool) ([]Message, error) {
 			if strings.HasPrefix(strings.TrimSpace(s), "<") {
 				continue
 			}
-			blocks = []claude.ContentBlock{{Type: "text", Text: s}}
+			blocks = []claude.ContentBlock{{Type: "text", Text: safetext.Clean(s)}}
 		} else if json.Unmarshal(m.Content, &blocks) != nil {
 			continue
 		}

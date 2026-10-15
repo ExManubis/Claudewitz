@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
@@ -46,5 +47,27 @@ func TestChatHasRoomAboveAndBelow(t *testing.T) {
 		if act != top+mm.vp.Height+1 || main(act-1) != "" || main(act-2) == "" {
 			t.Errorf("width %d: activity at row %d (chat %d+%d), rows above %q / %q", width, act, top, mm.vp.Height, main(act-2), main(act-1))
 		}
+	}
+}
+
+func TestTruncateLongAndWide(t *testing.T) {
+	long := strings.Repeat("x", 200000)
+	start := time.Now()
+	if got := truncate(long, 40); lipgloss.Width(got) != 40 || !strings.HasSuffix(got, "…") {
+		t.Errorf("truncate long: width %d", lipgloss.Width(got))
+	}
+	if d := time.Since(start); d > 100*time.Millisecond {
+		t.Errorf("truncate took %v", d)
+	}
+	styled := lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")).Render("hello world")
+	if got := truncate(styled, 6); lipgloss.Width(got) > 6 {
+		t.Errorf("truncate styled: width %d", lipgloss.Width(got))
+	}
+	cjk := "目录/" + strings.Repeat("文件", 20) + ".go"
+	if got := truncateLeft(cjk, 20); lipgloss.Width(got) > 20 || !strings.HasSuffix(got, ".go") {
+		t.Errorf("truncateLeft cjk = %q (width %d)", got, lipgloss.Width(got))
+	}
+	if got := truncateLeft("abc", 0); got != "" {
+		t.Errorf("truncateLeft zero width = %q", got)
 	}
 }

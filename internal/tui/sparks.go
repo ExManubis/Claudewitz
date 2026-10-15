@@ -512,6 +512,21 @@ func (m Model) sparkTarget() (sparkMode, float64) {
 	return sparkGathering, 0
 }
 
+// idleBop is how long the bean keeps bopping after the last input or
+// turn. Not every terminal reports focus (tmux doesn't by default), so
+// without a limit it would redraw the screen forever.
+const idleBop = time.Minute
+
+// idle reports whether the idle bean should hold still: the terminal is
+// unfocused, or nothing has happened for a while.
+func (m *Model) idle() bool {
+	last := m.lastInput
+	if m.lastTurnAt.After(last) {
+		last = m.lastTurnAt
+	}
+	return !m.focused || time.Since(last) > idleBop
+}
+
 // syncSparks updates the field's mode and starts its tick loop if needed.
 func (m *Model) syncSparks() tea.Cmd {
 	if m.sparks == nil || !m.sidebarVisible() || sparkRows(m.height-1) == 0 {
@@ -519,7 +534,7 @@ func (m *Model) syncSparks() tea.Cmd {
 	}
 	mode, _ := m.sparkTarget()
 	m.sparks.setMode(mode)
-	m.sparks.paused = !m.focused
+	m.sparks.paused = m.idle()
 	if m.sparkTicking || !m.sparks.animating() {
 		return nil
 	}
@@ -535,7 +550,7 @@ func (m *Model) onSparkTick(msg sparkTickMsg) tea.Cmd {
 	}
 	mode, energy := m.sparkTarget()
 	m.sparks.setMode(mode)
-	m.sparks.paused = !m.focused
+	m.sparks.paused = m.idle()
 	now := time.Now()
 	dt := math.Min(0.1, now.Sub(m.sparkLast).Seconds())
 	m.sparkLast = now

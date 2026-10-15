@@ -127,6 +127,19 @@ func TestDragSelectCopiesAndClickSelects(t *testing.T) {
 	}
 }
 
+// A press in the chat whose release goes elsewhere, then a press outside
+// it, must not leave a release dereferencing a cleared selection.
+func TestReleaseAfterLostSelection(t *testing.T) {
+	m := longChat(t)
+	top := m.chatTop()
+	m.handleMouse(mouse(tea.MouseActionPress, 2, top)) // release never arrives
+	m.textSel = nil                                    // e.g. a panel cleared it
+	m.handleMouse(mouse(tea.MouseActionRelease, 2, top))
+	m.handleMouse(mouse(tea.MouseActionPress, 2, top))
+	m.handleMouse(mouse(tea.MouseActionPress, 2, m.height-1)) // outside the chat
+	m.handleMouse(mouse(tea.MouseActionRelease, 2, m.height-1))
+}
+
 func TestDragScrollbar(t *testing.T) {
 	m := longChat(t)
 	bottom := m.vp.YOffset

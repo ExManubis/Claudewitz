@@ -45,3 +45,26 @@ func TestApplyGitToasts(t *testing.T) {
 		t.Fatalf("stale snapshot applied: %+v", m.git)
 	}
 }
+
+// While idle, polls read the repository only every gitIdleEvery ticks.
+func TestGitPollSlowsWhenIdle(t *testing.T) {
+	m := chatModel(t)
+	reads := func(n int) int {
+		got := 0
+		for range n {
+			m.gitBusy = false
+			m.onGitPoll()
+			if m.gitBusy {
+				got++
+			}
+		}
+		return got
+	}
+	if got := reads(gitIdleEvery); got != gitIdleEvery {
+		t.Errorf("active: %d reads in %d polls", got, gitIdleEvery)
+	}
+	m.focused = false
+	if got := reads(gitIdleEvery * 2); got != 2 {
+		t.Errorf("idle: %d reads in %d polls, want 2", got, gitIdleEvery*2)
+	}
+}
