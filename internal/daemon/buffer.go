@@ -74,6 +74,17 @@ func (b *buffer) evict() {
 	b.entries = out
 }
 
+// sticky returns the frames of the entries kept for late subscribers.
+func (b *buffer) sticky() [][]byte {
+	var frames [][]byte
+	for _, e := range b.entries {
+		if e.sticky != "" {
+			frames = append(frames, e.frame)
+		}
+	}
+	return frames
+}
+
 // since returns the frames after seq (all of them when since is nil) and
 // the seq replay starts at; next is the seq the next event will get. Sticky
 // entries are replayed but don't count as the start: they outlive what

@@ -551,17 +551,40 @@ func TestResumeReattachesToLiveSession(t *testing.T) {
 	s, f := startSession(t, h, c)
 	f.line(t, initLine)
 	next(t, s, "init", func(ev claude.Event) bool { return ev.Init != nil })
-	sum, err := c.Start(context.Background(), daemon.StartParams{CWD: f.opts.CWD, Resume: "cs-1"})
+	f.line(t, replayLine)
+	f.line(t, bashRequest)
+	next(t, s, "permission", func(ev claude.Event) bool { return ev.Permission != nil })
+
+	// Another TUI resuming it attaches: no second process, no replay but
+	// the init, and the pending request.
+	other := h.dial(t, "tui")
+	got, err := Starter(other)(context.Background(), claude.Options{CWD: f.opts.CWD, Resume: "cs-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sum.ID != s.ID {
-		t.Fatalf("resume started %s, want %s", sum.ID, s.ID)
+	if got.(*Session).ID != s.ID {
+		t.Fatalf("resume gave %s, want %s", got.(*Session).ID, s.ID)
 	}
 	select {
 	case <-h.procs:
 		t.Fatal("a second process was started")
 	default:
+	}
+	var kinds []string
+	for len(kinds) < 2 {
+		ev := next(t, got.(*Session), "attach", func(claude.Event) bool { return true })
+		switch {
+		case ev.Init != nil:
+			kinds = append(kinds, "init")
+		case ev.Permission != nil:
+			kinds = append(kinds, "permission")
+		default:
+			kinds = append(kinds, "other")
+		}
+	}
+	sort.Strings(kinds)
+	if fmt.Sprint(kinds) != "[init permission]" {
+		t.Fatalf("attach delivered %v", kinds)
 	}
 }
 

@@ -58,6 +58,11 @@ claudewitz -- --add-dir ../lib       # anything after -- goes straight to claude
 `esc` interrupts Claude, `tab` moves focus to the transcript, `shift+tab` cycles permission
 modes and `ctrl+b` toggles the sidebar.
 
+Sessions run in a background `claudewitz daemon`, started on demand, so they outlive the TUI:
+quitting asks whether to detach (the session keeps working; `-continue` or `ctrl+r` picks it
+back up) or stop it. The daemon exits after 10 minutes with no clients and no sessions.
+`claudewitz -no-daemon` runs `claude` directly instead, as before.
+
 **Icons look like boxes?** claudewitz uses [Nerd Font](https://www.nerdfonts.com) icons by
 default. Install a Nerd Font or run `/icons unicode`.
 

@@ -388,10 +388,13 @@ func (s *session) configure(p ConfigureParams) error {
 
 // subscribe replies to c and replays the buffer under one lock, so nothing
 // lands between the replay and the live stream.
-func (s *session) subscribe(c *conn, id int64, since *int64) {
+func (s *session) subscribe(c *conn, id int64, since *int64, live bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	frames, from := s.buf.since(since, s.seq+1)
+	if live {
+		frames, from = s.buf.sticky(), s.seq+1
+	}
 	s.subs[c] = true
 	res := SubscribeResult{Summary: s.summary(), Pending: []Permission{}, FromSeq: from}
 	for _, p := range s.pending {

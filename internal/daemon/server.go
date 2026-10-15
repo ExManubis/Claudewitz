@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -283,11 +284,11 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 		if err := decode(&p); err != nil {
 			return nil, err
 		}
-		sum, err := s.start(p)
+		sum, attached, err := s.start(p)
 		if err != nil {
 			return nil, err
 		}
-		return StartResult{Session: sum}, nil
+		return StartResult{Session: sum, Attached: attached}, nil
 
 	case "session.subscribe":
 		var p SubscribeParams
@@ -299,7 +300,7 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 			return nil, err
 		}
 		c.subscribe(ss)
-		ss.subscribe(c, req.ID, p.Since)
+		ss.subscribe(c, req.ID, p.Since, p.Live)
 		return nil, handled
 
 	case "session.unsubscribe":
@@ -374,19 +375,25 @@ func (s *Server) list() []SessionSummary {
 	return out
 }
 
-func (s *Server) start(p StartParams) (SessionSummary, error) {
+func (s *Server) start(p StartParams) (SessionSummary, bool, error) {
 	if !filepath.IsAbs(p.CWD) {
-		return SessionSummary{}, &Error{CodeBadRequest, "cwd must be an absolute path"}
+		return SessionSummary{}, false, &Error{CodeBadRequest, "cwd must be an absolute path"}
 	}
 	if fi, err := os.Stat(p.CWD); err != nil || !fi.IsDir() {
-		return SessionSummary{}, &Error{CodeBadRequest, "no such directory " + p.CWD}
+		return SessionSummary{}, false, &Error{CodeBadRequest, "no such directory " + p.CWD}
 	}
-	// Resuming a session that is already live reattaches to it rather
-	// than starting a second claude on the same transcript.
-	if p.Resume != "" {
+	// Resuming (or continuing) a session that is already live reattaches
+	// to it rather than starting a second claude on the same transcript.
+	target := p.Resume
+	if target == "" && p.Continue {
+		if path, ok := sessions.Find(sessions.ProjectDir(p.CWD), ""); ok {
+			target = strings.TrimSuffix(filepath.Base(path), ".jsonl")
+		}
+	}
+	if target != "" {
 		for _, sum := range s.list() {
-			if sum.ClaudeSessionID != nil && *sum.ClaudeSessionID == p.Resume {
-				return sum, nil
+			if sum.ClaudeSessionID != nil && *sum.ClaudeSessionID == target {
+				return sum, true, nil
 			}
 		}
 	}
@@ -406,7 +413,7 @@ func (s *Server) start(p StartParams) (SessionSummary, error) {
 	}
 	proc, err := s.Launch(s.ctx, opts)
 	if err != nil {
-		return SessionSummary{}, &Error{CodeFailed, err.Error()}
+		return SessionSummary{}, false, &Error{CodeFailed, err.Error()}
 	}
 
 	sum := SessionSummary{
@@ -443,7 +450,7 @@ func (s *Server) start(p StartParams) (SessionSummary, error) {
 	out := ss.summary()
 	ss.mu.Unlock()
 	go ss.run()
-	return out, nil
+	return out, false, nil
 }
 
 // PastSession is a session read from its transcript on disk.

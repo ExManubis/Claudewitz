@@ -46,7 +46,7 @@ func main() {
 	flag.BoolVar(&opts.Continue, "continue", false, "continue the most recent session in this directory")
 	flag.StringVar(&opts.CWD, "cwd", "", "working directory (defaults to current)")
 	theme := flag.String("theme", "", "colour theme for this run (overrides the saved one)")
-	useDaemon := flag.Bool("daemon", false, "experimental: run the session in the claudewitz daemon")
+	noDaemon := flag.Bool("no-daemon", false, "run claude directly instead of in the claudewitz daemon")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -77,17 +77,18 @@ func main() {
 	}
 
 	var start tui.Starter // nil: run claude directly
-	if *useDaemon {
+	var notice string
+	if !*noDaemon {
 		c, err := connectDaemon(ctx, opts.Binary)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "claudewitz: %v\n", err)
-			os.Exit(1)
+			notice = fmt.Sprintf("couldn't reach the claudewitz daemon (%v); this session runs here and ends when you quit", err)
+		} else {
+			defer c.Close()
+			start = client.Starter(c)
 		}
-		defer c.Close()
-		start = client.Starter(c)
 	}
 
-	p := tea.NewProgram(tui.New(ctx, opts, cfg, start), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
+	p := tea.NewProgram(tui.New(ctx, opts, cfg, start).WithNotice(notice), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

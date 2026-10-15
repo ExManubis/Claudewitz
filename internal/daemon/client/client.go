@@ -231,22 +231,33 @@ func (c *Client) List(ctx context.Context) ([]daemon.SessionSummary, error) {
 }
 
 // Start starts a session (or finds the live one being resumed).
-func (c *Client) Start(ctx context.Context, p daemon.StartParams) (daemon.SessionSummary, error) {
+func (c *Client) Start(ctx context.Context, p daemon.StartParams) (daemon.StartResult, error) {
 	var r daemon.StartResult
 	err := c.Call(ctx, "session.start", p, &r)
-	return r.Session, err
+	return r, err
 }
 
 // Subscribe attaches to a session's stream, replaying what the daemon still
 // holds after since (everything when since is nil).
 func (c *Client) Subscribe(ctx context.Context, id string, since *int64) (*Session, daemon.SubscribeResult, error) {
+	return c.subscribe(ctx, daemon.SubscribeParams{Session: id, Since: since})
+}
+
+// SubscribeLive attaches to a session's stream without replaying earlier
+// events, for a client that loads them from the transcript instead.
+func (c *Client) SubscribeLive(ctx context.Context, id string) (*Session, daemon.SubscribeResult, error) {
+	return c.subscribe(ctx, daemon.SubscribeParams{Session: id, Live: true})
+}
+
+func (c *Client) subscribe(ctx context.Context, p daemon.SubscribeParams) (*Session, daemon.SubscribeResult, error) {
+	id := p.Session
 	s := newSession(c, id)
 	// Registered before asking, since the replay follows the reply at once.
 	c.mu.Lock()
 	c.subs[id] = s
 	c.mu.Unlock()
 	var r daemon.SubscribeResult
-	if err := c.Call(ctx, "session.subscribe", daemon.SubscribeParams{Session: id, Since: since}, &r); err != nil {
+	if err := c.Call(ctx, "session.subscribe", p, &r); err != nil {
 		c.take(id)
 		return nil, r, err
 	}
@@ -255,10 +266,12 @@ func (c *Client) Subscribe(ctx context.Context, id string, since *int64) (*Sessi
 }
 
 // Starter starts a session in the daemon and subscribes to it, for
-// tui.New. The claude binary is the daemon's, not opts.Binary.
+// tui.New. The claude binary is the daemon's, not opts.Binary. When
+// resume or continue finds the session already live, it attaches without
+// replay: the TUI shows the history from the transcript on disk.
 func Starter(c *Client) func(ctx context.Context, opts claude.Options) (claude.Session, error) {
 	return func(ctx context.Context, opts claude.Options) (claude.Session, error) {
-		sum, err := c.Start(ctx, daemon.StartParams{
+		r, err := c.Start(ctx, daemon.StartParams{
 			CWD:            opts.CWD,
 			Model:          opts.Model,
 			Effort:         opts.Effort,
@@ -270,7 +283,13 @@ func Starter(c *Client) func(ctx context.Context, opts claude.Options) (claude.S
 		if err != nil {
 			return nil, err
 		}
-		s, _, err := c.Subscribe(ctx, sum.ID, nil)
+		subscribe := c.Subscribe
+		if r.Attached {
+			subscribe = func(ctx context.Context, id string, _ *int64) (*Session, daemon.SubscribeResult, error) {
+				return c.SubscribeLive(ctx, id)
+			}
+		}
+		s, _, err := subscribe(ctx, r.Session.ID, nil)
 		if err != nil {
 			return nil, err
 		}

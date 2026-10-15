@@ -15,8 +15,12 @@ import (
 // Protocol is the protocol version this daemon speaks.
 const Protocol = 1
 
-// SocketPath is the local listener, ~/.claudewitz/daemon.sock.
+// SocketPath is the local listener, ~/.claudewitz/daemon.sock, or
+// $CLAUDEWITZ_SOCKET (for running a second daemon while developing).
 func SocketPath() string {
+	if p := os.Getenv("CLAUDEWITZ_SOCKET"); p != "" {
+		return p
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(".claudewitz", "daemon.sock")
@@ -156,6 +160,9 @@ type StartParams struct {
 
 type StartResult struct {
 	Session SessionSummary `json:"session"`
+	// Attached is true when resume or continue found the session already
+	// live, so no new claude was started.
+	Attached bool `json:"attached,omitempty"`
 }
 
 type SessionParams struct {
@@ -165,6 +172,9 @@ type SessionParams struct {
 type SubscribeParams struct {
 	Session string `json:"session"`
 	Since   *int64 `json:"since,omitempty"`
+	// Live skips the replay of earlier events (the client has them from
+	// the transcript on disk) except the CLI's init and initialize answer.
+	Live bool `json:"live,omitempty"`
 }
 
 type SubscribeResult struct {

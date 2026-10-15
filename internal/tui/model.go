@@ -73,6 +73,8 @@ type Model struct {
 	gitLoaded bool
 	gitBusy   bool
 	showHelp  bool
+	quitAsk   bool   // asking whether to leave a daemon session running
+	notice    string // shown in the chat at startup
 	files     []string
 	vp        viewport.Model
 	input     textarea.Model
@@ -185,8 +187,20 @@ func New(ctx context.Context, opts claude.Options, cfg config.Config, start Star
 	}
 }
 
+// WithNotice shows msg in the chat once the TUI starts.
+func (m Model) WithNotice(msg string) Model {
+	m.notice = msg
+	return m
+}
+
+type noticeMsg string
+
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, m.startCmd(m.opts), indexFiles(m.opts.CWD), m.refreshGit(), gitPoll(), loadHistory(m.opts.CWD)}
+	if m.notice != "" {
+		notice := m.notice
+		cmds = append(cmds, func() tea.Msg { return noticeMsg(notice) })
+	}
 	if m.opts.Resume != "" || m.opts.Continue {
 		cmds = append(cmds, loadTranscript(m.opts.CWD, m.opts.Resume))
 	}
@@ -272,6 +286,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.layout()
 		m.ready = true
+		m.refresh()
+
+	case noticeMsg:
+		m.chat.info("%s", string(msg))
 		m.refresh()
 
 	case startedMsg:
@@ -419,6 +437,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if !m.mouseDown {
 			m.textSel = nil // any key clears a mouse selection
+		}
+		if m.quitAsk {
+			return m, m.handleQuitKey(msg)
 		}
 		if m.showHelp {
 			switch msg.String() {
@@ -608,11 +629,54 @@ func (m *Model) interrupt() {
 	m.refresh()
 }
 
+// detacher is a session that can keep running without this TUI: one held
+// by the daemon.
+type detacher interface{ Detach() error }
+
+// quit ends a local session. A daemon session may outlive the TUI, so
+// quitting asks whether to detach (the default) or stop it.
 func (m *Model) quit() tea.Cmd {
+	if _, ok := m.proc.(detacher); ok {
+		m.quitAsk = true
+		m.input.Blur()
+		m.layout()
+		return nil
+	}
 	if m.proc != nil {
 		_ = m.proc.Close()
 	}
 	return tea.Quit
+}
+
+func (m *Model) handleQuitKey(k tea.KeyMsg) tea.Cmd {
+	switch k.String() {
+	case "enter", "d", "ctrl+d", "ctrl+c":
+		if d, ok := m.proc.(detacher); ok {
+			_ = d.Detach()
+		}
+		return tea.Quit
+	case "s":
+		if m.proc != nil {
+			_ = m.proc.Close()
+		}
+		return tea.Quit
+	case "esc", "n", "q":
+		m.quitAsk = false
+		if !m.chatFocus {
+			m.input.Focus()
+		}
+		m.layout()
+	}
+	return nil
+}
+
+func (m Model) quitView() string {
+	title := warnStyle.Bold(true).Render("Leave this session running?")
+	detail := mutedStyle.Render("Detached, it keeps working in the claudewitz daemon; resume it with ctrl+r or claudewitz --continue.")
+	keys := statusKey.Render("d") + mutedStyle.Render(" detach  ") +
+		statusKey.Render("s") + mutedStyle.Render(" stop session  ") +
+		statusKey.Render("esc") + mutedStyle.Render(" cancel")
+	return permBox.Width(m.mainWidth() - 2).Render(title + "\n\n" + lipgloss.NewStyle().Width(m.mainWidth()-6).Render(detail) + "\n\n" + keys)
 }
 
 func (m *Model) handleEvent(ev claude.Event) (cmd tea.Cmd) {
@@ -1565,6 +1629,9 @@ func overlayBottom(base, pop string, height, width int) string {
 }
 
 func (m Model) bottomView() string {
+	if m.quitAsk {
+		return m.quitView()
+	}
 	if len(m.pending) > 0 {
 		return m.permissionView()
 	}
