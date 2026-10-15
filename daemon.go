@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,6 +31,9 @@ func runDaemon(args []string) {
 		case "remote":
 			runDaemonRemote(args[1:])
 			return
+		case "stop":
+			runDaemonStop(args[1:])
+			return
 		}
 	}
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
@@ -45,7 +51,14 @@ func runDaemon(args []string) {
 		fmt.Fprintf(os.Stderr, "claudewitz daemon: %v\n", err)
 		os.Exit(1)
 	}
-	defer os.Remove(*sock)
+	// Remove the socket on the way out, unless a newer daemon has already
+	// replaced it (see replaceStale).
+	own, _ := os.Stat(*sock)
+	defer func() {
+		if cur, err := os.Stat(*sock); err == nil && own != nil && os.SameFile(own, cur) {
+			_ = os.Remove(*sock)
+		}
+	}()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -64,30 +77,37 @@ func runDaemon(args []string) {
 }
 
 // connectDaemon connects to the local daemon, starting one in the
-// background if nothing answers.
-func connectDaemon(ctx context.Context, bin string) (*client.Client, error) {
+// background if nothing answers. A daemon from another claudewitz version
+// (after an upgrade it is the old binary) is replaced when it has no live
+// sessions; otherwise it is kept, and note says so.
+func connectDaemon(ctx context.Context, bin string) (c *client.Client, note string, err error) {
 	sock := daemon.SocketPath()
 	if c, err := client.Dial(ctx, sock, "tui", versionString()); err == nil {
-		return c, nil
+		if c.Hello.DaemonVersion == versionString() {
+			return c, "", nil
+		}
+		if note := replaceStale(ctx, c, sock); note != "" {
+			return c, note, nil
+		}
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	logPath := filepath.Join(filepath.Dir(sock), "daemon.log")
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer logf.Close()
 	cmd := exec.Command(exe, "daemon", "-claude", bin, "-socket", sock)
 	cmd.Stdout, cmd.Stderr = logf, logf
 	detach(cmd) // outlive this terminal
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("starting the daemon: %w", err)
+		return nil, "", fmt.Errorf("starting the daemon: %w", err)
 	}
 	_ = cmd.Process.Release()
 
@@ -95,11 +115,59 @@ func connectDaemon(ctx context.Context, bin string) (*client.Client, error) {
 	for {
 		c, err := client.Dial(ctx, sock, "tui", versionString())
 		if err == nil {
-			return c, nil
+			return c, "", nil
 		}
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("the daemon didn't come up (see %s): %w", logPath, err)
+			return nil, "", fmt.Errorf("the daemon didn't come up (see %s): %w", logPath, err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// replaceStale asks a daemon of another version to exit and waits until it
+// has. It returns a note, and leaves c open, if the daemon stays.
+func replaceStale(ctx context.Context, c *client.Client, sock string) (note string) {
+	old := c.Hello.DaemonVersion
+	err := c.Call(ctx, "daemon.stop", daemon.StopParams{}, nil)
+	var e *daemon.Error
+	switch {
+	case err == nil:
+	case errors.As(err, &e) && e.Code == daemon.CodeBusy:
+		return fmt.Sprintf("the claudewitz daemon is still %s (this is %s) because it has live sessions; "+
+			"run `claudewitz daemon stop` once they're done", old, versionString())
+	default:
+		return fmt.Sprintf("the claudewitz daemon is %s (this is %s) and couldn't be replaced: %v", old, versionString(), err)
+	}
+	c.Close()
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		conn, err := net.DialTimeout("unix", sock, 200*time.Millisecond)
+		if err != nil {
+			break
+		}
+		conn.Close()
+	}
+	return ""
+}
+
+// liveNote mentions the sessions already live in the daemon, so detached
+// ones don't pile up unnoticed.
+func liveNote(ctx context.Context, c *client.Client) string {
+	list, err := c.List(ctx)
+	if err != nil || len(list) == 0 {
+		return ""
+	}
+	var names []string
+	for i, s := range list {
+		if i == 3 {
+			names = append(names, fmt.Sprintf("%d more", len(list)-3))
+			break
+		}
+		names = append(names, fmt.Sprintf("%s (%s)", filepath.Base(s.CWD), s.State))
+	}
+	what := "1 session is"
+	if len(list) > 1 {
+		what = fmt.Sprintf("%d sessions are", len(list))
+	}
+	return fmt.Sprintf("%s already live in the daemon: %s. ctrl+r resumes one; `claudewitz daemon status` lists them.",
+		what, strings.Join(names, ", "))
 }

@@ -46,7 +46,8 @@ type Server struct {
 	// means TailscaleIP.
 	TailscaleAddr func() (netip.Addr, error)
 
-	ctx      context.Context // outlives requests; ends the processes
+	ctx      context.Context    // outlives requests; ends the processes
+	stop     context.CancelFunc // ends Serve, for daemon.stop
 	mu       sync.RWMutex
 	sessions map[string]*session
 	order    []string // session ids by start
@@ -69,7 +70,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	s.mu.Lock()
-	s.ctx = ctx
+	s.ctx, s.stop = ctx, cancel
 	s.sessions = map[string]*session{}
 	s.conns = map[*conn]bool{}
 	s.idleFrom = time.Now()
@@ -353,6 +354,16 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 		devs, err := s.deviceList()
 		return DevicesResult{Devices: devs}, err
 
+	case "daemon.stop":
+		if err := localOnly(); err != nil {
+			return nil, err
+		}
+		var p StopParams
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		return s.stopDaemon(p)
+
 	case "devices.revoke":
 		if err := localOnly(); err != nil {
 			return nil, err
@@ -461,6 +472,19 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 		return withSession(p.Session, func(ss *session) error { ss.stop(); return nil })
 	}
 	return nil, &Error{CodeUnknownMethod, "unknown method " + req.Method}
+}
+
+// stopDaemon ends Serve shortly after the reply goes out.
+func (s *Server) stopDaemon(p StopParams) (any, error) {
+	if n := len(s.list()); n > 0 && !p.Force {
+		return nil, &Error{CodeBusy, fmt.Sprintf("%d live session(s) would end; stop them first, or force it", n)}
+	}
+	s.mu.RLock()
+	stop := s.stop
+	s.mu.RUnlock()
+	s.logf("stopping on request")
+	time.AfterFunc(100*time.Millisecond, stop)
+	return struct{}{}, nil
 }
 
 func wrap(err error) error {

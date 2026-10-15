@@ -41,6 +41,9 @@ from the session rather than ending it, and it stays live in the daemon (visible
 reattachable from any TUI) until someone stops it with `session.stop`. The TUI's quit offers
 "detach" (default) or "stop".
 - `claudewitz daemon status` shows pid, uptime, listeners, sessions and paired devices.
+- `claudewitz daemon stop` ends the daemon; it refuses while sessions are live unless `-force`d.
+- A TUI that finds a daemon of another version (after an upgrade it is the old binary) asks it to
+  stop and starts a fresh one; if the old one has live sessions it is kept, and the TUI says so.
 - `claudewitz --no-daemon` keeps today's behaviour (TUI spawns `claude` directly), for
   debugging and as a fallback while the daemon matures.
 
@@ -143,6 +146,7 @@ Management methods, all local only, used by the `claudewitz` CLI:
 | `pair.code` | `{}` | `{host, port, code, expiresAt}` |
 | `devices.list` | `{}` | `{devices: [{id, name, pairedAt, lastSeen, connected}]}` |
 | `devices.revoke` | `{device}` (id or name) | `{device}` |
+| `daemon.stop` | `{force?}` | `{}`; the daemon exits just after replying. Without `force`, `busy` while sessions are live |
 
 ### Overview (every client gets this, no subscription needed)
 

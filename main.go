@@ -88,12 +88,13 @@ func main() {
 	var start tui.Starter // nil: run claude directly
 	var notice string
 	if !*noDaemon {
-		c, err := connectDaemon(ctx, opts.Binary)
+		c, note, err := connectDaemon(ctx, opts.Binary)
 		if err != nil {
 			notice = fmt.Sprintf("couldn't reach the claudewitz daemon (%v); this session runs here and ends when you quit", err)
 		} else {
 			defer c.Close()
 			start = client.Starter(c)
+			notice = strings.TrimSpace(note + "\n" + liveNote(ctx, c))
 		}
 	}
 

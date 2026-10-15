@@ -54,6 +54,7 @@ const (
 	CodeProtocol      = "protocol"
 	CodeUnknownMethod = "unknown_method"
 	CodeFailed        = "failed"
+	CodeBusy          = "busy"
 )
 
 // Error is a failed request.
@@ -324,6 +325,12 @@ type DeviceInfo struct {
 
 type DevicesResult struct {
 	Devices []DeviceInfo `json:"devices"`
+}
+
+// StopParams asks the daemon to exit. Live sessions end with it, so
+// without Force it refuses while there are any.
+type StopParams struct {
+	Force bool `json:"force"`
 }
 
 type RevokeParams struct {

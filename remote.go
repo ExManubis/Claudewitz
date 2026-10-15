@@ -27,6 +27,28 @@ func fail(format string, args ...any) {
 	os.Exit(1)
 }
 
+func warn(note string) {
+	if note != "" {
+		fmt.Fprintln(os.Stderr, "claudewitz: "+note)
+	}
+}
+
+// runDaemonStop is `claudewitz daemon stop [-force]`.
+func runDaemonStop(args []string) {
+	fs := flag.NewFlagSet("daemon stop", flag.ExitOnError)
+	force := fs.Bool("force", false, "stop even if sessions are live (they end with it)")
+	_ = fs.Parse(args)
+	ctx := context.Background()
+	c := dialRunning(ctx)
+	if c == nil {
+		fmt.Println("no daemon is running")
+		return
+	}
+	defer c.Close()
+	call(ctx, c, "daemon.stop", daemon.StopParams{Force: *force}, nil)
+	fmt.Println("daemon stopped")
+}
+
 // dialRunning connects to the daemon if one is running, without starting one.
 func dialRunning(ctx context.Context) *client.Client {
 	c, err := client.Dial(ctx, daemon.SocketPath(), "cli", versionString())
@@ -79,9 +101,11 @@ func runDaemonRemote(args []string) {
 	}
 	if c == nil {
 		var err error
-		if c, err = connectDaemon(ctx, *bin); err != nil {
+		var note string
+		if c, note, err = connectDaemon(ctx, *bin); err != nil {
 			fail("%v", err)
 		}
+		warn(note)
 	}
 	defer c.Close()
 	var st daemon.RemoteStatus
@@ -183,10 +207,11 @@ func runPair(args []string) {
 	bin := fs.String("claude", "claude", "path to the claude CLI, if the daemon has to be started")
 	_ = fs.Parse(args)
 	ctx := context.Background()
-	c, err := connectDaemon(ctx, *bin)
+	c, note, err := connectDaemon(ctx, *bin)
 	if err != nil {
 		fail("%v", err)
 	}
+	warn(note)
 	defer c.Close()
 	var code daemon.PairCodeResult
 	call(ctx, c, "pair.code", struct{}{}, &code)

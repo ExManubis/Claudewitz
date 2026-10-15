@@ -118,6 +118,8 @@ type harness struct {
 	procs chan *fakeProc
 	// prepare, if set, adjusts each fake before it is handed out.
 	prepare func(*fakeProc)
+	// done is closed when Serve returns.
+	done chan struct{}
 }
 
 func startDaemon(t *testing.T) *harness {
@@ -146,9 +148,9 @@ func startDaemon(t *testing.T) *harness {
 		},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { _ = srv.Serve(ctx, ln); close(done) }()
-	t.Cleanup(func() { cancel(); <-done })
+	h.done = make(chan struct{})
+	go func() { _ = srv.Serve(ctx, ln); close(h.done) }()
+	t.Cleanup(func() { cancel(); <-h.done })
 	return h
 }
 
@@ -762,5 +764,45 @@ func TestResumeSkipsStoppingSession(t *testing.T) {
 	}
 	if f2 := h.proc(t); f2.opts.Resume != "cs-1" {
 		t.Fatalf("new process opts: %+v", f2.opts)
+	}
+}
+
+func TestDaemonStop(t *testing.T) {
+	h := startDaemon(t)
+	c := h.dial(t, "cli")
+	startSession(t, h, c)
+
+	// A live session would end with the daemon, so a plain stop is refused.
+	err := c.Call(context.Background(), "daemon.stop", daemon.StopParams{}, nil)
+	var e *daemon.Error
+	if !errors.As(err, &e) || e.Code != daemon.CodeBusy {
+		t.Fatalf("stop with a live session: %v", err)
+	}
+	select {
+	case <-h.done:
+		t.Fatal("the daemon stopped anyway")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	if err := c.Call(context.Background(), "daemon.stop", daemon.StopParams{Force: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-h.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("forced stop didn't end the daemon")
+	}
+}
+
+func TestDaemonStopWhenIdle(t *testing.T) {
+	h := startDaemon(t)
+	c := h.dial(t, "cli")
+	if err := c.Call(context.Background(), "daemon.stop", daemon.StopParams{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-h.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop didn't end the idle daemon")
 	}
 }
