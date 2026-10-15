@@ -89,7 +89,7 @@ func (p *folderPicker) applyFilter() {
 			p.shown = append(p.shown, d)
 		}
 	}
-	p.sel = min(p.sel, max(0, len(p.shown)-1))
+	p.sel = max(0, min(p.sel, len(p.shown)-1))
 }
 
 func (p *folderPicker) choice() string {
@@ -104,7 +104,7 @@ func (p *folderPicker) choice() string {
 func completeDir(input string) string {
 	path := expandHome(input)
 	parent, prefix := filepath.Dir(path), filepath.Base(path)
-	if strings.HasSuffix(path, "/") {
+	if strings.HasSuffix(input, "/") {
 		parent, prefix = path, ""
 	}
 	entries, err := os.ReadDir(parent)
@@ -135,7 +135,9 @@ func completeDir(input string) string {
 func (m *Model) openFolders() tea.Cmd {
 	var live []string
 	for _, s := range m.live {
-		live = append(live, s.CWD)
+		if s.CWD != "" {
+			live = append(live, s.CWD)
+		}
 	}
 	m.folders = newFolderPicker(live)
 	m.input.Blur()
@@ -150,10 +152,14 @@ func (m *Model) handleFoldersKey(k tea.KeyMsg) tea.Cmd {
 		m.input.Focus()
 		return nil
 	case "up", "ctrl+p":
-		p.sel = max(0, p.sel-1)
+		if len(p.shown) > 0 {
+			p.sel = max(0, p.sel-1)
+		}
 		return nil
 	case "down", "ctrl+n":
-		p.sel = min(len(p.shown)-1, p.sel+1)
+		if len(p.shown) > 0 {
+			p.sel = min(len(p.shown)-1, p.sel+1)
+		}
 		return nil
 	case "tab":
 		p.filter.SetValue(completeDir(p.filter.Value()))
@@ -188,7 +194,7 @@ func (p *folderPicker) view(width, height int) string {
 	w := min(72, width-4)
 	lines := []string{agentStyle.Render("New session in…"), p.filter.View(), ""}
 	for i, d := range p.shown {
-		if i == height-8 {
+		if i == max(1, height-8) {
 			break
 		}
 		row := "  " + prettyPath(d)

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/exmanubis/claudewitz/internal/daemon"
 )
 
@@ -42,5 +44,32 @@ func TestNewSessionStartsInChosenFolder(t *testing.T) {
 	m = run(t, m, m.newSessionIn(dir))
 	if len(d.started) != 1 || d.started[0].CWD != dir || m.opts.CWD != dir || m.sessionView.id != "s_new1" {
 		t.Fatalf("started %+v focused %q in %q", d.started, m.sessionView.id, m.opts.CWD)
+	}
+}
+
+func TestFolderPickerSelectionStaysInRange(t *testing.T) {
+	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle))
+	m := daemonModel(t, d)
+	m.openFolders()
+	m.folders.filter.SetValue("zzz-no-match")
+	m.folders.applyFilter()
+	m.handleFoldersKey(tea.KeyMsg{Type: tea.KeyDown})
+	m.handleFoldersKey(tea.KeyMsg{Type: tea.KeyUp})
+	m.folders.filter.SetValue("")
+	m.folders.applyFilter()
+	if got := m.folders.choice(); got != "/x/a" {
+		t.Fatalf("choice %q", got)
+	}
+}
+
+func TestCompleteDirTrailingSlash(t *testing.T) {
+	dir := t.TempDir()
+	os.Mkdir(filepath.Join(dir, "sub"), 0o755)
+	if got := completeDir(dir + "/"); got != filepath.Join(dir, "sub")+"/" {
+		t.Fatalf("abs: %q", got)
+	}
+	t.Setenv("HOME", dir)
+	if got := completeDir("~/"); got != filepath.Join(dir, "sub")+"/" {
+		t.Fatalf("home: %q", got)
 	}
 }
