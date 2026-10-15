@@ -29,7 +29,11 @@ iPhone app ────────▶│ one WebSocket protocol on both listene
 
 The daemon is part of the claudewitz binary (`claudewitz daemon`), not a separate install.
 
-- **On demand (default).** Running `claudewitz` connects to `~/.claudewitz/daemon.sock`; if
+For now the TUI uses the daemon only with `claudewitz -daemon`; without it the TUI spawns `claude`
+directly, as before. It becomes the default once the TUI can show and switch between the
+daemon's sessions.
+
+- **On demand.** Running `claudewitz -daemon` connects to `~/.claudewitz/daemon.sock`; if
   nothing answers it starts `claudewitz daemon` detached and connects. The daemon exits once
   it has had no clients and no live sessions for 10 min.
 - **Always on.** `claudewitz daemon install` writes a launchd LaunchAgent
@@ -44,8 +48,6 @@ reattachable from any TUI) until someone stops it with `session.stop`. The TUI's
 - `claudewitz daemon stop` ends the daemon; it refuses while sessions are live unless `-force`d.
 - A TUI that finds a daemon of another version (after an upgrade it is the old binary) asks it to
   stop and starts a fresh one; if the old one has live sessions it is kept, and the TUI says so.
-- `claudewitz --no-daemon` keeps today's behaviour (TUI spawns `claude` directly), for
-  debugging and as a fallback while the daemon matures.
 
 If the daemon is restarted, live `claude` processes go with it; sessions come back as resumable
 (`--resume`) from their transcripts, so nothing is lost but the in-flight turn.
@@ -281,7 +283,7 @@ Payloads carry session id, cwd name and a one-line summary; no code or transcrip
 1. Put an interface in front of `claude.Process` (`Events`, `Send`, `SendWithImages`, `Respond`,
    `Interrupt`, `Set*`, `Close`) and have `internal/tui` use only that.
 2. Add `internal/daemon` (server) and `internal/daemon/client`, whose session handle implements
-   the same interface over the socket. The TUI picks local or daemon at startup (`--no-daemon`).
+   the same interface over the socket. The TUI picks local or daemon at startup (`-daemon`).
 3. Move git polling into the daemon, per cwd, so the TUI and phone share one poller.
 4. Add the remote listener, pairing and APNs, then build the app against this doc.
 
