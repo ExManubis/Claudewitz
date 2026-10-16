@@ -1,8 +1,13 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/exmanubis/claudewitz/internal/claude"
 )
 
 func TestRevealStep(t *testing.T) {
@@ -50,5 +55,27 @@ func TestUnpacedEntriesShowEverything(t *testing.T) {
 	e := &entry{kind: kindAssistant, text: "replayed history"}
 	if e.visibleText() != e.text {
 		t.Fatal("history should render in full")
+	}
+}
+
+// A reply that streamed in while its session was out of view shows in full
+// as soon as the session is focused, instead of waiting on the next event.
+func TestFocusShowsTextStreamedInTheBackground(t *testing.T) {
+	m := readyModel(t)
+	bg := newSessionView(claude.Options{CWD: t.TempDir()})
+	m.views = append(m.views, bg)
+	m.inView(bg, func() {
+		stream(t, &m, `{"event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}`)
+		stream(t, &m, `{"event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done while you were away"}}}`)
+	})
+	if bg.chat.entries[0].visibleText() != "" {
+		t.Fatal("the hidden reply was revealed before focus")
+	}
+	_ = m.focus(bg)
+	if got := m.chat.entries[0].visibleText(); got != "done while you were away" {
+		t.Fatalf("after focus the reply shows %q", got)
+	}
+	if v := ansi.Strip(m.vp.View()); !strings.Contains(v, "done while you were away") {
+		t.Fatalf("the reply isn't drawn:\n%s", v)
 	}
 }

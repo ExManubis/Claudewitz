@@ -73,6 +73,16 @@ func (c *chat) revealing() bool {
 	return false
 }
 
+// revealAll shows every paced entry's text as it stands, for a session
+// that streamed while out of view: the reveal only paces the focused chat.
+func (c *chat) revealAll() {
+	for _, e := range c.entries {
+		if e.paced && e.shown < len(e.text) {
+			e.shown, e.dirty = len(e.text), true
+		}
+	}
+}
+
 // startReveal begins the reveal tick loop if it isn't already running.
 func (m *Model) startReveal() tea.Cmd {
 	if m.revealTicking || !m.chat.revealing() {
