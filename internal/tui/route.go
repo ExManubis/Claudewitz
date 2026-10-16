@@ -71,6 +71,7 @@ func (m *Model) focus(v *sessionView) tea.Cmd {
 		m.input.Focus()
 	}
 	m.comp.update(m)
+	m.chat.revealAll()
 	m.layout()
 	m.refresh()
 	return tea.Batch(cmds...)
