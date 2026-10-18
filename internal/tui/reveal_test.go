@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
@@ -77,5 +78,69 @@ func TestFocusShowsTextStreamedInTheBackground(t *testing.T) {
 	}
 	if v := ansi.Strip(m.vp.View()); !strings.Contains(v, "done while you were away") {
 		t.Fatalf("the reply isn't drawn:\n%s", v)
+	}
+}
+
+// An entry that's cheap to render redraws on every reveal frame.
+func TestRevealRedrawsCheapEntriesEveryFrame(t *testing.T) {
+	c := newChat(newTracker())
+	e := c.add(&entry{kind: kindAssistant, paced: true, renderCost: time.Millisecond})
+	e.setText(strings.Repeat("word ", 400))
+	e.dirty = false
+	for range 5 {
+		if !c.reveal(1.0/revealFPS) || !e.dirty {
+			t.Fatal("a cheap entry should redraw every frame")
+		}
+		e.dirty = false
+	}
+}
+
+// An entry that's costly to render (a long code block streaming, say)
+// redraws only once enough time has passed to pay for the last render,
+// so it can't hog the UI loop. The reveal still moves on underneath.
+func TestRevealThrottlesCostlyEntries(t *testing.T) {
+	c := newChat(newTracker())
+	e := c.add(&entry{kind: kindAssistant, paced: true, renderCost: 50 * time.Millisecond})
+	e.setText(strings.Repeat("word ", 4000))
+	e.dirty = false
+	dt := 1.0 / revealFPS
+	frames := 0
+	for !e.dirty {
+		before := e.shown
+		changed := c.reveal(dt)
+		if e.shown <= before {
+			t.Fatal("the reveal stalled while throttled")
+		}
+		if changed != e.dirty {
+			t.Fatalf("reveal reported change=%v with dirty=%v", changed, e.dirty)
+		}
+		if frames++; frames > revealFPS {
+			t.Fatal("a throttled entry never redrew")
+		}
+	}
+	if gap := float64(frames) * dt; gap < revealCostRatio*0.05 {
+		t.Errorf("redrew after %.3fs, want at least %.3fs for a 50ms render", gap, revealCostRatio*0.05)
+	}
+}
+
+// However costly the entry, the frame that catches up with the stream
+// draws, or the tick loop would stop with the tail undrawn.
+func TestRevealAlwaysDrawsTheLastFrame(t *testing.T) {
+	c := newChat(newTracker())
+	e := c.add(&entry{kind: kindAssistant, paced: true, renderCost: time.Second})
+	e.setText("short")
+	e.dirty = false
+	if !c.reveal(1) || !e.dirty || e.visibleText() != "short" {
+		t.Fatalf("caught-up frame should draw: dirty=%v visible=%q", e.dirty, e.visibleText())
+	}
+}
+
+// Rendering a paced entry records what it cost.
+func TestViewRecordsRenderCostOfPacedEntries(t *testing.T) {
+	c := newChat(newTracker())
+	e := c.add(&entry{kind: kindAssistant, paced: true, text: "# Heading\n\nSome *text*.", shown: 23})
+	_ = c.View(80)
+	if e.renderCost <= 0 {
+		t.Fatal("no render cost recorded")
 	}
 }
