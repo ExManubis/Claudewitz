@@ -65,6 +65,10 @@ type entry struct {
 	// shown bytes at a time (see reveal.go)
 	paced bool
 	shown int
+	// what the last render cost, and seconds of reveal since it, so a
+	// costly entry redraws less often (see reveal.go)
+	renderCost  time.Duration
+	sinceRender float64
 
 	// render cache
 	rendered string
@@ -217,8 +221,12 @@ func (c *chat) View(width int) string {
 	for i := keep; i < len(c.entries); i++ {
 		e := c.entries[i]
 		if e.dirty || e.width != width {
+			start := time.Now()
 			e.rendered = c.renderEntry(e, width)
 			e.width, e.dirty = width, false
+			if e.paced {
+				e.renderCost = time.Since(start)
+			}
 		}
 		if prev != nil {
 			b.WriteString("\n")

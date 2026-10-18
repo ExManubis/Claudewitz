@@ -21,6 +21,10 @@ const (
 	revealTau = 0.12
 	// revealMinCPS keeps a small backlog moving at a readable pace.
 	revealMinCPS = 90
+	// revealCostRatio is how many times its last render's cost an entry
+	// waits before redrawing, so rendering it takes at most about a
+	// third of the loop's time.
+	revealCostRatio = 3
 )
 
 type revealTickMsg struct{ id int }
@@ -46,7 +50,10 @@ func revealStep(backlog int, dt float64) int {
 }
 
 // reveal advances every paced entry by dt seconds and reports whether any
-// of them changed.
+// of them needs a redraw. An entry that's costly to render (a long code
+// block can't be cached until its fence closes) redraws only every few
+// times its cost, so it can't starve the loop of time for keys and the
+// rest of the screen; the frame that catches up always draws.
 func (c *chat) reveal(dt float64) bool {
 	changed := false
 	for _, e := range c.entries {
@@ -57,8 +64,12 @@ func (c *chat) reveal(dt float64) bool {
 		for n < len(e.text) && !utf8.RuneStart(e.text[n]) {
 			n++ // never split a character
 		}
-		e.shown, e.dirty = n, true
-		changed = true
+		e.shown = n
+		e.sinceRender += dt
+		if n == len(e.text) || e.sinceRender >= revealCostRatio*e.renderCost.Seconds() {
+			e.dirty, e.sinceRender = true, 0
+			changed = true
+		}
 	}
 	return changed
 }
