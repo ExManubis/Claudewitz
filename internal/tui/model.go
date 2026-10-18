@@ -42,13 +42,14 @@ type Model struct {
 	spaces map[string]*workspace // by folder
 	base   claude.Options        // flags every new session starts from
 
-	daemon    Daemon                  // nil without the claudewitz daemon
-	alwaysOn  AlwaysOn                // keeping the daemon running at login; nil without the daemon
-	live      []daemon.SessionSummary // every live session, in start order
-	done      map[string]bool         // turn ended while not focused
-	since     map[string]time.Time    // when each session entered its state
-	lastState map[string]rowState
-	killed    map[string]bool // sessions just killed, so late pushes don't bring their rows back
+	daemon     Daemon                  // nil without the claudewitz daemon
+	alwaysOn   AlwaysOn                // keeping the daemon running at login; nil without the daemon
+	live       []daemon.SessionSummary // every live session, in start order
+	done       map[string]bool         // turn ended while not focused
+	since      map[string]time.Time    // when each session entered its state
+	lastState  map[string]rowState
+	statusSent map[string]string // the program status reported, by record (progstatus.go)
+	killed     map[string]bool   // sessions just killed, so late pushes don't bring their rows back
 
 	ctx   context.Context
 	start Starter
@@ -145,6 +146,7 @@ func New(ctx context.Context, opts claude.Options, cfg config.Config, start Star
 		done:        map[string]bool{},
 		since:       map[string]time.Time{},
 		lastState:   map[string]rowState{},
+		statusSent:  map[string]string{},
 		killed:      map[string]bool{},
 		base:        opts,
 		ctx:         ctx,
@@ -267,6 +269,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			nm.vp.GotoBottom()
 		}
 	}
+	nm.syncStatus()
 	return nm, tea.Batch(cmd, nm.syncSparks())
 }
 

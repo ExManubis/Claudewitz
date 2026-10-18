@@ -112,7 +112,9 @@ func main() {
 		model = model.WithDaemon(hub).WithAlwaysOn(always)
 	}
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
-	if _, err := p.Run(); err != nil {
+	_, err = p.Run()
+	tui.ClearProgramStatus()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
