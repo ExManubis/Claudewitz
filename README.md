@@ -27,6 +27,9 @@ tools, MCP servers, skills, hooks, `CLAUDE.md` and session history.
 - **Sessions**: resume any past session (`ctrl+r`), with prompt history across sessions
 - **Model and effort picker** (`ctrl+t`), plus autocompletion for `/` commands and `@` files
 - **Desktop notifications** when Claude needs you or finishes a turn, and they work over SSH too
+- **Your terminal knows what each session is doing**: working, waiting on you, done or failed,
+  through the [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status)
+  (OSC 7501), for terminals that show it (Rex, PrompTTY)
 - **Recap** (`/recap`): your day with Claude, from Claude Code's transcripts: how long Claude
   worked, prompts, commits, pull requests, releases, green and red test runs, an hours chart,
   badges and your streak; `←→` walks back a month and `c` copies it as Markdown
