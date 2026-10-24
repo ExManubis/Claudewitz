@@ -1,0 +1,20 @@
+{
+  "working": 2,
+  "waiting": 1,
+  "done": 1,
+  "lead": {
+    "session": "s_1",
+    "name": "claudewitz",
+    "status": "waiting",
+    "tool": "Bash",
+    "line": "go test ./...",
+    "since": 1792836120
+  },
+  "others": [
+    {"name": "smallclaims", "status": "working"},
+    {"name": "pdf-summarizer", "status": "working"},
+    {"name": "landing-page", "status": "done", "since": 1792835800}
+  ],
+  "more": 0,
+  "updatedAt": 1792836162
+}

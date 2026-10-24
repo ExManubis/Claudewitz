@@ -73,6 +73,11 @@ type Server struct {
 	remoteErr string          // why an enabled remote listener is down
 	apns      *apns.Client    // nil while APNs isn't configured
 	apnsErr   string          // why a configured APNs key can't be used
+
+	actMu   sync.Mutex
+	actMemo map[string]*activityMemo // device id → its Live Activity
+	// manualActivities leaves tickActivities to the caller (tests).
+	manualActivities bool
 }
 
 // Serve accepts clients on ln until ctx ends or the daemon idles out.
@@ -86,6 +91,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.idleFrom = time.Now()
 	s.codes = map[string]time.Time{}
 	s.started = now()
+	s.actMemo = map[string]*activityMemo{}
 	s.local = ln.Addr().String()
 	s.mu.Unlock()
 	if s.Launch == nil {
@@ -104,6 +110,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.loadAPNs()
 	s.remoteMu.Unlock()
 	s.retryRemote()
+	if !s.manualActivities {
+		go s.runActivities(ctx.Done())
+	}
 	defer func() {
 		s.remoteMu.Lock()
 		s.closeRemote()
@@ -393,6 +402,20 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 			return nil, err
 		}
 		return s.registerPush(c, p)
+
+	case "device.registerActivity":
+		var p RegisterActivityParams
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		return s.registerActivity(c, p)
+
+	case "device.endActivity":
+		var p EndActivityParams
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		return s.endActivity(c, p)
 
 	case "pair.code":
 		if err := localOnly(); err != nil {

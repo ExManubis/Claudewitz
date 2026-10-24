@@ -1,7 +1,7 @@
 # Daemon and client protocol (draft)
 
-Status: built except alert pushes (the APNs transport and `device.registerPush` are built),
-git state and `session.changes`/`session.diff`. This is the contract between `claudewitz daemon`, the
+Status: built except alert pushes (the APNs transport, `device.registerPush` and the Live
+Activity are built), git state and `session.changes`/`session.diff`. This is the contract between `claudewitz daemon`, the
 claudewitz TUI and the iPhone companion app (separate repo).
 
 ## Why
@@ -146,6 +146,8 @@ can add things without breaking the other. Breaking changes bump `protocol` in `
 |---|---|---|
 | `hello` | `{protocol: 1, client: "tui" \| "ios", clientVersion}` | `{protocol, daemonVersion, account: Account}` |
 | `pair` | `{code, deviceName}` | `{token, deviceId}` (remote, unpaired connections only; see Transport and auth) |
+| `device.registerActivity` | `{pushToStartToken?, activity?: {id, pushToken}, sandbox, theme?}` | `{}`; paired phones only. The phone's Live Activity tokens (see Live Activity) |
+| `device.endActivity` | `{id}` | `{}`; the phone ended its activity on purpose (the setting turned off, disconnecting). The daemon forgets it and its push-to-start token until the phone registers again |
 | `device.registerPush` | `{apnsToken, sandbox}` | `{}`; paired phones only, stored with the device in `devices.json`. `sandbox` is true for development builds (their tokens only work with Apple's sandbox host) |
 
 ```jsonc
@@ -248,6 +250,8 @@ merges, releases and test runs come from the shell commands Claude ran and their
   "contextUsed": 41200, "contextWindow": 1000000,
   "costUSD": 1.92,
   "lastActivity": "2026-10-14T14:02:11Z",
+  "turnStartedAt": "2026-10-14T14:01:29Z", // when the current turn started; null while idle.
+                                  // The Live Activity's timer
   "lastTurnEndedAt": "2026-10-14T13:58:40Z", // null until a turn ends; "done · 14m" in overviews
   "lastError": null,              // why the session exited, when state=exited after a failure
   "clients": 2,                   // clients subscribed right now
@@ -339,6 +343,53 @@ forgets it and deletes the copy. Requests go over HTTP/2 to `api.push.apple.com`
 for a device that registered with `sandbox: true`, with an ES256 JWT re-signed every 50 minutes.
 A token APNs calls dead (410, `BadDeviceToken`, `Unregistered`, `DeviceTokenNotForTopic`) is
 dropped from `devices.json`.
+
+### Live Activity
+
+The phone shows one Live Activity for every live session: on the lock screen and in the Dynamic
+Island, how many sessions are working, waiting and done, and the most urgent one in full. The app
+starts it as you leave it and updates it while it runs; iOS suspends the app about 30s later, so
+from then on the daemon keeps it current with `liveactivity` pushes (topic
+`ai.claudewitz.ios.push-type.liveactivity`).
+
+- **Tokens.** The app sends `device.registerActivity` with its push-to-start token
+  (`Activity.pushToStartTokenUpdates`) and, for a running activity, its id and update token
+  (`pushTokenUpdates`). The daemon keeps them with the device in `devices.json`.
+- **Content.** Every second the daemon builds the content state from the live sessions and
+  pushes it when it changed. It is the app's `SessionsActivityAttributes.ContentState`, with
+  times in Unix seconds (ActivityKit decodes with a plain `JSONDecoder`):
+
+  ```jsonc
+  {
+    "working": 2, "waiting": 1, "done": 1,  // done: finished a turn in the last 30 min
+    "lead": {                               // the most urgent session; absent when none is
+      "session": "s_1", "name": "claudewitz", "status": "waiting",  // waiting | working | done
+      "tool": "Bash", "line": "go test ./...", "since": 1792836120
+    },
+    "others": [{"name": "smallclaims", "status": "working"},       // at most 3
+               {"name": "landing-page", "status": "done", "since": 1792835800}],
+    "more": 0, "updatedAt": 1792836162
+  }
+  ```
+
+  The lead is the session that has waited longest, else the one whose turn has run longest
+  (`turnStartedAt`), else the one that finished last. `line` is the waiting request's summary
+  or the latest activity (the title before there is one), one line of at most 80 characters.
+  Exited sessions don't show; starting ones count as idle. Both repos decode the same fixture
+  (`internal/daemon/testdata/live-activity-content-state.json` here).
+- **Start.** When something starts working or waiting and the phone has a push-to-start token
+  but no activity the daemon knows of, it sends `event: start` with
+  `attributes-type: SessionsActivityAttributes` and `attributes: {macName, theme}`; once, until
+  the app registers the new activity's token (iOS wakes it to do so) or 8 hours pass.
+- **Update.** `event: update`, `stale-date` 10 min ahead, `relevance-score` 100 while something
+  waits, else 50. A change of state (counts, the lead, what it waits on) goes out at once with
+  priority 10; a new activity line alone with priority 5, at most every 15s.
+- **End.** After 2 min with nothing working or waiting, `event: end` with the final state and a
+  `dismissal-date` 15 min ahead. iOS ends an activity after 8 hours; the daemon then forgets it
+  and starts a new one if work goes on. A token APNs calls gone is forgotten.
+
+The daemon pushes whether or not the phone is connected: a suspended phone's WebSocket can look
+alive for a while, and an update that matches what the app already shows does no harm.
 
 Not built yet: alert pushes. It will push to every registered device when:
 

@@ -334,6 +334,13 @@ func (s *session) exit(err error) {
 func (s *session) refresh() {
 	s.sum.Waiting = nil
 	switch {
+	case !s.busy:
+		s.sum.TurnStartedAt = nil
+	case s.sum.TurnStartedAt == nil:
+		t := now()
+		s.sum.TurnStartedAt = &t
+	}
+	switch {
 	case s.sum.State == StateExited:
 		return
 	case len(s.pending) > 0:
@@ -378,12 +385,12 @@ func (s *session) changed() {
 // sameSummary compares everything but LastActivity.
 func sameSummary(a, b SessionSummary) bool {
 	if !ptrEqual(a.ClaudeSessionID, b.ClaudeSessionID) || !ptrEqual(a.Waiting, b.Waiting) ||
-		!ptrEqual(a.Activity, b.Activity) || !ptrEqual(a.LastTurnEndedAt, b.LastTurnEndedAt) ||
-		!ptrEqual(a.LastError, b.LastError) {
+		!ptrEqual(a.Activity, b.Activity) || !ptrEqual(a.TurnStartedAt, b.TurnStartedAt) ||
+		!ptrEqual(a.LastTurnEndedAt, b.LastTurnEndedAt) || !ptrEqual(a.LastError, b.LastError) {
 		return false
 	}
-	a.ClaudeSessionID, a.Waiting, a.Activity, a.LastTurnEndedAt, a.LastError = nil, nil, nil, nil, nil
-	b.ClaudeSessionID, b.Waiting, b.Activity, b.LastTurnEndedAt, b.LastError = nil, nil, nil, nil, nil
+	a.ClaudeSessionID, a.Waiting, a.Activity, a.TurnStartedAt, a.LastTurnEndedAt, a.LastError = nil, nil, nil, nil, nil, nil
+	b.ClaudeSessionID, b.Waiting, b.Activity, b.TurnStartedAt, b.LastTurnEndedAt, b.LastError = nil, nil, nil, nil, nil, nil
 	a.LastActivity, b.LastActivity = time.Time{}, time.Time{}
 	return a == b
 }

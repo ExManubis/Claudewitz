@@ -28,3 +28,23 @@ func TestLocalCommandEchoStartsNoTurn(t *testing.T) {
 		t.Fatalf("after a prompt: state %s, title %q", got.State, got.Title)
 	}
 }
+
+func TestATurnKnowsWhenItStarted(t *testing.T) {
+	s := newSession(nil, "s_1", nil, SessionSummary{ID: "s_1"})
+	s.observe(line(t, `{"type":"system","subtype":"init","session_id":"c1","model":"claude-sonnet-5-5"}`))
+	if got := s.summary(); got.TurnStartedAt != nil {
+		t.Fatalf("idle with a turn start %v", got.TurnStartedAt)
+	}
+	s.observe(line(t, `{"type":"user","message":{"role":"user","content":"run the tests"},"parent_tool_use_id":null,"isReplay":true}`))
+	started := s.summary().TurnStartedAt
+	if started == nil {
+		t.Fatal("working without a turn start")
+	}
+	if again := s.summary().TurnStartedAt; again == nil || !again.Equal(*started) {
+		t.Fatal("the turn start moved")
+	}
+	s.observe(line(t, `{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0,"duration_ms":1}`))
+	if got := s.summary(); got.TurnStartedAt != nil {
+		t.Fatalf("the turn ended but kept its start %v", got.TurnStartedAt)
+	}
+}
