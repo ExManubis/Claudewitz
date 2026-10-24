@@ -119,6 +119,49 @@ func runDaemonRemote(args []string) {
 	suggestInstall()
 }
 
+// runDaemonAPNs is `claudewitz daemon apns -key K.p8 -key-id ID -team-id ID`
+// (or `off`): the key the daemon signs pushes to the phone with.
+func runDaemonAPNs(args []string) {
+	fs := flag.NewFlagSet("daemon apns", flag.ExitOnError)
+	key := fs.String("key", "", "the .p8 key file from developer.apple.com (Keys, with Apple Push Notifications service)")
+	keyID := fs.String("key-id", "", "the key's id (10 characters, shown with the key)")
+	teamID := fs.String("team-id", "", "your Apple developer team id")
+	topic := fs.String("topic", "", "the app's bundle id (default "+daemon.DefaultAPNsTopic+")")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: claudewitz daemon apns -key AuthKey_ID.p8 -key-id ID -team-id ID\n       claudewitz daemon apns off")
+		fs.PrintDefaults()
+	}
+	p := daemon.APNsSetParams{Off: len(args) == 1 && args[0] == "off"}
+	if !p.Off {
+		_ = fs.Parse(args)
+		if *key == "" || *keyID == "" || *teamID == "" {
+			fs.Usage()
+			os.Exit(2)
+		}
+		p.KeyPath, p.KeyID, p.TeamID, p.Topic = *key, *keyID, *teamID, *topic
+	}
+	ctx := context.Background()
+	var st daemon.APNsStatus
+	if c := dialRunning(ctx); c != nil {
+		defer c.Close()
+		call(ctx, c, "apns.set", p, &st)
+	} else {
+		var err error
+		if st, err = daemon.ConfigureAPNs(daemon.ConfigPath(), p); err != nil {
+			fail("%v", err)
+		}
+	}
+	if p.Off {
+		fmt.Println("Push notifications are off.")
+		return
+	}
+	if st.Error != "" {
+		fail("the key is saved but can't be used: %s", st.Error)
+	}
+	fmt.Printf("The daemon pushes to the phone with key %s (team %s, app %s).\n", st.KeyID, st.TeamID, st.Topic)
+	fmt.Printf("It keeps its own copy of the key; you can delete %s.\n", *key)
+}
+
 // runDaemonStatus is `claudewitz daemon status`.
 func runDaemonStatus() {
 	ctx := context.Background()
@@ -131,6 +174,11 @@ func runDaemonStatus() {
 			fmt.Printf("%-10s%s\n", "remote", "on (listens when the daemon starts)")
 		} else {
 			fmt.Printf("%-10s%s\n", "remote", "off")
+		}
+		if cfg.APNs != nil {
+			fmt.Printf("%-10s%s\n", "apns", "key "+cfg.APNs.KeyID+", team "+cfg.APNs.TeamID)
+		} else {
+			fmt.Printf("%-10s%s\n", "apns", "off (`claudewitz daemon apns` to push to the phone)")
 		}
 		devs, err := (&daemon.Devices{Path: daemon.DevicesPath()}).List()
 		if err != nil {
@@ -159,6 +207,14 @@ func runDaemonStatus() {
 		fmt.Fprintf(w, "remote\ton, but down: %s\n", st.Remote.Error)
 	default:
 		fmt.Fprintf(w, "remote\toff\n")
+	}
+	switch {
+	case st.APNs.Error != "":
+		fmt.Fprintf(w, "apns\tkey %s, but unusable: %s\n", st.APNs.KeyID, st.APNs.Error)
+	case st.APNs.Configured:
+		fmt.Fprintf(w, "apns\tkey %s, team %s\n", st.APNs.KeyID, st.APNs.TeamID)
+	default:
+		fmt.Fprintf(w, "apns\toff (`claudewitz daemon apns` to push to the phone)\n")
 	}
 	fmt.Fprintf(w, "clients\t%d\n", st.Clients-1) // not counting this one
 	fmt.Fprintf(w, "sessions\t%d live\n", len(st.Sessions))

@@ -56,6 +56,13 @@ type remoteHarness struct {
 // startRemoteDaemon runs a daemon whose "Tailscale address" is loopback.
 func startRemoteDaemon(t *testing.T, dir string) *remoteHarness {
 	t.Helper()
+	return startRemoteDaemonWith(t, dir, nil)
+}
+
+// startRemoteDaemonWith is startRemoteDaemon with setup run on the Server
+// before it starts serving.
+func startRemoteDaemonWith(t *testing.T, dir string, setup func(*Server)) *remoteHarness {
+	t.Helper()
 	if dir == "" {
 		var err error
 		// Unix socket paths are limited to ~104 bytes; t.TempDir is too long on macOS.
@@ -82,6 +89,9 @@ func startRemoteDaemon(t *testing.T, dir string) *remoteHarness {
 		Launch: func(context.Context, claude.Options) (claude.Session, error) {
 			return &idleProc{events: make(chan claude.Event, 4)}, nil
 		},
+	}
+	if setup != nil {
+		setup(h.srv)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel, h.done = cancel, make(chan struct{})

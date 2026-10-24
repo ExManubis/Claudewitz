@@ -1,7 +1,7 @@
 # Daemon and client protocol (draft)
 
-Status: built except APNs (`device.registerPush`, push notifications), git state and
-`session.changes`/`session.diff`. This is the contract between `claudewitz daemon`, the
+Status: built except alert pushes (the APNs transport and `device.registerPush` are built),
+git state and `session.changes`/`session.diff`. This is the contract between `claudewitz daemon`, the
 claudewitz TUI and the iPhone companion app (separate repo).
 
 ## Why
@@ -64,7 +64,8 @@ Sessions are persistent agents, as with Claude Code Remote Control: quitting the
 from the session rather than ending it, and it stays live in the daemon (visible on the phone,
 reattachable from any TUI) until someone stops it with `session.stop`. Quitting the TUI detaches
 from every session; ctrl+q (or the palette's Kill session) stops one.
-- `claudewitz daemon status` shows pid, uptime, listeners, sessions and paired devices.
+- `claudewitz daemon status` shows pid, uptime, listeners, whether it can push (APNs), sessions
+  and paired devices.
 - `claudewitz daemon stop` ends the daemon; it refuses while sessions are live unless `-force`d.
   An always-on daemon stays stopped until the next TUI starts it (`launchctl kickstart`) or the
   next login.
@@ -145,7 +146,7 @@ can add things without breaking the other. Breaking changes bump `protocol` in `
 |---|---|---|
 | `hello` | `{protocol: 1, client: "tui" \| "ios", clientVersion}` | `{protocol, daemonVersion, account: Account}` |
 | `pair` | `{code, deviceName}` | `{token, deviceId}` (remote, unpaired connections only; see Transport and auth) |
-| `device.registerPush` | `{apnsToken, sandbox}` | `{}` |
+| `device.registerPush` | `{apnsToken, sandbox}` | `{}`; paired phones only, stored with the device in `devices.json`. `sandbox` is true for development builds (their tokens only work with Apple's sandbox host) |
 
 ```jsonc
 // Account. usage comes from the latest rate_limit_event of any session; null until one arrives.
@@ -168,7 +169,8 @@ Management methods, all local only, used by the `claudewitz` CLI:
 
 | Method | Params | Result |
 |---|---|---|
-| `daemon.status` | `{}` | `{pid, daemonVersion, startedAt, listeners: [{kind, address}], remote, clients, sessions, devices, idleSeconds}`; `idleSeconds` 0 never idles out |
+| `daemon.status` | `{}` | `{pid, daemonVersion, startedAt, listeners: [{kind, address}], remote, clients, sessions, devices, idleSeconds, apns: {configured, keyId?, teamId?, topic?, error?}}`; `idleSeconds` 0 never idles out |
+| `apns.set` | `{keyPath, keyId, teamId, topic?}` or `{off: true}` | `{configured, keyId, teamId, topic, error?}`; checks the key, copies it to `~/.claudewitz/apns.p8` (0600) and records it in `daemon.json` |
 | `remote.set` | `{enabled, port?}` | `{enabled, host?, port?, error?}` |
 | `pair.code` | `{}` | `{host, port, code, expiresAt}` |
 | `devices.list` | `{}` | `{devices: [{id, name, pairedAt, lastSeen, connected}]}` |
@@ -324,9 +326,21 @@ gets finished messages, not thousands of deltas.
 
 ## Push notifications
 
-The daemon sends APNs pushes directly (token auth, `.p8` key configured with
-`claudewitz daemon apns --key … --key-id … --team-id …`); no extra server. It pushes to every
-registered device when:
+The daemon sends APNs pushes directly; no extra server. It signs them with a token-auth key
+from the Apple developer account (Certificates, Identifiers & Profiles → Keys, with Apple Push
+Notifications service enabled), set up once with:
+
+    claudewitz daemon apns -key AuthKey_ABC123DEFG.p8 -key-id ABC123DEFG -team-id RQ2CW4W282
+
+It checks the key, keeps its own copy as `~/.claudewitz/apns.p8` (0600) and records the ids in
+`daemon.json` (`"apns": {keyPath, keyId, teamId, topic}`; the topic defaults to the app's bundle
+id, `ai.claudewitz.ios`). A running daemon picks it up at once; `claudewitz daemon apns off`
+forgets it and deletes the copy. Requests go over HTTP/2 to `api.push.apple.com`, or `api.sandbox.push.apple.com`
+for a device that registered with `sandbox: true`, with an ES256 JWT re-signed every 50 minutes.
+A token APNs calls dead (410, `BadDeviceToken`, `Unregistered`, `DeviceTokenNotForTopic`) is
+dropped from `devices.json`.
+
+Not built yet: alert pushes. It will push to every registered device when:
 
 - a permission request is waiting and no client has answered within 10s
   (category `PERMISSION` with Allow/Deny actions; the action calls `session.respond`)

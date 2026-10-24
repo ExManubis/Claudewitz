@@ -31,6 +31,9 @@ func runDaemon(args []string) {
 		case "remote":
 			runDaemonRemote(args[1:])
 			return
+		case "apns":
+			runDaemonAPNs(args[1:])
+			return
 		case "stop":
 			runDaemonStop(args[1:])
 			return

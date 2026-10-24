@@ -381,4 +381,5 @@ type StatusResult struct {
 	Sessions      []SessionSummary `json:"sessions"`
 	Devices       []DeviceInfo     `json:"devices"`
 	IdleSeconds   int              `json:"idleSeconds"` // 0: never idles out
+	APNs          APNsStatus       `json:"apns"`
 }
