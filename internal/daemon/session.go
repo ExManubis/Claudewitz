@@ -132,6 +132,9 @@ func (s *session) observe(ev claude.Event) {
 			return // a sub-agent's message
 		}
 		if m.IsReplay {
+			if isLocalCommandEcho(m.Message.Text()) {
+				return // set_model and the like echo their output; no turn starts
+			}
 			s.busy = true
 			if s.sum.Title == "" {
 				s.sum.Title = firstLine(m.Message.Text(), 80)
@@ -523,6 +526,13 @@ func activityOf(blocks []claude.ContentBlock) *Activity {
 		}
 	}
 	return nil
+}
+
+// isLocalCommandEcho reports whether a replayed user message is the CLI
+// echoing a local command's output, such as "<local-command-stdout>Set model
+// to …</local-command-stdout>" after set_model, rather than a prompt.
+func isLocalCommandEcho(text string) bool {
+	return strings.HasPrefix(strings.TrimSpace(text), "<local-command-")
 }
 
 // firstLine is s's first non-blank line, cut to max runes.
