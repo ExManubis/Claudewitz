@@ -17,6 +17,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/exmanubis/claudewitz/internal/apns"
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/recap"
 	"github.com/exmanubis/claudewitz/internal/sessions"
@@ -46,6 +47,8 @@ type Server struct {
 	// TailscaleAddr finds the address the remote listener binds to; nil
 	// means TailscaleIP.
 	TailscaleAddr func() (netip.Addr, error)
+	// NewAPNs makes the push client for a key; nil means Apple's servers.
+	NewAPNs func(*apns.Key) *apns.Client
 
 	ctx      context.Context    // outlives requests; ends the processes
 	stop     context.CancelFunc // ends Serve, for daemon.stop
@@ -68,6 +71,8 @@ type Server struct {
 	config    Config
 	remote    *remoteListener // nil while off or down
 	remoteErr string          // why an enabled remote listener is down
+	apns      *apns.Client    // nil while APNs isn't configured
+	apnsErr   string          // why a configured APNs key can't be used
 }
 
 // Serve accepts clients on ln until ctx ends or the daemon idles out.
@@ -96,6 +101,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 
 	s.remoteMu.Lock()
 	s.config = s.loadConfig()
+	s.loadAPNs()
 	s.remoteMu.Unlock()
 	s.retryRemote()
 	defer func() {
@@ -370,6 +376,23 @@ func (s *Server) call(c *conn, req Request) (any, error) {
 			return nil, err
 		}
 		return s.setRemote(p)
+
+	case "apns.set":
+		if err := localOnly(); err != nil {
+			return nil, err
+		}
+		var p APNsSetParams
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		return s.setAPNs(p)
+
+	case "device.registerPush":
+		var p RegisterPushParams
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		return s.registerPush(c, p)
 
 	case "pair.code":
 		if err := localOnly(); err != nil {

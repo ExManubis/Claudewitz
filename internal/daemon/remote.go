@@ -33,6 +33,9 @@ const maxPairFailures = 3
 // Config is the daemon's persisted settings, ~/.claudewitz/daemon.json.
 type Config struct {
 	Remote RemoteConfig `json:"remote"`
+	// APNs is the key the daemon signs pushes to the phone with; nil while
+	// it can't push.
+	APNs *APNsConfig `json:"apns,omitempty"`
 }
 
 // RemoteConfig says whether the remote (Tailscale) listener is on.
@@ -483,6 +486,7 @@ func (s *Server) status() (StatusResult, error) {
 		Remote:        s.remoteStatus(),
 		Sessions:      s.list(),
 		Devices:       devs,
+		APNs:          s.apnsStatus(),
 	}
 	if st.Remote.Host != "" {
 		st.Listeners = append(st.Listeners, Listener{Kind: "remote",

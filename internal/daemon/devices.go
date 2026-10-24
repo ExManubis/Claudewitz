@@ -24,6 +24,16 @@ type Device struct {
 	TokenHash string    `json:"tokenHash"`
 	PairedAt  time.Time `json:"pairedAt"`
 	LastSeen  time.Time `json:"lastSeen"`
+	// Push is where the daemon reaches the phone through APNs; nil until
+	// the app registers.
+	Push *Push `json:"push,omitempty"`
+}
+
+// Push is a device's APNs tokens.
+type Push struct {
+	APNsToken string `json:"apnsToken,omitempty"` // alerts
+	// Sandbox: the tokens are development ones (an Xcode build of the app).
+	Sandbox bool `json:"sandbox"`
 }
 
 // Devices is the paired devices file, ~/.claudewitz/devices.json (0600).
@@ -129,6 +139,32 @@ func (d *Devices) Seen(id string) {
 			return
 		}
 	}
+}
+
+// UpdatePush changes a device's push tokens. A Push left empty is dropped.
+func (d *Devices) UpdatePush(id string, change func(*Push)) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	all, err := d.load()
+	if err != nil {
+		return err
+	}
+	for i := range all {
+		if all[i].ID != id {
+			continue
+		}
+		p := Push{}
+		if all[i].Push != nil {
+			p = *all[i].Push
+		}
+		change(&p)
+		all[i].Push = &p
+		if p == (Push{Sandbox: p.Sandbox}) {
+			all[i].Push = nil
+		}
+		return d.save(all)
+	}
+	return &Error{CodeNotFound, "no paired device " + id}
 }
 
 // Revoke removes the device with id or name ref. A name shared by several
