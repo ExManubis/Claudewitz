@@ -124,6 +124,7 @@ type SessionSummary struct {
 	ContextWindow   int        `json:"contextWindow"`
 	CostUSD         float64    `json:"costUSD"`
 	LastActivity    time.Time  `json:"lastActivity"`
+	TurnStartedAt   *time.Time `json:"turnStartedAt"` // nil while idle; the phone's Live Activity timer
 	LastTurnEndedAt *time.Time `json:"lastTurnEndedAt"`
 	LastError       *string    `json:"lastError"`
 	Clients         int        `json:"clients"`

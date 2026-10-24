@@ -34,6 +34,11 @@ type Push struct {
 	APNsToken string `json:"apnsToken,omitempty"` // alerts
 	// Sandbox: the tokens are development ones (an Xcode build of the app).
 	Sandbox bool `json:"sandbox"`
+	// PushToStartToken starts a Live Activity on the phone; Activity is the
+	// one running there, if the daemon knows of it.
+	PushToStartToken string         `json:"pushToStartToken,omitempty"`
+	Activity         *ActivityToken `json:"activity,omitempty"`
+	Theme            string         `json:"theme,omitempty"` // the app's palette
 }
 
 // Devices is the paired devices file, ~/.claudewitz/devices.json (0600).
