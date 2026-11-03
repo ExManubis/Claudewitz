@@ -378,6 +378,14 @@ func (c *chat) renderTool(e *entry, width int) string {
 	}
 	head := "  " + icon + " " + nameStyle.Render(label) + " " + mutedStyle.Render(summary)
 	body := c.toolBody(e, width-6)
+	if name == "Bash" {
+		var cmdLine string
+		summary, cmdLine = c.bashHeader(e, width-lipgloss.Width(name)-8, width-6)
+		head = "  " + icon + " " + nameStyle.Render(label) + " " + summary
+		if cmdLine != "" {
+			body = strings.TrimSuffix(cmdLine+"\n"+body, "\n")
+		}
+	}
 	if body == "" {
 		return head
 	}

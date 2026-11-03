@@ -36,7 +36,7 @@ tools, MCP servers, skills, hooks, `CLAUDE.md` and session history.
 - **tty**, the mascot at the foot of the sidebar, swirls while Claude works, sets off
   fireworks when a commit, merge or release goes out (and when red tests go green), and spins
   round when you click it
-- **Themes**: claude, charm, flexoki, catppuccin, tokyonight, gruvbox, dracula, nord and mono,
+- **Themes**: claude, charm, flexoki, catppuccin, tokyonight, gruvbox, dracula, nord, keanu and mono,
   each in light and dark (`/theme`)
 
 ## Install
