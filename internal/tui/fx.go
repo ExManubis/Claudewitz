@@ -1,19 +1,20 @@
 package tui
 
 import (
+	"image/color"
 	"math"
 	"math/rand"
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	colorful "github.com/lucasb-eyer/go-colorful"
 )
 
 // resolve picks the light or dark variant of an adaptive colour.
-func resolve(c lipgloss.AdaptiveColor) colorful.Color {
+func resolve(c ac) colorful.Color {
 	hex := c.Dark
 	if !darkBG {
 		hex = c.Light
@@ -26,7 +27,7 @@ func resolve(c lipgloss.AdaptiveColor) colorful.Color {
 }
 
 // gradient returns n colours blended through the given stops.
-func gradient(n int, stops ...lipgloss.AdaptiveColor) []lipgloss.Color {
+func gradient(n int, stops ...ac) []color.Color {
 	if n <= 0 {
 		return nil
 	}
@@ -34,7 +35,7 @@ func gradient(n int, stops ...lipgloss.AdaptiveColor) []lipgloss.Color {
 	for i, s := range stops {
 		cs[i] = resolve(s)
 	}
-	out := make([]lipgloss.Color, n)
+	out := make([]color.Color, n)
 	for i := range out {
 		if len(cs) == 1 || n == 1 {
 			out[i] = lipgloss.Color(cs[0].Hex())
@@ -64,7 +65,7 @@ func gradientText(s string, bold bool) string {
 }
 
 // stripes renders a run of diagonal hatching fading from a to b.
-func stripes(n int, a, b lipgloss.AdaptiveColor) string {
+func stripes(n int, a, b ac) string {
 	cols := gradient(n, a, b)
 	var sb strings.Builder
 	for i := 0; i < n; i++ {

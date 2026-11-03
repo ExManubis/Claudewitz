@@ -2,15 +2,16 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"strconv"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/aymanbagabas/go-udiff"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/safetext"
@@ -293,7 +294,7 @@ func diffCell(l *diffLine, no, numW, width int, lexer chroma.Lexer, style *chrom
 	if l.kind == '@' {
 		return lipgloss.NewStyle().Foreground(th.muted).Width(width).MaxWidth(width).Render(strings.Repeat(" ", numW+1) + l.text)
 	}
-	var bg lipgloss.TerminalColor = lipgloss.NoColor{}
+	var bg color.Color = lipgloss.NoColor{}
 	sign := " "
 	signStyle := lipgloss.NewStyle().Foreground(th.muted)
 	switch l.kind {
@@ -351,7 +352,7 @@ func expandTabs(s string) string { return strings.ReplaceAll(safetext.Clean(s), 
 
 // highlightLine tokenises one line and paints each token over bg, padding
 // (or truncating) to exactly width cells.
-func highlightLine(lexer chroma.Lexer, style *chroma.Style, text string, bg lipgloss.TerminalColor, width int) string {
+func highlightLine(lexer chroma.Lexer, style *chroma.Style, text string, bg color.Color, width int) string {
 	if width < 1 {
 		return ""
 	}

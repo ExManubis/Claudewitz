@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
@@ -135,7 +135,7 @@ func TestBusyKeepsScreenHeight(t *testing.T) {
 	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 44})
 	m = next.(Model)
-	height := func() int { return strings.Count(m.View(), "\n") + 1 }
+	height := func() int { return strings.Count(m.render(), "\n") + 1 }
 	if h := height(); h != 44 {
 		t.Fatalf("idle screen is %d lines, want 44", h)
 	}
@@ -159,7 +159,7 @@ func TestIdleBopStopsWithoutInput(t *testing.T) {
 	if !m.sparks.paused || m.sparks.animating() {
 		t.Fatal("bop should hold still after idleBop without input")
 	}
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	if nm := next.(Model); nm.sparks.paused {
 		t.Fatal("a key should restart the bop")
 	}

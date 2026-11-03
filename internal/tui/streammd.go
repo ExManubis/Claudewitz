@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/charmbracelet/glamour"
+	"charm.land/glamour/v2"
 )
 
 // streamMD renders Markdown that only grows, as a reply does while it

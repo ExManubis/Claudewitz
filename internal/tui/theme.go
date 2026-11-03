@@ -1,13 +1,22 @@
 package tui
 
 import (
-	"github.com/charmbracelet/glamour/ansi"
-	"github.com/charmbracelet/glamour/styles"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/glamour/v2/ansi"
+	"charm.land/glamour/v2/styles"
+	"charm.land/lipgloss/v2"
 	colorful "github.com/lucasb-eyer/go-colorful"
 )
 
-type ac = lipgloss.AdaptiveColor
+// ac is a colour with a light and a dark variant, picked by darkBG when
+// it is drawn, as lipgloss v1's AdaptiveColor was.
+type ac struct{ Light, Dark string }
+
+func (c ac) RGBA() (r, g, b, a uint32) {
+	if darkBG {
+		return lipgloss.Color(c.Dark).RGBA()
+	}
+	return lipgloss.Color(c.Light).RGBA()
+}
 
 type theme struct {
 	name   string
@@ -221,8 +230,6 @@ var (
 func init() {
 	registerFlexoki()
 	registerKeanu()
-	detectedBG = lipgloss.HasDarkBackground()
-	darkBG = detectedBG
 	applyTheme(themes[0].name)
 }
 
@@ -250,8 +257,6 @@ func setAppearance(mode string) {
 		darkBG = detectedBG
 	}
 	appearance = mode
-	// AdaptiveColor resolves through lipgloss's own detection, so tell it.
-	lipgloss.SetHasDarkBackground(darkBG)
 	applyTheme(activeTheme.name)
 }
 

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
@@ -42,13 +42,13 @@ func TestEditPanelPlacesTheDiffInTheFile(t *testing.T) {
 	if m.editPanel == nil {
 		t.Fatal("no panel for an Edit request")
 	}
-	v := ansi.Strip(m.View())
+	v := ansi.Strip(m.render())
 	for _, want := range []string{"Permission Required", "notes.txt", "@@ -40,2 +40,2 @@", "40 - line 40", "40 + line forty", "Yes, allow", "Allow for session", "answer in the panel"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("missing %q in:\n%s", want, v)
 		}
 	}
-	for _, l := range strings.Split(m.View(), "\n") {
+	for _, l := range strings.Split(m.render(), "\n") {
 		if w := ansi.StringWidth(l); w > 120 {
 			t.Fatalf("line is %d wide: %q", w, ansi.Strip(l))
 		}
@@ -61,7 +61,7 @@ func TestEditPanelButtonsAnswer(t *testing.T) {
 	// the tool call marked failed.
 	m.chat.add(&entry{kind: kindTool, toolID: "t1", toolName: "Edit"})
 	m.pending[0].ToolUseID = "t1"
-	for _, k := range []tea.KeyMsg{{Type: tea.KeyRight}, {Type: tea.KeyRight}, {Type: tea.KeyEnter}} {
+	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyRight}, {Code: tea.KeyRight}, {Code: tea.KeyEnter}} {
 		next, _ := m.Update(k)
 		m = next.(Model)
 	}
@@ -75,10 +75,10 @@ func TestEditPanelButtonsAnswer(t *testing.T) {
 
 func TestEditPanelClickButton(t *testing.T) {
 	m, _ := panelModel(t, 120, 40)
-	_ = m.View() // lays out the buttons
+	_ = m.render() // lays out the buttons
 	ep := m.editPanel
 	x := ep.buttonsX[1][0] + 1
-	next, _ := m.Update(tea.MouseMsg{X: x, Y: ep.buttonsY, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	next, _ := m.Update(tea.MouseClickMsg{X: x, Y: ep.buttonsY, Button: tea.MouseLeft})
 	if m = next.(Model); len(m.pending) != 0 || !m.alwaysAllow["Edit"] {
 		t.Fatalf("clicking 'Allow for session' should answer and remember Edit (pending %d)", len(m.pending))
 	}
@@ -147,14 +147,14 @@ func TestEnterOpensAnEditsDiffReadOnly(t *testing.T) {
 	m.chat.byToolID["e1"].toolStatus = toolOK
 	m.refresh()
 
-	for _, k := range []tea.KeyMsg{{Type: tea.KeyTab}, {Type: tea.KeyEnter}} {
+	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyTab}, {Code: tea.KeyEnter}} {
 		next, _ := m.Update(k)
 		m = next.(Model)
 	}
 	if m.diffView == nil {
 		t.Fatal("enter on an edit should open its diff")
 	}
-	v := ansi.Strip(m.View())
+	v := ansi.Strip(m.render())
 	for _, want := range []string{"Edit · applied", "@@ -30,1 +30,1 @@", "30 + line thirty", "esc close"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("missing %q in:\n%s", want, v)
@@ -163,7 +163,7 @@ func TestEnterOpensAnEditsDiffReadOnly(t *testing.T) {
 	if strings.Contains(v, "Yes, allow") {
 		t.Error("a read-only diff has no buttons")
 	}
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m = next.(Model); m.diffView != nil || !m.chatFocus {
 		t.Fatalf("esc should close the diff and stay in the transcript (open %v, focus %v)", m.diffView != nil, m.chatFocus)
 	}

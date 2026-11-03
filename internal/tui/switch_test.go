@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
@@ -75,17 +75,17 @@ func TestNextNeedsYouPicksOldestWaitingThenErrors(t *testing.T) {
 func TestSwitchKeys(t *testing.T) {
 	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateIdle), sum("s_2", "/x/b", daemon.StateIdle), sum("s_3", "/x/c", daemon.StateIdle))
 	m := daemonModel(t, d)
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown, Alt: true})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModAlt})
 	m = run(t, next.(Model), cmd)
 	if m.sessionView.id != "s_2" {
 		t.Fatalf("alt+down: %q", m.sessionView.id)
 	}
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3"), Alt: true})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt})
 	m = run(t, next.(Model), cmd)
 	if m.sessionView.id != "s_3" {
 		t.Fatalf("alt+3: %q", m.sessionView.id)
 	}
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s"), Alt: true})
+	next, _ = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt})
 	m = next.(Model)
 	if m.sessionsMode() != sessionsNone || m.width != 160 {
 		t.Fatalf("alt+s didn't hide the panel: mode %d width %d", m.sessionsMode(), m.width)
@@ -141,7 +141,7 @@ func TestQuitDetachesEverySession(t *testing.T) {
 	other := newSessionView(claude.Options{CWD: t.TempDir()})
 	other.proc, other.id = b, "s_2"
 	m.views = append(m.views, other)
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("ctrl+d didn't quit")
 	}
@@ -219,7 +219,7 @@ func TestOneRowPlusDeadViewShowsPanel(t *testing.T) {
 	if m.panelMode != sessionsPanel {
 		t.Fatalf("panel mode %v", m.panelMode)
 	}
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown, Alt: true})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModAlt})
 	m = run(t, next.(Model), cmd)
 	if m.sessionView.id != "s_1" {
 		t.Fatalf("alt+down: %q", m.sessionView.id)

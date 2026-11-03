@@ -1,12 +1,13 @@
 package tui
 
 import (
+	"image/color"
 	"math"
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	colorful "github.com/lucasb-eyer/go-colorful"
 )
@@ -88,7 +89,7 @@ func (m *Model) pruneToasts(now time.Time) bool {
 	return len(kept) > 0
 }
 
-func (k toastKind) style() (icon string, col lipgloss.AdaptiveColor) {
+func (k toastKind) style() (icon string, col ac) {
 	th := currentTheme()
 	switch k {
 	case toastSuccess:
@@ -117,7 +118,7 @@ func backdrop() colorful.Color {
 }
 
 // fade blends an adaptive colour toward the backdrop; t=1 is fully faded.
-func fade(c lipgloss.AdaptiveColor, t float64) lipgloss.Color {
+func fade(c ac, t float64) color.Color {
 	return lipgloss.Color(resolve(c).BlendLab(backdrop(), t).Clamped().Hex())
 }
 

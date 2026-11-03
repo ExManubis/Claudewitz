@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exmanubis/claudewitz/internal/config"
 )
@@ -39,8 +39,7 @@ func (m *Model) closeThemePicker() {
 // restyle pushes the active theme into everything that caches styles.
 func (m *Model) restyle() {
 	m.spin.Style = lipgloss.NewStyle().Foreground(currentTheme().accent)
-	m.input.FocusedStyle.Placeholder = mutedStyle
-	m.input.BlurredStyle.Placeholder = mutedStyle
+	m.input.SetStyles(inputStyles())
 	m.chat.markAllDirty()
 	m.refresh()
 }
@@ -58,7 +57,7 @@ func (m *Model) saveTheme() tea.Cmd {
 	return m.notify(toastSuccess, "Theme: "+currentTheme().name, "saved to "+prettyPath(config.Path()))
 }
 
-func (m *Model) handleThemePickerKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handleThemePickerKey(k tea.KeyPressMsg) tea.Cmd {
 	p := m.themePick
 	switch k.String() {
 	case "esc", "ctrl+c", "q":
@@ -132,7 +131,7 @@ func (p *themePicker) view(width int) string {
 	for _, a := range appearances {
 		label := " " + a + " "
 		if a == appearance {
-			segs = append(segs, lipgloss.NewStyle().Background(cur.accent).Foreground(lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#111111"}).Bold(true).Render(label))
+			segs = append(segs, lipgloss.NewStyle().Background(cur.accent).Foreground(ac{Light: "#FFFFFF", Dark: "#111111"}).Bold(true).Render(label))
 		} else {
 			segs = append(segs, mutedStyle.Render(label))
 		}
@@ -155,5 +154,5 @@ func (p *themePicker) view(width int) string {
 	)
 
 	lines = append(lines, "", helpLine([][2]string{{"↑↓", "theme"}, {"←→", "appearance"}, {"enter", "save"}, {"esc", "cancel"}}, inner))
-	return dialogBox.Width(w).Render(strings.Join(lines, "\n"))
+	return dialogBox.Width(w + 2).Render(strings.Join(lines, "\n"))
 }

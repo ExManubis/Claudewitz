@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
@@ -105,7 +105,7 @@ func TestFocusKeepsEachViewsDraft(t *testing.T) {
 	if m.input.Value() != "first draft" || second.input.Value() != "second draft" {
 		t.Fatalf("drafts: %q / %q", m.input.Value(), second.input.Value())
 	}
-	if m.vp.Width == 0 {
+	if m.vp.Width() == 0 {
 		t.Fatal("the focused view wasn't laid out")
 	}
 }

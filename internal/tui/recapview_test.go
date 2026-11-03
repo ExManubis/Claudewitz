@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
@@ -29,17 +29,17 @@ func TestRecapDialogNavigates(t *testing.T) {
 			t.Fatalf("dialog lacks %q:\n%s", want, view)
 		}
 	}
-	m.handleRecapKey(tea.KeyMsg{Type: tea.KeyRight})
+	m.handleRecapKey(tea.KeyPressMsg{Code: tea.KeyRight})
 	if !m.recapView.date.Equal(midnight(time.Now())) {
 		t.Fatal("moved past today")
 	}
-	cmd = m.handleRecapKey(tea.KeyMsg{Type: tea.KeyLeft})
+	cmd = m.handleRecapKey(tea.KeyPressMsg{Code: tea.KeyLeft})
 	m.gotRecap(cmd().(recapMsg))
 	view = ansi.Strip(m.recapDialog())
 	if !strings.Contains(view, "Yesterday") || !strings.Contains(view, "A quiet day.") || !strings.Contains(view, "t today") {
 		t.Fatalf("yesterday:\n%s", view)
 	}
-	m.handleRecapKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m.handleRecapKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.recapView != nil {
 		t.Fatal("esc didn't close")
 	}

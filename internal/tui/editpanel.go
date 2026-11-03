@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 )
@@ -47,17 +47,17 @@ type editPanel struct {
 
 type editButton struct {
 	label string
-	key   int        // index of the underlined hotkey in label, or -1
-	press tea.KeyMsg // the prompt key it stands for
+	key   int             // index of the underlined hotkey in label, or -1
+	press tea.KeyPressMsg // the prompt key it stands for
 }
 
-func runeKey(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
+func runeKey(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }
 
 var editButtons = []editButton{
 	{"Yes, allow", 0, runeKey('y')},
 	{"Allow for session", 0, runeKey('a')},
 	{"No, deny", 0, runeKey('n')},
-	{"Deny & stop", -1, tea.KeyMsg{Type: tea.KeyCtrlC}},
+	{"Deny & stop", -1, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}},
 }
 
 // maxPanelFileBytes bounds the files read to place a diff in its file.
@@ -110,13 +110,13 @@ func (m *Model) openDiffView(e *entry) {
 	m.diffView = &editPanel{tool: e.toolName, input: e.toolInput, readOnly: true, status: status, lines: lines, note: note}
 }
 
-func (m *Model) handleDiffViewKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handleDiffViewKey(k tea.KeyPressMsg) tea.Cmd {
 	switch k.String() {
 	case "esc", "q", "enter", "ctrl+c":
 		m.diffView = nil
 		m.refresh()
 		return nil
-	case "left", "right", "tab", "shift+tab", "h", "l", " ":
+	case "left", "right", "tab", "shift+tab", "h", "l", "space":
 		return nil // no buttons
 	}
 	cmd, _ := m.handlePanelKey(k)
@@ -243,7 +243,7 @@ func (m *Model) scrollPanel(d int) {
 
 // handlePanelKey drives the edit panel. Answers go through the same keys
 // as the compact prompt; it reports false for keys it leaves to it.
-func (m *Model) handlePanelKey(k tea.KeyMsg) (tea.Cmd, bool) {
+func (m *Model) handlePanelKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 	ep := m.panel()
 	_, _, _, bodyH := m.panelLayout()
 	switch k.String() {
@@ -251,7 +251,7 @@ func (m *Model) handlePanelKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		ep.focus = (ep.focus + len(editButtons) - 1) % len(editButtons)
 	case "right", "tab", "l":
 		ep.focus = (ep.focus + 1) % len(editButtons)
-	case "enter", " ":
+	case "enter", "space":
 		return m.handlePermissionKey(editButtons[ep.focus].press), true
 	case "t":
 		_, _, innerW, _ := m.panelLayout()
@@ -278,14 +278,16 @@ func (m *Model) handlePanelKey(k tea.KeyMsg) (tea.Cmd, bool) {
 
 func (m *Model) handlePanelMouse(msg tea.MouseMsg) tea.Cmd {
 	ep := m.panel()
+	mouse := msg.Mouse()
+	_, click := msg.(tea.MouseClickMsg)
 	switch {
-	case msg.Button == tea.MouseButtonWheelUp:
+	case mouse.Button == tea.MouseWheelUp:
 		m.scrollPanel(-3)
-	case msg.Button == tea.MouseButtonWheelDown:
+	case mouse.Button == tea.MouseWheelDown:
 		m.scrollPanel(3)
-	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && !ep.readOnly && msg.Y == ep.buttonsY:
+	case click && mouse.Button == tea.MouseLeft && !ep.readOnly && mouse.Y == ep.buttonsY:
 		for i, x := range ep.buttonsX {
-			if msg.X >= x[0] && msg.X < x[1] {
+			if mouse.X >= x[0] && mouse.X < x[1] {
 				ep.focus = i
 				return m.handlePermissionKey(editButtons[i].press)
 			}
@@ -379,5 +381,5 @@ func (m Model) panelWaiting() string {
 	p := m.pending[0]
 	line := warnStyle.Bold(true).Render("Allow "+p.ToolName+"?") + " " +
 		mutedStyle.Render(truncateLeft(relPath(filePathOf(p.Input), m.cwd()), max(10, m.mainWidth()/2))+" · answer in the panel above")
-	return permBox.Width(m.mainWidth() - 2).Render(line)
+	return permBox.Width(m.mainWidth()).Render(line)
 }

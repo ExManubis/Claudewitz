@@ -3,11 +3,12 @@ package tui
 import (
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/config"
@@ -62,7 +63,7 @@ func (m *Model) gotRecap(msg recapMsg) {
 	r.day, r.loading, r.shown = msg.day, false, true
 }
 
-func (m *Model) handleRecapKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handleRecapKey(k tea.KeyPressMsg) tea.Cmd {
 	r := m.recapView
 	today := midnight(time.Now())
 	switch k.String() {
@@ -143,7 +144,7 @@ func (m Model) recapDialog() string {
 	}
 	lines := append([]string{head, ""}, body...)
 	lines = append(lines, "", panelHints(hints))
-	return popupBox.BorderForeground(th.accent).Width(w + 2).Render(strings.Join(lines, "\n"))
+	return popupBox.BorderForeground(th.accent).Width(w + 4).Render(strings.Join(lines, "\n"))
 }
 
 func recapLoading(w int) []string {
@@ -606,6 +607,7 @@ func plural(n int, one, many string) string {
 // RecapCard renders a day's recap the way the TUI's dialog shows it, for
 // `claudewitz recap` to print. width is the terminal's.
 func RecapCard(d recap.Day, cfg config.Config, width int) string {
+	detectedBG = lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
 	setAppearance(cfg.Appearance)
 	if !applyTheme(cfg.Theme) {
 		applyTheme(themes[0].name)
@@ -619,7 +621,7 @@ func RecapCard(d recap.Day, cfg config.Config, width int) string {
 	head := lipgloss.NewStyle().Foreground(th.accent).Bold(true).Render("Recap") + mutedStyle.Render(" · ") + textStyle.Bold(true).Render(date)
 	isToday := d.Date == time.Now().Format(time.DateOnly)
 	lines := append([]string{head, ""}, recapCard(d, w, 1000, isToday)...)
-	return popupBox.BorderForeground(th.accent).Width(w + 2).Render(strings.Join(lines, "\n"))
+	return popupBox.BorderForeground(th.accent).Width(w + 4).Render(strings.Join(lines, "\n"))
 }
 
 // RecapMarkdown is a day's recap as Markdown.

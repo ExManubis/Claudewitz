@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
@@ -80,12 +80,12 @@ func TestSidebarDrawer(t *testing.T) {
 	m := New(context.Background(), claude.Options{CWD: t.TempDir()}, config.Config{}, nil)
 	var tm tea.Model = m
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	mm := tm.(Model)
 	if !mm.showDrawer() || !mm.sidebarOn {
 		t.Fatalf("ctrl+b at 80 columns should open the drawer and leave the docked setting alone")
 	}
-	lines := strings.Split(ansi.Strip(mm.View()), "\n")
+	lines := strings.Split(ansi.Strip(mm.render()), "\n")
 	if len(lines) != 24 {
 		t.Fatalf("view is %d rows, want 24", len(lines))
 	}

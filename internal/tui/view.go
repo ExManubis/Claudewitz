@@ -4,10 +4,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 )
@@ -77,7 +77,7 @@ func newSessionView(opts claude.Options) *sessionView {
 	tr := newTracker()
 	c := newChat(tr)
 	c.cwd = opts.CWD
-	vp := viewport.New(0, 0)
+	vp := viewport.New()
 	vp.MouseWheelEnabled = true
 	return &sessionView{
 		opts:        opts,
@@ -92,6 +92,15 @@ func newSessionView(opts claude.Options) *sessionView {
 	}
 }
 
+// inputStyles is the message box's look in the active theme.
+func inputStyles() textarea.Styles {
+	s := textarea.DefaultStyles(darkBG)
+	s.Focused.CursorLine = lipgloss.NewStyle()
+	s.Focused.Placeholder, s.Blurred.Placeholder = mutedStyle, mutedStyle
+	s.Cursor.Color = currentTheme().text
+	return s
+}
+
 // newInput is the message box, the same for every session.
 func newInput() textarea.Model {
 	ta := textarea.New()
@@ -100,9 +109,7 @@ func newInput() textarea.Model {
 	ta.Prompt = ""
 	ta.CharLimit = 0
 	ta.SetHeight(3)
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.FocusedStyle.Placeholder = mutedStyle
-	ta.BlurredStyle.Placeholder = mutedStyle
+	ta.SetStyles(inputStyles())
 	ta.KeyMap.InsertNewline.SetKeys("ctrl+j", "alt+enter")
 	ta.Focus()
 	return ta

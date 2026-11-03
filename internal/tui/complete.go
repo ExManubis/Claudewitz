@@ -9,8 +9,8 @@ import (
 	"strings"
 	"unicode"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 const maxSuggestions = 8
@@ -370,5 +370,5 @@ func (c *completer) view(width int) string {
 	if len(c.items) > maxSuggestions {
 		footer = mutedStyle.Render(truncate(fmt.Sprintf("↑↓ %d/%d · tab/enter accept · esc close", c.sel+1, len(c.items)), inner))
 	}
-	return popupBox.Width(w).Render(strings.Join(rows, "\n") + "\n" + footer)
+	return popupBox.Width(w + 2).Render(strings.Join(rows, "\n") + "\n" + footer)
 }

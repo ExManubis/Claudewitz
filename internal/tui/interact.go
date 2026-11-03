@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/safetext"
@@ -27,9 +27,26 @@ func newFreeText(placeholder string) textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = placeholder
 	ti.Prompt = "› "
-	ti.PromptStyle = statusKey
+	ti.SetStyles(fieldStyles(statusKey))
 	ti.CharLimit = 0
 	return ti
+}
+
+// fieldWidth is the text width that fits a field into room cells, after
+// its prompt and the cursor. Without one, bubbles v2 cuts the placeholder
+// to its first letter.
+func fieldWidth(f textinput.Model, room int) int {
+	return max(1, room-lipgloss.Width(f.Prompt)-1)
+}
+
+// fieldStyles is a one-line text field's look in the active theme, with
+// the given prompt style.
+func fieldStyles(prompt lipgloss.Style) textinput.Styles {
+	s := textinput.DefaultStyles(darkBG)
+	s.Focused.Prompt, s.Blurred.Prompt = prompt, prompt
+	s.Focused.Placeholder, s.Blurred.Placeholder = mutedStyle, mutedStyle
+	s.Cursor.Color = currentTheme().text
+	return s
 }
 
 // startInteraction prepares a dialog when the head of the permission queue
@@ -190,7 +207,7 @@ func (m *Model) declineQuestions(interrupt bool) {
 	m.finishPending(claude.PermissionDecision{Behavior: "deny", Message: "The user declined to answer."}, interrupt)
 }
 
-func (m *Model) handleQuestionKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handleQuestionKey(k tea.KeyPressMsg) tea.Cmd {
 	q := m.question
 	defer m.layout()
 
@@ -281,7 +298,7 @@ func (m *Model) handleQuestionKey(k tea.KeyMsg) tea.Cmd {
 		q.cursor[i] = (q.cursor[i] - 1 + q.rows(i)) % q.rows(i)
 	case s == "down" || s == "j" || s == "ctrl+n":
 		q.cursor[i] = (q.cursor[i] + 1) % q.rows(i)
-	case s == "enter" || s == " ":
+	case s == "enter" || s == "space":
 		return choose(q.cursor[i])
 	case len(s) == 1 && s[0] >= '1' && s[0] <= '9':
 		if n := int(s[0] - '1'); n < len(qq.Options) {
@@ -350,7 +367,7 @@ func (m Model) questionView(width int) string {
 	if q.warn != "" {
 		lines = append(lines, "", warnStyle.Render("▲ "+q.warn))
 	}
-	return popupBox.BorderForeground(currentTheme().second).Width(width - 2).Render(strings.Join(lines, "\n"))
+	return popupBox.BorderForeground(currentTheme().second).Width(width).Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) questionRow(i, row, inner int) string {
@@ -388,7 +405,7 @@ func (m Model) questionRow(i, row, inner int) string {
 		return head
 	case row == q.otherRow(i):
 		if q.editing {
-			q.input.Width = max(10, inner-10)
+			q.input.SetWidth(max(10, inner-10))
 			return pointer + "   " + q.input.View()
 		}
 		label := "Other…"
@@ -423,7 +440,7 @@ type planState struct {
 	input      textinput.Model
 }
 
-func (m *Model) handlePlanKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handlePlanKey(k tea.KeyPressMsg) tea.Cmd {
 	pl := m.plan
 	defer m.layout()
 
@@ -524,10 +541,10 @@ func (m Model) planView(width int) string {
 		lines = append(lines, pointer+mutedStyle.Render(fmt.Sprintf("%d. ", i+1))+label+mutedStyle.Render("  "+c.desc))
 	}
 	if pl.editing {
-		pl.input.Width = max(10, inner-6)
+		pl.input.SetWidth(max(10, inner-6))
 		lines = append(lines, "", "   "+pl.input.View())
 	}
-	return popupBox.BorderForeground(currentTheme().accent).Width(width - 2).Render(strings.Join(lines, "\n"))
+	return popupBox.BorderForeground(currentTheme().accent).Width(width).Render(strings.Join(lines, "\n"))
 }
 
 // interactionHelp is the help bar for an open question or plan dialog.

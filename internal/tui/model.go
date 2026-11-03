@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/cursor"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
@@ -176,7 +176,7 @@ func (m Model) Init() tea.Cmd {
 	if m.daemon != nil && m.opts.Resume == "" && !m.opts.Continue {
 		first = launchListCmd(m.daemon) // lists the sessions, then attaches or starts
 	}
-	cmds := []tea.Cmd{textarea.Blink, m.spin.Tick, first, indexFiles(m.opts.CWD), m.refreshGit(), gitPoll(), loadHistory(m.opts.CWD)}
+	cmds := []tea.Cmd{tea.RequestBackgroundColor, cursor.Blink, m.spin.Tick, first, indexFiles(m.opts.CWD), m.refreshGit(), gitPoll(), loadHistory(m.opts.CWD)}
 	if m.notice != "" {
 		notice := m.notice
 		cmds = append(cmds, func() tea.Msg { return noticeMsg(notice) })
@@ -257,7 +257,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	nm := next.(Model)
 	switch msg.(type) {
-	case tea.KeyMsg, tea.MouseMsg, tea.FocusMsg:
+	case tea.KeyPressMsg, tea.MouseMsg, tea.FocusMsg:
 		nm.lastInput = time.Now()
 	}
 	// The area under the chat grows and shrinks (the activity line, pills,
@@ -438,7 +438,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case errors.Is(msg.err, errNoClipboardImage):
 			// No image: paste text as the textarea normally would.
 			var c tea.Cmd
-			m.input, c = m.input.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
+			m.input, c = m.input.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 			m.comp.update(&m)
 			m.layout()
 			return m, c
@@ -510,13 +510,16 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		overlaid := m.picker != nil || m.palette != nil || m.modelPick != nil || m.themePick != nil || m.showHelp
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && !overlaid && !m.modalOpen() && m.mascotAt(msg.X, msg.Y) {
+		mouse := msg.Mouse()
+		_, press := msg.(tea.MouseClickMsg)
+		leftClick := press && mouse.Button == tea.MouseLeft
+		if leftClick && !overlaid && !m.modalOpen() && m.mascotAt(mouse.X, mouse.Y) {
 			m.poke()
 			return m, nil
 		}
 		var path string // a changed file clicked in the sidebar
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.changes == nil && !overlaid {
-			path, _ = m.sidebarFileAt(msg.X, msg.Y)
+		if leftClick && m.changes == nil && !overlaid {
+			path, _ = m.sidebarFileAt(mouse.X, mouse.Y)
 		}
 		if m.changes != nil {
 			cmds = append(cmds, m.handleChangesMouse(msg))
@@ -524,14 +527,40 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.handlePanelMouse(msg))
 		} else if path != "" {
 			cmds = append(cmds, m.openChanges(path))
-		} else if m.showDrawer() && msg.Action == tea.MouseActionPress && msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+		} else if m.showDrawer() && press {
 			// A click closes the drawer rather than landing on the chat under it.
 			m.drawer = false
 		} else if m.picker == nil && m.palette == nil && m.modelPick == nil && m.themePick == nil && !m.showHelp {
 			cmds = append(cmds, m.handleMouse(msg))
 		}
 
-	case tea.KeyMsg:
+	case tea.BackgroundColorMsg:
+		// The terminal's answer to RequestBackgroundColor; "auto"
+		// appearance follows it.
+		detectedBG = msg.IsDark()
+		setAppearance(appearance)
+		m.restyle()
+		return m, nil
+
+	case tea.PasteMsg:
+		if m.modalOpen() || len(m.pending) > 0 {
+			// Dialogs and their filters take a paste as typing.
+			return m.update(tea.KeyPressMsg{Text: msg.Content})
+		}
+		if m.chatFocus {
+			m.blurChat()
+		}
+		// Files dragged into the terminal arrive as pasted paths.
+		if paths := droppedPaths(msg.Content, m.cwd()); paths != nil {
+			return m, m.attachPaths(paths)
+		}
+		var c tea.Cmd
+		m.input, c = m.input.Update(msg)
+		m.comp.update(&m)
+		m.layout()
+		return m, c
+
+	case tea.KeyPressMsg:
 		if !m.mouseDown {
 			m.textSel = nil // any key clears a mouse selection
 		}
@@ -580,15 +609,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if len(m.pending) > 0 {
 			return m, m.handlePermissionKey(msg)
-		}
-		if msg.Paste {
-			// Files dragged into the terminal arrive as pasted paths.
-			if paths := droppedPaths(string(msg.Runes), m.cwd()); paths != nil {
-				if m.chatFocus {
-					m.blurChat()
-				}
-				return m, m.attachPaths(paths)
-			}
 		}
 		if m.chatFocus {
 			if cmd, handled := m.handleChatKey(msg); handled {
@@ -1108,7 +1128,7 @@ func (m *Model) replay(t transcriptMsg) {
 	m.follow = true
 }
 
-func (m *Model) handlePermissionKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handlePermissionKey(k tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case m.question != nil:
 		return m.handleQuestionKey(k)
@@ -1185,7 +1205,7 @@ func (m *Model) closePicker() {
 	}
 }
 
-func (m *Model) handlePickerKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handlePickerKey(k tea.KeyPressMsg) tea.Cmd {
 	p := m.picker
 	rows := pickerRows(m.height - 1)
 	switch k.String() {
@@ -1644,7 +1664,8 @@ func (m *Model) layout() {
 		bottom++
 	}
 	h := max(3, m.height-bottom)
-	m.vp.Width, m.vp.Height = m.chatWidth(), h
+	m.vp.SetWidth(m.chatWidth())
+	m.vp.SetHeight(h)
 }
 
 func (m *Model) refresh() {
@@ -1692,7 +1713,18 @@ func (m Model) drawDialogs(screen string) string {
 	return screen
 }
 
-func (m Model) View() string {
+// View is the whole screen, in the alternate screen with mouse and focus
+// reporting on.
+func (m Model) View() tea.View {
+	v := tea.NewView(m.render())
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	v.ReportFocus = true
+	return v
+}
+
+// render draws the screen.
+func (m Model) render() string {
 	if !m.ready {
 		return ""
 	}
@@ -1727,7 +1759,7 @@ func (m Model) View() string {
 func (m Model) viewMain() string {
 	chatView := lipgloss.JoinHorizontal(lipgloss.Top, m.highlightSelection(m.vp.View()), strings.Join(m.scrollbar(), "\n"))
 	if pop := m.comp.view(m.mainWidth()); pop != "" {
-		chatView = overlayBottom(chatView, pop, m.vp.Height, m.mainWidth())
+		chatView = overlayBottom(chatView, pop, m.vp.Height(), m.mainWidth())
 	}
 	main := lipgloss.JoinVertical(lipgloss.Left, "", chatView, "", m.bottomView())
 	if m.showHeader() {
@@ -1830,7 +1862,7 @@ func (m Model) bottomView() string {
 	if a := m.attachmentsView(m.mainWidth()); a != "" {
 		top += a + "\n"
 	}
-	return top + box.Width(m.mainWidth()-2).Render(m.input.View())
+	return top + box.Width(m.mainWidth()).Render(m.input.View())
 }
 
 func (m Model) permissionView() string {
@@ -1874,7 +1906,7 @@ func (m Model) permissionView() string {
 		}
 		keys += statusKey.Render("  t") + mutedStyle.Render(" "+layout)
 	}
-	return permBox.Width(m.mainWidth() - 2).Render(title + "\n\n" + detail + "\n\n" + keys)
+	return permBox.Width(m.mainWidth()).Render(title + "\n\n" + detail + "\n\n" + keys)
 }
 
 func (m Model) prettyInput(tool string, raw json.RawMessage, width int) string {

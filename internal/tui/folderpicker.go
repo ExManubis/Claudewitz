@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
@@ -44,6 +44,7 @@ func newFolderPicker(live []string) *folderPicker {
 	ti := textinput.New()
 	ti.Placeholder = "type a folder or filter"
 	ti.Prompt = icons.search + " "
+	ti.SetStyles(fieldStyles(lipgloss.NewStyle()))
 	ti.Focus()
 	p := &folderPicker{filter: ti}
 	for _, d := range live {
@@ -149,7 +150,7 @@ func (m *Model) openFolders() tea.Cmd {
 	return loadFolders()
 }
 
-func (m *Model) handleFoldersKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handleFoldersKey(k tea.KeyPressMsg) tea.Cmd {
 	p := m.folders
 	switch k.String() {
 	case "esc", "ctrl+c":
@@ -197,6 +198,7 @@ func (m *Model) newSessionIn(dir string) tea.Cmd {
 
 func (p *folderPicker) view(width, height int) string {
 	w := min(72, width-4)
+	p.filter.SetWidth(fieldWidth(p.filter, w-2))
 	lines := []string{agentStyle.Render("New session in…"), p.filter.View(), ""}
 	for i, d := range p.shown {
 		if i == max(1, height-8) {
@@ -209,5 +211,5 @@ func (p *folderPicker) view(width, height int) string {
 		lines = append(lines, row)
 	}
 	lines = append(lines, "", mutedStyle.Render("enter start · tab complete · esc cancel"))
-	return popupBox.Width(w).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return popupBox.Width(w + 2).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }

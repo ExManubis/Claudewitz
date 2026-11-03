@@ -2,13 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // pill is a compact status chip shown above the input.
-func pill(icon string, iconColor lipgloss.TerminalColor, text string) string {
+func pill(icon string, iconColor color.Color, text string) string {
 	th := currentTheme()
 	bg := th.selBg
 	return lipgloss.NewStyle().Background(bg).Foreground(iconColor).Bold(true).Render(" "+icon+" ") +

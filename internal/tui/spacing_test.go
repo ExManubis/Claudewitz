@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
@@ -29,7 +29,7 @@ func TestChatHasRoomAboveAndBelow(t *testing.T) {
 		mm.layout()
 		mm.refresh()
 
-		lines := strings.Split(ansi.Strip(mm.View()), "\n")
+		lines := strings.Split(ansi.Strip(mm.render()), "\n")
 		if len(lines) != 24 {
 			t.Fatalf("width %d: view is %d rows, want 24", width, len(lines))
 		}
@@ -44,8 +44,8 @@ func TestChatHasRoomAboveAndBelow(t *testing.T) {
 				act = i
 			}
 		}
-		if act != top+mm.vp.Height+1 || main(act-1) != "" || main(act-2) == "" {
-			t.Errorf("width %d: activity at row %d (chat %d+%d), rows above %q / %q", width, act, top, mm.vp.Height, main(act-2), main(act-1))
+		if act != top+mm.vp.Height()+1 || main(act-1) != "" || main(act-2) == "" {
+			t.Errorf("width %d: activity at row %d (chat %d+%d), rows above %q / %q", width, act, top, mm.vp.Height(), main(act-2), main(act-1))
 		}
 	}
 }

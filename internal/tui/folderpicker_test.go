@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/exmanubis/claudewitz/internal/daemon"
 )
@@ -54,7 +54,7 @@ func TestFolderPickerSelectionStaysInRange(t *testing.T) {
 	m.openFolders()
 	m.folders.filter.SetValue("zzz-no-match")
 	m.folders.applyFilter()
-	m.handleFoldersKey(tea.KeyMsg{Type: tea.KeyDown})
+	m.handleFoldersKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	m.folders.filter.SetValue("/x/a")
 	m.folders.applyFilter()
 	if got := m.folders.choice(); got != "/x/a" {
@@ -99,7 +99,7 @@ func TestNewOpensPickerOnCurrentFolder(t *testing.T) {
 	if news != 1 {
 		t.Fatalf("%d New session entries", news)
 	}
-	m = run(t, m, m.handleFoldersKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	m = run(t, m, m.handleFoldersKey(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if len(d.started) != 1 || d.started[0].CWD != "/x/b" {
 		t.Fatalf("started %+v", d.started)
 	}

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/mdp/qrterminal/v3"
 
 	"github.com/exmanubis/claudewitz/internal/daemon"
@@ -68,7 +68,7 @@ func (m *Model) gotPairCode(msg pairCodeMsg) {
 	m.pair = &pairState{code: msg.code, qr: pairQR(msg.code)}
 }
 
-func (m *Model) handlePairKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handlePairKey(k tea.KeyPressMsg) tea.Cmd {
 	switch k.String() {
 	case "enter":
 		if m.pair.remoteOff {

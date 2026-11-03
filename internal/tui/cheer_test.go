@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
@@ -129,7 +129,7 @@ func TestPokingTtySpinsIt(t *testing.T) {
 	if !m.mascotAt(x, y) || m.mascotAt(x, 2) || m.mascotAt(2, y) {
 		t.Fatal("hit-test")
 	}
-	next, _ := m.Update(tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	next, _ := m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
 	m = next.(Model)
 	if m.sparks.spinFor == 0 || m.quip == "" {
 		t.Fatalf("no spin (%v) or quip (%q)", m.sparks.spinFor, m.quip)

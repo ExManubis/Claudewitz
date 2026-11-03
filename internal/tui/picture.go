@@ -8,7 +8,7 @@ import (
 	"image"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	colorful "github.com/lucasb-eyer/go-colorful"
 
 	"github.com/exmanubis/claudewitz/internal/claude"

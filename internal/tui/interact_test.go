@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
@@ -33,20 +33,20 @@ func withRequest(t *testing.T, tool, input string) *Model {
 
 func keys(m *Model, ks ...string) {
 	for _, k := range ks {
-		var msg tea.KeyMsg
+		var msg tea.KeyPressMsg
 		switch k {
 		case "enter":
-			msg = tea.KeyMsg{Type: tea.KeyEnter}
+			msg = tea.KeyPressMsg{Code: tea.KeyEnter}
 		case "esc":
-			msg = tea.KeyMsg{Type: tea.KeyEsc}
+			msg = tea.KeyPressMsg{Code: tea.KeyEsc}
 		case "tab":
-			msg = tea.KeyMsg{Type: tea.KeyTab}
+			msg = tea.KeyPressMsg{Code: tea.KeyTab}
 		case "down":
-			msg = tea.KeyMsg{Type: tea.KeyDown}
+			msg = tea.KeyPressMsg{Code: tea.KeyDown}
 		case "space":
-			msg = tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")}
+			msg = tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 		default:
-			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+			msg = tea.KeyPressMsg{Code: []rune(k)[0], Text: k}
 		}
 		m.handlePermissionKey(msg)
 	}

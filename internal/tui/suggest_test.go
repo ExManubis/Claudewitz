@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
 )
@@ -19,14 +19,14 @@ func TestPromptSuggestion(t *testing.T) {
 	}
 
 	m.input.SetValue("typed")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	m = next.(Model)
 	if m.input.Value() != "typed" || m.suggestion == "" {
 		t.Fatal("→ with text in the input should move the cursor, not accept")
 	}
 
 	m.input.Reset()
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	m = next.(Model)
 	if m.input.Value() != "Create these files." {
 		t.Fatalf("→ should accept the suggestion, got %q", m.input.Value())
@@ -37,7 +37,7 @@ func TestPromptSuggestion(t *testing.T) {
 
 	m.input.Reset()
 	m.handleEvent(claude.Event{Suggestion: "Run the tests."})
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(Model)
 	if m.suggestion != "" || m.hist.items[len(m.hist.items)-1] != "Run the tests." {
 		t.Fatal("enter on an empty input should send the suggestion")

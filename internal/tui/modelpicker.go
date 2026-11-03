@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 )
@@ -103,7 +103,7 @@ func (p *modelPicker) shiftEffort(d int) {
 	p.effort[v] = lv[max(0, min(len(lv)-1, cur+d))]
 }
 
-func (m *Model) handleModelPickerKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handleModelPickerKey(k tea.KeyPressMsg) tea.Cmd {
 	p := m.modelPick
 	switch k.String() {
 	case "esc", "ctrl+c", "ctrl+t", "q":
@@ -246,5 +246,5 @@ func (p *modelPicker) view(width int) string {
 		)
 	}
 	lines = append(lines, "", helpLine([][2]string{{"↑↓", "model"}, {"←→", "effort"}, {"enter", "apply"}, {"esc", "cancel"}}, inner))
-	return dialogBox.Width(w).Render(strings.Join(lines, "\n"))
+	return dialogBox.Width(w + 2).Render(strings.Join(lines, "\n"))
 }

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // selectable reports whether entry i can be selected; info lines (turn
@@ -127,29 +127,7 @@ func (m *Model) blurChat() {
 
 // handleChatKey drives the focused transcript. Keys it doesn't use fall
 // through to the global bindings; plain typing returns to the input.
-func (m *Model) handleChatKey(k tea.KeyMsg) (tea.Cmd, bool) {
-	// Keys that arrive in one read (fast typing, key repeat) come as a
-	// single multi-rune event; handle them one at a time.
-	if k.Type == tea.KeyRunes && len(k.Runes) > 1 && !k.Paste {
-		var cmds []tea.Cmd
-		for i, r := range k.Runes {
-			if !m.chatFocus {
-				// Left the transcript part-way: the rest is typing.
-				rest := tea.KeyMsg{Type: tea.KeyRunes, Runes: k.Runes[i:]}
-				var c tea.Cmd
-				m.input, c = m.input.Update(rest)
-				return tea.Batch(append(cmds, c)...), true
-			}
-			cmd, handled := m.handleChatKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-			if !handled {
-				var c tea.Cmd
-				m.input, c = m.input.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: k.Runes[i:]})
-				return tea.Batch(append(cmds, cmd, c)...), true
-			}
-			cmds = append(cmds, cmd)
-		}
-		return tea.Batch(cmds...), true
-	}
+func (m *Model) handleChatKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 	c := m.chat
 	moved := func() {
 		m.follow = false
@@ -182,21 +160,21 @@ func (m *Model) handleChatKey(k tea.KeyMsg) (tea.Cmd, bool) {
 			}
 		}
 		return m.toggleSelected(), true
-	case " ":
+	case "space":
 		return m.toggleSelected(), true
 	case "d", "u", "f", "b", "pgdown", "pgup":
 		// Page the view and carry the selection along.
 		switch k.String() {
 		case "d":
-			m.vp.HalfViewDown()
+			m.vp.HalfPageDown()
 		case "u":
-			m.vp.HalfViewUp()
+			m.vp.HalfPageUp()
 		case "f", "pgdown":
-			m.vp.ViewDown()
+			m.vp.PageDown()
 		default:
-			m.vp.ViewUp()
+			m.vp.PageUp()
 		}
-		c.sel = c.firstVisible(m.vp.YOffset)
+		c.sel = c.firstVisible(m.vp.YOffset())
 		m.follow = m.vp.AtBottom()
 		m.refresh()
 	case "y", "c":
@@ -206,7 +184,7 @@ func (m *Model) handleChatKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		text := copyText(c.entries[c.sel])
 		return tea.Batch(copyToClipboard(text), m.notify(toastSuccess, "Copied", truncate(firstLine(text), 60))), true
 	default:
-		if len(k.Runes) > 0 && k.Type == tea.KeyRunes && !k.Alt {
+		if k.Text != "" && !k.Mod.Contains(tea.ModAlt) {
 			m.blurChat()
 			return nil, false // type it into the input
 		}
@@ -238,10 +216,10 @@ func (m *Model) ensureSelVisible() {
 	}
 	top, h := c.offsets[c.sel], c.heights[c.sel]
 	switch {
-	case top < m.vp.YOffset || h > m.vp.Height:
+	case top < m.vp.YOffset() || h > m.vp.Height():
 		m.vp.SetYOffset(top)
-	case top+h > m.vp.YOffset+m.vp.Height:
-		m.vp.SetYOffset(top + h - m.vp.Height)
+	case top+h > m.vp.YOffset()+m.vp.Height():
+		m.vp.SetYOffset(top + h - m.vp.Height())
 	}
 }
 

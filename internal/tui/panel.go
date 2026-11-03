@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // Every diff that opens over the screen (an edit waiting for approval, an
@@ -35,7 +35,7 @@ func panelHints(pairs [][2]string) string {
 
 // panelFrame draws the rounded accent box around content lines.
 func panelFrame(boxW, boxH int, lines []string) string {
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(currentTheme().accent).Padding(0, 1).Width(boxW - 2).Height(boxH - 2)
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(currentTheme().accent).Padding(0, 1).Width(boxW).Height(boxH)
 	return box.Render(strings.Join(lines, "\n"))
 }
 

@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/daemon"
 )
 
-func ctrlQ() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyCtrlQ} }
+func ctrlQ() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl} }
 
 func TestKillDialogDefaultsToKeep(t *testing.T) {
 	d := newFakeDaemon(sum("s_1", "/x/a", daemon.StateWorking), sum("s_2", "/x/b", daemon.StateIdle))
@@ -30,7 +30,7 @@ func TestKillDialogDefaultsToKeep(t *testing.T) {
 			t.Fatalf("dialog lacks %q:\n%s", want, view)
 		}
 	}
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(Model)
 	if m.kill != nil || p.stopped {
 		t.Fatalf("enter on the default killed it: dialog %v stopped %v", m.kill, p.stopped)
@@ -120,7 +120,7 @@ func TestKillDialogIgnoresRowClicks(t *testing.T) {
 	m.proc = p
 	next, _ := m.Update(ctrlQ())
 	m = next.(Model)
-	click := tea.MouseMsg{X: 2, Y: panelTop + 2*2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft} // s_3's row
+	click := tea.MouseClickMsg{X: 2, Y: panelTop + 2*2, Button: tea.MouseLeft} // s_3's row
 	next, cmd := m.Update(click)
 	m = run(t, next.(Model), cmd)
 	if m.sessionView.id != "s_1" || m.kill == nil {

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/daemon"
@@ -113,7 +113,7 @@ func (m Model) sessionsView(height int) string {
 	}
 	lines = append(lines[:min(len(lines), max(0, height-len(hints)))], hints...)
 	body := strings.Join(lines[:min(len(lines), height)], "\n")
-	return lipgloss.NewStyle().Width(panelWidth-1).Height(height).
+	return lipgloss.NewStyle().Width(panelWidth).Height(height).
 		Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(th.subtle).
 		Render(body)
 }
@@ -148,7 +148,7 @@ func (m Model) sessionBox(s daemon.SessionSummary, width int) string {
 		border = th.accent
 	}
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).
-		Padding(0, 1).Width(width - 2).Render(l1 + "\n" + l2)
+		Padding(0, 1).Width(width).Render(l1 + "\n" + l2)
 }
 
 // boxWindow is which session boxes fit in a panel height rows tall: from
@@ -233,39 +233,40 @@ func (m Model) tabsView(width int) string {
 // sessionsMouse handles clicks on the panel or strip and shifts other mouse
 // events into the coordinates today's layout expects.
 func (m *Model) sessionsMouse(msg *tea.MouseMsg) (id string, handled bool) {
-	click := msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft
-	wheel := msg.Action == tea.MouseActionPress &&
-		(msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown)
+	mouse := (*msg).Mouse()
+	_, click := (*msg).(tea.MouseClickMsg)
+	click = click && mouse.Button == tea.MouseLeft
+	_, wheel := (*msg).(tea.MouseWheelMsg)
 	switch m.panelMode {
 	case sessionsPanel:
-		if msg.X < panelWidth && (click || wheel) {
+		if mouse.X < panelWidth && (click || wheel) {
 			rows := m.rows()
 			first, shown := m.boxWindow(len(rows), m.termH)
-			box := (msg.Y - panelTop) / boxHeight
-			if click && msg.Y >= panelTop && box < shown {
+			box := (mouse.Y - panelTop) / boxHeight
+			if click && mouse.Y >= panelTop && box < shown {
 				return rows[first+box].ID, true
 			}
 			return "", true
 		}
 		// Releases and motion go on to the chat, so a drag that ends over
 		// the panel still finishes.
-		msg.X = max(0, msg.X-panelWidth)
+		*msg = shiftMouse(*msg, -min(mouse.X, panelWidth), 0)
 	case sessionsTabs:
-		if msg.Y == 0 && (click || wheel) {
+		if mouse.Y == 0 && (click || wheel) {
 			if click {
 				rows := m.rows()
 				tabs, start := m.tabStrip(rows, m.termW)
 				x := 0
 				for i := start; i < len(tabs); i++ {
 					x += lipgloss.Width(tabs[i])
-					if msg.X < x {
+					if mouse.X < x {
 						return rows[i].ID, true
 					}
 				}
 			}
 			return "", true
 		}
-		msg.Y = max(0, msg.Y-1)
+		*msg = shiftMouse(*msg, 0, -min(mouse.Y, 1))
 	}
 	return "", false
 }
@@ -275,4 +276,21 @@ func (m *Model) sessionsMouse(msg *tea.MouseMsg) (id string, handled bool) {
 func (m Model) modalOpen() bool {
 	return m.kill != nil || m.alwaysOnAsk != nil || m.pair != nil || m.recapView != nil || m.folders != nil || m.picker != nil || m.palette != nil ||
 		m.modelPick != nil || m.themePick != nil || m.showHelp || m.changes != nil
+}
+
+// shiftMouse moves a mouse message by dx, dy, keeping its kind.
+func shiftMouse(msg tea.MouseMsg, dx, dy int) tea.MouseMsg {
+	mouse := msg.Mouse()
+	mouse.X, mouse.Y = mouse.X+dx, mouse.Y+dy
+	switch msg.(type) {
+	case tea.MouseClickMsg:
+		return tea.MouseClickMsg(mouse)
+	case tea.MouseReleaseMsg:
+		return tea.MouseReleaseMsg(mouse)
+	case tea.MouseWheelMsg:
+		return tea.MouseWheelMsg(mouse)
+	case tea.MouseMotionMsg:
+		return tea.MouseMotionMsg(mouse)
+	}
+	return msg
 }

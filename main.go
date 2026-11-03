@@ -9,7 +9,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
@@ -111,7 +111,7 @@ func main() {
 	if hub.C != nil {
 		model = model.WithDaemon(hub).WithAlwaysOn(always)
 	}
-	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
+	p := tea.NewProgram(model)
 	_, err = p.Run()
 	tui.ClearProgramStatus()
 	if err != nil {
