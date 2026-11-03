@@ -21,7 +21,7 @@ func BenchmarkRefreshLongSession(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		live.setText(fmt.Sprintf("streaming reply, frame %d", i))
 		m.refresh()
-		_ = m.View()
+		_ = m.render()
 	}
 }
 
@@ -45,7 +45,7 @@ func BenchmarkRevealLongCodeBlock(b *testing.B) {
 			live.setText(text[:min(n, len(text))])
 			if m.chat.reveal(1.0 / revealFPS) {
 				m.refresh()
-				_ = m.View()
+				_ = m.render()
 			}
 		}
 	}

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exmanubis/claudewitz/internal/sessions"
 )
@@ -44,6 +44,7 @@ func newPicker(current, cwd string) *picker {
 	ti := textinput.New()
 	ti.Placeholder = "type to filter"
 	ti.Prompt = icons.search + " "
+	ti.SetStyles(fieldStyles(lipgloss.NewStyle()))
 	ti.Focus()
 	return &picker{loading: true, filter: ti, current: current, cwd: cwd}
 }
@@ -123,6 +124,7 @@ func (p *picker) view(width, height int) string {
 		count = mutedStyle.Render(fmt.Sprintf("%d sessions", len(p.shown)))
 	}
 	gap := inner - lipgloss.Width(title) - lipgloss.Width(count)
+	p.filter.SetWidth(fieldWidth(p.filter, inner))
 	lines := []string{title + strings.Repeat(" ", max(1, gap)) + count, p.filter.View(), ""}
 
 	rows := pickerRows(height)
@@ -168,7 +170,7 @@ func (p *picker) view(width, height int) string {
 		scopeHint = "this project"
 	}
 	lines = append(lines, "", helpLine([][2]string{{"↑↓", "move"}, {"enter", "resume"}, {"tab", scopeHint}, {"esc", "close"}}, inner))
-	return pickerBox.Width(w).Render(strings.Join(lines, "\n"))
+	return pickerBox.Width(w + 2).Render(strings.Join(lines, "\n"))
 }
 
 func (p *picker) isCurrent(s sessions.Info) bool {

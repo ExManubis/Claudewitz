@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Every dialog draws without panicking however small the terminal gets.
@@ -23,7 +23,7 @@ func TestDialogsOnTinyTerminals(t *testing.T) {
 					m := chatModel(t)
 					fn(m)
 					mm, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-					_ = mm.View()
+					_ = mm.(Model).render()
 				})
 			}
 		}

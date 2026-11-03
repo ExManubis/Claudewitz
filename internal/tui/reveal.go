@@ -5,7 +5,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Streamed text arrives in uneven bursts: a few characters, a pause, then a

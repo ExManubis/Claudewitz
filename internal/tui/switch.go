@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/daemon"
@@ -129,7 +129,7 @@ func (m *Model) nextNeedsYou() string {
 }
 
 // handleSessionKey runs the sessions keys; ok is false for any other key.
-func (m *Model) handleSessionKey(k tea.KeyMsg) (tea.Cmd, bool) {
+func (m *Model) handleSessionKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 	if m.daemon == nil {
 		return nil, false
 	}

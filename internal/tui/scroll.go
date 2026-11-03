@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -24,7 +24,7 @@ func (m Model) chatTop() int {
 // scrollbar renders the bar column for the viewport: a thumb sized to the
 // visible share of the transcript, or blanks when everything fits.
 func (m Model) scrollbar() []string {
-	h := m.vp.Height
+	h := m.vp.Height()
 	out := make([]string, h)
 	total := m.vp.TotalLineCount()
 	if total <= h || h <= 0 {
@@ -37,7 +37,7 @@ func (m Model) scrollbar() []string {
 	maxOff := total - h
 	pos := 0
 	if maxOff > 0 {
-		pos = m.vp.YOffset * (h - thumb) / maxOff
+		pos = m.vp.YOffset() * (h - thumb) / maxOff
 	}
 	th := currentTheme()
 	track := lipgloss.NewStyle().Foreground(th.subtle).Render("│")
@@ -57,7 +57,7 @@ func (m Model) scrollbar() []string {
 
 // scrollToBar moves the view so the thumb centres on a screen row.
 func (m *Model) scrollToBar(row int) {
-	h := m.vp.Height
+	h := m.vp.Height()
 	total := m.vp.TotalLineCount()
 	if total <= h {
 		return
@@ -119,7 +119,7 @@ func (m Model) highlightSelection(view string) string {
 	w := m.chatWidth()
 	lines := strings.Split(view, "\n")
 	for i, l := range lines {
-		from, to, ok := m.textSel.span(m.vp.YOffset+i, w)
+		from, to, ok := m.textSel.span(m.vp.YOffset()+i, w)
 		if !ok {
 			continue
 		}
@@ -155,73 +155,73 @@ func (m Model) selectedText() string {
 // posAt converts a screen cell to a transcript position, clamped to the
 // visible rows.
 func (m Model) posAt(x, y int) textPos {
-	row := max(0, min(m.vp.Height-1, y-m.chatTop()))
-	return textPos{line: m.vp.YOffset + row, col: max(0, min(m.chatWidth()-1, x))}
+	row := max(0, min(m.vp.Height()-1, y-m.chatTop()))
+	return textPos{line: m.vp.YOffset() + row, col: max(0, min(m.chatWidth()-1, x))}
 }
 
 func (m Model) inChat(x, y int) bool {
 	row := y - m.chatTop()
-	return x >= 0 && x < m.chatWidth() && row >= 0 && row < m.vp.Height
+	return x >= 0 && x < m.chatWidth() && row >= 0 && row < m.vp.Height()
 }
 
 func (m Model) onScrollbar(x, y int) bool {
 	row := y - m.chatTop()
-	return x == m.chatWidth() && row >= 0 && row < m.vp.Height
+	return x == m.chatWidth() && row >= 0 && row < m.vp.Height()
 }
 
 // handleMouse routes mouse events: wheel scrolling, dragging the
 // scrollbar, drag-to-select (copied on release) and click-to-select.
 func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
-	if tea.MouseEvent(msg).IsWheel() {
+	mouse := msg.Mouse()
+	switch msg.(type) {
+	case tea.MouseWheelMsg:
 		var c tea.Cmd
 		m.vp, c = m.vp.Update(msg)
 		m.follow = m.vp.AtBottom()
 		return c
-	}
-	switch msg.Action {
-	case tea.MouseActionPress:
-		if msg.Button != tea.MouseButtonLeft {
+	case tea.MouseClickMsg:
+		if mouse.Button != tea.MouseLeft {
 			return nil
 		}
 		// A release can go missing (outside the window, or sent to a panel
 		// that opened mid-drag), so every press starts afresh.
 		m.mouseDown, m.dragBar = false, false
 		switch {
-		case m.onScrollbar(msg.X, msg.Y):
+		case m.onScrollbar(mouse.X, mouse.Y):
 			m.dragBar = true
-			m.scrollToBar(msg.Y - m.chatTop())
-		case m.inChat(msg.X, msg.Y):
-			p := m.posAt(msg.X, msg.Y)
+			m.scrollToBar(mouse.Y - m.chatTop())
+		case m.inChat(mouse.X, mouse.Y):
+			p := m.posAt(mouse.X, mouse.Y)
 			m.textSel = &textSelection{anchor: p, head: p}
 			m.mouseDown = true
 		default:
 			m.textSel = nil
 			// A click in the prompt area returns focus to the input.
-			if m.chatFocus && msg.Y > m.chatTop()+m.vp.Height && msg.X < m.mainWidth() {
+			if m.chatFocus && mouse.Y > m.chatTop()+m.vp.Height() && mouse.X < m.mainWidth() {
 				m.blurChat()
 			}
 		}
-	case tea.MouseActionMotion:
+	case tea.MouseMotionMsg:
 		switch {
 		case m.dragBar:
-			m.scrollToBar(msg.Y - m.chatTop())
+			m.scrollToBar(mouse.Y - m.chatTop())
 		case m.mouseDown && m.textSel != nil:
 			// Dragging past the top or bottom edge scrolls.
-			row := msg.Y - m.chatTop()
+			row := mouse.Y - m.chatTop()
 			if row < 0 {
-				m.vp.LineUp(1)
+				m.vp.ScrollUp(1)
 				m.follow = false
-			} else if row >= m.vp.Height {
-				m.vp.LineDown(1)
+			} else if row >= m.vp.Height() {
+				m.vp.ScrollDown(1)
 				m.follow = m.vp.AtBottom()
 			}
-			m.textSel.head = m.posAt(msg.X, msg.Y)
+			m.textSel.head = m.posAt(mouse.X, mouse.Y)
 			if m.textSel.head != m.textSel.anchor {
 				m.textSel.active = true
 				m.follow = false
 			}
 		}
-	case tea.MouseActionRelease:
+	case tea.MouseReleaseMsg:
 		if m.dragBar {
 			m.dragBar = false
 			return nil

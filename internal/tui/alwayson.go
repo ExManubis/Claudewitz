@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // AlwaysOn keeps the claudewitz daemon running at login (a launchd agent on
@@ -65,7 +65,7 @@ func (m *Model) openAlwaysOn() {
 	m.input.Blur()
 }
 
-func (m *Model) handleAlwaysOnKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handleAlwaysOnKey(k tea.KeyPressMsg) tea.Cmd {
 	var cmd tea.Cmd
 	switch k.String() {
 	case "up", "down", "tab", "k", "j":
@@ -146,5 +146,5 @@ func (m Model) alwaysOnView() string {
 		}
 		lines = append(lines, pointer+mutedStyle.Render(fmt.Sprintf("%d. ", i+1))+style.Render(c.label)+mutedStyle.Render("  "+c.keys))
 	}
-	return popupBox.BorderForeground(th.accent).Width(min(72, m.termW-4)).Render(strings.Join(lines, "\n"))
+	return popupBox.BorderForeground(th.accent).Width(min(72, m.termW-4) + 2).Render(strings.Join(lines, "\n"))
 }

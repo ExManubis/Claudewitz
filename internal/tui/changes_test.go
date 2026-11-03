@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
@@ -67,18 +67,18 @@ func TestChangesViewerShowsDiffsAndSwitchesFiles(t *testing.T) {
 	if m.changes == nil {
 		t.Fatal("viewer didn't open")
 	}
-	v := ansi.Strip(m.View())
+	v := ansi.Strip(m.render())
 	if !strings.Contains(v, `println("changed line")`) || !strings.Contains(v, "notes.txt") || !strings.Contains(v, "1/2") {
 		t.Fatalf("viewer:\n%s", v)
 	}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = feed(t, next.(Model), cmd)
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "brand new file") || !strings.Contains(v, "2/2") {
+	if v := ansi.Strip(m.render()); !strings.Contains(v, "brand new file") || !strings.Contains(v, "2/2") {
 		t.Fatalf("after tab:\n%s", v)
 	}
 
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m = next.(Model); m.changes != nil {
 		t.Fatal("esc should close the viewer")
 	}
@@ -90,7 +90,7 @@ func TestChangesViewerNarrowHidesList(t *testing.T) {
 	if _, _, listW, _, _ := m.changesLayout(); listW != 0 {
 		t.Fatalf("list width %d at 80 columns", listW)
 	}
-	for _, l := range strings.Split(m.View(), "\n") {
+	for _, l := range strings.Split(m.render(), "\n") {
 		if w := ansi.StringWidth(l); w > 80 {
 			t.Fatalf("line is %d wide: %q", w, ansi.Strip(l))
 		}
@@ -113,7 +113,7 @@ func TestClickingSidebarFileOpensIt(t *testing.T) {
 		t.Fatalf("row %d is %q", row, ansi.Strip(lines[row]))
 	}
 	x := m.width - sidebarWidth + 4
-	next, cmd := m.Update(tea.MouseMsg{X: x, Y: row, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	next, cmd := m.Update(tea.MouseClickMsg{X: x, Y: row, Button: tea.MouseLeft})
 	m = feed(t, next.(Model), cmd)
 	if m.changes == nil {
 		t.Fatal("click didn't open the viewer")
@@ -135,7 +135,7 @@ func TestChangesListClickInCentredPanel(t *testing.T) {
 	m = feed(t, m, m.openChanges("main.go"))
 	x0, y0 := m.changesPos()
 	// The second file is on the second list row.
-	next, cmd := m.Update(tea.MouseMsg{X: x0 + 4, Y: y0 + 5 + 1, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	next, cmd := m.Update(tea.MouseClickMsg{X: x0 + 4, Y: y0 + 5 + 1, Button: tea.MouseLeft})
 	m = feed(t, next.(Model), cmd)
 	if f, _ := m.changes.file(); f.Path != "notes.txt" {
 		t.Fatalf("selected %q", f.Path)
@@ -162,12 +162,12 @@ func TestSessionChangesOutsideARepo(t *testing.T) {
 	if row < 0 {
 		t.Fatalf("Modified files row not mapped:\n%s", ansi.Strip(strings.Join(lines, "\n")))
 	}
-	next, cmd := m.Update(tea.MouseMsg{X: m.width - sidebarWidth + 4, Y: row, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	next, cmd := m.Update(tea.MouseClickMsg{X: m.width - sidebarWidth + 4, Y: row, Button: tea.MouseLeft})
 	m = feed(t, next.(Model), cmd)
 	if m.changes == nil || !m.changes.session {
 		t.Fatal("click didn't open the session viewer")
 	}
-	v := ansi.Strip(m.View())
+	v := ansi.Strip(m.render())
 	for _, want := range []string{"Edits this session", "notes.txt", "@@ -12,1 +12,1 @@", "12 + line twelve"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("missing %q in:\n%s", want, v)

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/daemon"
@@ -97,7 +97,7 @@ func TestAlwaysOnDialogDefaultsToNotNow(t *testing.T) {
 	if !m.modalOpen() {
 		t.Fatal("dialog isn't modal")
 	}
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = run(t, next.(Model), cmd)
 	if m.alwaysOnAsk != nil || a.installs != 0 {
 		t.Fatalf("enter on the default installed it: dialog %v installs %d", m.alwaysOnAsk, a.installs)
@@ -105,8 +105,8 @@ func TestAlwaysOnDialogDefaultsToNotNow(t *testing.T) {
 
 	// Down, enter: installed, and said so.
 	m = runPaletteAction(t, m, "Keep daemon running at login")
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	next, cmd = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	next, cmd = next.(Model).Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = run(t, next.(Model), cmd)
 	if a.installs != 1 || m.alwaysOnAsk != nil {
 		t.Fatalf("installs %d, dialog %v", a.installs, m.alwaysOnAsk)

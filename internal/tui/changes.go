@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exmanubis/claudewitz/internal/gitstatus"
 )
@@ -263,7 +263,7 @@ func (m *Model) scrollChanges(d int) {
 	v.scroll = max(0, min(v.scroll+d, len(v.diffRows(diffW))-bodyH))
 }
 
-func (m *Model) handleChangesKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handleChangesKey(k tea.KeyPressMsg) tea.Cmd {
 	_, _, _, diffW, bodyH := m.changesLayout()
 	switch k.String() {
 	case "esc", "q", "ctrl+s", "ctrl+c":
@@ -276,7 +276,7 @@ func (m *Model) handleChangesKey(k tea.KeyMsg) tea.Cmd {
 		m.scrollChanges(bodyH / 2)
 	case "u", "ctrl+u":
 		m.scrollChanges(-bodyH / 2)
-	case "f", " ", "pgdown":
+	case "f", "space", "pgdown":
 		m.scrollChanges(bodyH)
 	case "b", "pgup":
 		m.scrollChanges(-bodyH)
@@ -299,18 +299,19 @@ func (m *Model) handleChangesKey(k tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) handleChangesMouse(msg tea.MouseMsg) tea.Cmd {
-	ev := tea.MouseEvent(msg)
+	mouse := msg.Mouse()
+	_, click := msg.(tea.MouseClickMsg)
 	switch {
-	case ev.Button == tea.MouseButtonWheelUp:
+	case mouse.Button == tea.MouseWheelUp:
 		m.scrollChanges(-3)
-	case ev.Button == tea.MouseButtonWheelDown:
+	case mouse.Button == tea.MouseWheelDown:
 		m.scrollChanges(3)
-	case ev.Action == tea.MouseActionPress && ev.Button == tea.MouseButtonLeft:
+	case click && mouse.Button == tea.MouseLeft:
 		// Clicks on the file list pick a file: inside the border and
 		// padding, under the title, the file and their blank rows.
 		_, _, listW, _, bodyH := m.changesLayout()
 		x0, y0 := m.changesPos()
-		x, row := msg.X-x0-2, msg.Y-y0-5
+		x, row := mouse.X-x0-2, mouse.Y-y0-5
 		if listW > 0 && x >= 0 && x < listW && row >= 0 && row < bodyH {
 			if i := m.changes.listOffset(bodyH) + row; i < len(m.changes.files) && i != m.changes.sel {
 				m.changes.sel, m.changes.scroll = i, 0

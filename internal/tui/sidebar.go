@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
@@ -343,7 +343,7 @@ func truncateLeft(s string, w int) string {
 // sidebarView renders the right-hand panel.
 func (m Model) sidebarView(height int) string {
 	lines, _ := m.sidebarLines(height)
-	return sidebarStyle.Width(sidebarWidth - 1).Height(height).Render(strings.Join(lines, "\n"))
+	return sidebarStyle.Width(sidebarWidth).Height(height).Render(strings.Join(lines, "\n"))
 }
 
 // sidebarLines lays out the sidebar's rows, and which rows show a changed

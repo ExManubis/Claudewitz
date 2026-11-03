@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/daemon"
@@ -24,7 +24,7 @@ func TestPairShowsQRCode(t *testing.T) {
 	if !strings.Contains(view, "Pair an iPhone") || !strings.Contains(view, "100.64.0.1:7745") || !strings.Contains(view, "█") {
 		t.Fatalf("view:\n%s", view)
 	}
-	m.handlePairKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m.handlePairKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.pair != nil {
 		t.Fatal("esc didn't close it")
 	}
@@ -40,7 +40,7 @@ func TestPairTurnsRemoteAccessOn(t *testing.T) {
 	if m.pair == nil || !m.pair.remoteOff || !strings.Contains(ansi.Strip(m.pairView()), "turn remote access on") {
 		t.Fatalf("pair %+v", m.pair)
 	}
-	m = run(t, m, m.handlePairKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	m = run(t, m, m.handlePairKey(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if d.enabled != 1 || m.pair == nil || len(m.pair.qr) == 0 {
 		t.Fatalf("enabled %d, pair %+v", d.enabled, m.pair)
 	}

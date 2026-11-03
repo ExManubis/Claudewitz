@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
@@ -285,7 +285,7 @@ func (c *chat) renderEntry(e *entry, width int) string {
 				body += "\n" + imgs
 			}
 		}
-		return userBlock.Width(width - 2).Render(body)
+		return userBlock.Width(width - 1).Render(body)
 	case kindAssistant:
 		body := e.visibleText()
 		w := min(width-2, maxProseWidth)
@@ -628,7 +628,7 @@ func (c *chat) planBody(e *entry, width int) string {
 	if lines := strings.Split(body, "\n"); e.toolStatus != toolPending && !c.open(e) && len(lines) > 12 {
 		body = strings.Join(lines[:12], "\n") + "\n" + mutedStyle.Render(fmt.Sprintf("  … %d more lines (ctrl+o to expand)", len(lines)-12))
 	}
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(currentTheme().accent).Width(width - 2).Render(body)
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(currentTheme().accent).Width(width).Render(body)
 	var status string
 	switch {
 	case e.toolStatus == toolPending:

@@ -7,10 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/exmanubis/claudewitz/internal/daemon"
 )
@@ -42,7 +41,7 @@ func TestSessionsModeByWidth(t *testing.T) {
 	if m.sessionsMode() != sessionsPanel || m.width != 170-panelWidth {
 		t.Fatalf("wide again: mode %d width %d", m.sessionsMode(), m.width)
 	}
-	for _, line := range strings.Split(m.View(), "\n") {
+	for _, line := range strings.Split(m.render(), "\n") {
 		if w := ansi.StringWidth(line); w > 170 {
 			t.Fatalf("line %d wide: %q", w, line)
 		}
@@ -93,14 +92,14 @@ func TestTabsLabelSharedFolders(t *testing.T) {
 func TestPanelClickPicksRow(t *testing.T) {
 	m := withSessions(t, 160, sum("a", "/x/one", daemon.StateIdle), sum("b", "/x/two", daemon.StateWaiting))
 	// Row 0 is b (waiting first); rows start below the header line, two lines each.
-	msg := tea.MouseMsg{X: 5, Y: 2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
+	var msg tea.MouseMsg = tea.MouseClickMsg{X: 5, Y: 2, Button: tea.MouseLeft}
 	id, handled := m.sessionsMouse(&msg)
 	if !handled || id != "b" {
 		t.Fatalf("click: %q %v", id, handled)
 	}
-	chat := tea.MouseMsg{X: panelWidth + 10, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
-	if _, handled := m.sessionsMouse(&chat); handled || chat.X != 10 {
-		t.Fatalf("chat click shifted to %d, handled %v", chat.X, handled)
+	var chat tea.MouseMsg = tea.MouseClickMsg{X: panelWidth + 10, Y: 5, Button: tea.MouseLeft}
+	if _, handled := m.sessionsMouse(&chat); handled || chat.Mouse().X != 10 {
+		t.Fatalf("chat click shifted to %d, handled %v", chat.Mouse().X, handled)
 	}
 }
 
@@ -108,11 +107,11 @@ func TestReleaseOverPanelReachesChat(t *testing.T) {
 	m := withSessions(t, 160, sum("a", "/x/one", daemon.StateIdle), sum("b", "/x/two", daemon.StateWaiting))
 	m.mouseDown = true
 	m.textSel = &textSelection{}
-	rel := tea.MouseMsg{X: 5, Y: 5, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft}
-	if _, handled := m.sessionsMouse(&rel); handled || rel.X != 0 {
-		t.Fatalf("release over panel: handled %v X %d", handled, rel.X)
+	var rel tea.MouseMsg = tea.MouseReleaseMsg{X: 5, Y: 5, Button: tea.MouseLeft}
+	if _, handled := m.sessionsMouse(&rel); handled || rel.Mouse().X != 0 {
+		t.Fatalf("release over panel: handled %v X %d", handled, rel.Mouse().X)
 	}
-	next, _ := m.Update(tea.MouseMsg{X: 5, Y: 5, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+	next, _ := m.Update(tea.MouseReleaseMsg{X: 5, Y: 5, Button: tea.MouseLeft})
 	if next.(Model).mouseDown {
 		t.Fatal("release over the panel left the drag running")
 	}
@@ -130,7 +129,7 @@ func TestTabClickWhenScrolled(t *testing.T) {
 	if start == 0 {
 		t.Fatal("strip did not scroll")
 	}
-	msg := tea.MouseMsg{X: 1, Y: 0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
+	var msg tea.MouseMsg = tea.MouseClickMsg{X: 1, Y: 0, Button: tea.MouseLeft}
 	if id, handled := m.sessionsMouse(&msg); !handled || id != rows[start].ID {
 		t.Fatalf("click on first visible tab: %q %v, want %q", id, handled, rows[start].ID)
 	}
@@ -169,10 +168,6 @@ func TestPanelShowsWholePath(t *testing.T) {
 // Each session is a rounded box; the focused one has the accent border and
 // no background fill.
 func TestPanelDrawsABoxPerSession(t *testing.T) {
-	// Tests have no terminal, so lipgloss drops colour unless told otherwise.
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 	m := withSessions(t, 160, sum("a", "/x/one", daemon.StateIdle), sum("b", "/x/two", daemon.StateWaiting))
 	m.sessionView.id = "a"
 	raw := m.sessionsView(40)
@@ -227,7 +222,7 @@ func TestPanelScrollsToFocusedBox(t *testing.T) {
 		t.Fatalf("expected the top boxes hidden with a count:\n%s", view)
 	}
 	start, _ := m.boxWindow(len(m.rows()), m.termH)
-	msg := tea.MouseMsg{X: 5, Y: panelTop + boxHeight, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
+	var msg tea.MouseMsg = tea.MouseClickMsg{X: 5, Y: panelTop + boxHeight, Button: tea.MouseLeft}
 	if id, _ := m.sessionsMouse(&msg); id != m.rows()[start+1].ID {
 		t.Fatalf("click on the second visible box picked %q, want %q", id, m.rows()[start+1].ID)
 	}
@@ -258,7 +253,7 @@ func TestDialogsCentreOnTheWholeScreen(t *testing.T) {
 	} {
 		mm := m
 		dialog := open(&mm)
-		left, right := dialogSpan(mm.View(), dialog)
+		left, right := dialogSpan(mm.render(), dialog)
 		if left < 0 {
 			t.Fatalf("%s: nothing drawn", name)
 		}

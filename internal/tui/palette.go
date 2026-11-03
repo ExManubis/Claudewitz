@@ -5,10 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 )
@@ -36,7 +35,7 @@ func (m *Model) openPalette() {
 	ti := textinput.New()
 	ti.Placeholder = "Type a command, model, theme…"
 	ti.Prompt = "❯ "
-	ti.PromptStyle = statusKey
+	ti.SetStyles(fieldStyles(statusKey))
 	ti.Focus()
 	m.palette = &palette{all: m.actions(), filter: ti}
 	m.palette.apply()
@@ -53,10 +52,7 @@ func (m *Model) closePalette() {
 // copyToClipboard uses OSC 52, which most modern terminals (and tmux with
 // set-clipboard on) honour, including over SSH.
 func copyToClipboard(s string) tea.Cmd {
-	return func() tea.Msg {
-		termenv.Copy(s)
-		return nil
-	}
+	return tea.SetClipboard(s)
 }
 
 // actions lists everything the palette can do in the current state.
@@ -85,7 +81,7 @@ func (m *Model) actions() []action {
 	})
 	if m.daemon != nil {
 		add("Sessions", "Next session that needs you", "", "ctrl+]", func(m *Model) tea.Cmd {
-			cmd, _ := m.handleSessionKey(tea.KeyMsg{Type: tea.KeyCtrlCloseBracket})
+			cmd, _ := m.handleSessionKey(tea.KeyPressMsg{Code: ']', Mod: tea.ModCtrl})
 			return cmd
 		})
 		add("Sessions", "Kill session", "end the focused session", "ctrl+q", func(m *Model) tea.Cmd { return m.openKill() })
@@ -285,7 +281,7 @@ func (p *palette) move(d int) {
 	}
 }
 
-func (m *Model) handlePaletteKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handlePaletteKey(k tea.KeyPressMsg) tea.Cmd {
 	p := m.palette
 	switch k.String() {
 	case "esc", "ctrl+c", "ctrl+p":
@@ -323,6 +319,7 @@ func (p *palette) view(width int) string {
 	title := gradientText("Commands", true)
 	count := mutedStyle.Render(fmt.Sprintf("%d", len(p.shown)))
 	head := title + strings.Repeat(" ", max(1, inner-lipgloss.Width(title)-lipgloss.Width(count))) + count
+	p.filter.SetWidth(fieldWidth(p.filter, inner))
 	lines := []string{head, p.filter.View(), mutedStyle.Render(strings.Repeat("─", inner))}
 
 	if len(p.shown) == 0 {
@@ -356,5 +353,5 @@ func (p *palette) view(width int) string {
 		}
 	}
 	lines = append(lines, "", helpLine([][2]string{{"↑↓", "move"}, {"enter", "run"}, {"esc", "close"}}, inner))
-	return dialogBox.Width(w).Render(strings.Join(lines, "\n"))
+	return dialogBox.Width(w + 2).Render(strings.Join(lines, "\n"))
 }

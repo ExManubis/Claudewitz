@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exmanubis/claudewitz/internal/daemon"
 )
@@ -35,7 +35,7 @@ func (m *Model) openKill() tea.Cmd {
 	return nil
 }
 
-func (m *Model) handleKillKey(k tea.KeyMsg) tea.Cmd {
+func (m *Model) handleKillKey(k tea.KeyPressMsg) tea.Cmd {
 	switch k.String() {
 	case "up", "down", "tab", "k", "j":
 		m.kill.cursor = 1 - m.kill.cursor
@@ -160,5 +160,5 @@ func (m Model) killView() string {
 		label := style.Render(c.label)
 		lines = append(lines, pointer+mutedStyle.Render(fmt.Sprintf("%d. ", i+1))+label+mutedStyle.Render("  "+c.keys))
 	}
-	return popupBox.BorderForeground(th.err).Width(min(64, m.termW-4)).Render(strings.Join(lines, "\n"))
+	return popupBox.BorderForeground(th.err).Width(min(64, m.termW-4) + 2).Render(strings.Join(lines, "\n"))
 }

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // longChat is a chat model with enough content to scroll.
@@ -20,15 +20,23 @@ func longChat(t *testing.T) *Model {
 	return m
 }
 
-func mouse(action tea.MouseAction, x, y int) tea.MouseMsg {
-	return tea.MouseMsg{Action: action, Button: tea.MouseButtonLeft, X: x, Y: y}
+// mouse is a left-button "press", "release" or "motion" at x, y.
+func mouse(action string, x, y int) tea.MouseMsg {
+	m := tea.Mouse{X: x, Y: y, Button: tea.MouseLeft}
+	switch action {
+	case "release":
+		return tea.MouseReleaseMsg(m)
+	case "motion":
+		return tea.MouseMotionMsg(m)
+	}
+	return tea.MouseClickMsg(m)
 }
 
 func TestScrollbarGeometry(t *testing.T) {
 	m := longChat(t)
 	bar := m.scrollbar()
-	if len(bar) != m.vp.Height {
-		t.Fatalf("bar rows %d, viewport %d", len(bar), m.vp.Height)
+	if len(bar) != m.vp.Height() {
+		t.Fatalf("bar rows %d, viewport %d", len(bar), m.vp.Height())
 	}
 	thumbRows := func() (first, n int) {
 		first = -1
@@ -43,8 +51,8 @@ func TestScrollbarGeometry(t *testing.T) {
 		return
 	}
 	first, n := thumbRows()
-	if n == 0 || n >= m.vp.Height || first+n != m.vp.Height {
-		t.Fatalf("at the bottom the thumb should end at the last row: first=%d n=%d h=%d", first, n, m.vp.Height)
+	if n == 0 || n >= m.vp.Height() || first+n != m.vp.Height() {
+		t.Fatalf("at the bottom the thumb should end at the last row: first=%d n=%d h=%d", first, n, m.vp.Height())
 	}
 	m.vp.GotoTop()
 	if first, _ := thumbRows(); first != 0 {
@@ -88,7 +96,7 @@ func TestSelectionSpanAndText(t *testing.T) {
 func TestHighlightKeepsWidth(t *testing.T) {
 	m := longChat(t)
 	view := m.vp.View()
-	m.textSel = &textSelection{anchor: textPos{m.vp.YOffset + 1, 4}, head: textPos{m.vp.YOffset + 3, 12}, active: true}
+	m.textSel = &textSelection{anchor: textPos{m.vp.YOffset() + 1, 4}, head: textPos{m.vp.YOffset() + 3, 12}, active: true}
 	hl := m.highlightSelection(view)
 	a, b := strings.Split(view, "\n"), strings.Split(hl, "\n")
 	if len(a) != len(b) {
@@ -107,21 +115,21 @@ func TestHighlightKeepsWidth(t *testing.T) {
 func TestDragSelectCopiesAndClickSelects(t *testing.T) {
 	m := longChat(t)
 	top := m.chatTop()
-	m.handleMouse(mouse(tea.MouseActionPress, 2, top))
-	m.handleMouse(mouse(tea.MouseActionMotion, 20, top+2))
+	m.handleMouse(mouse("press", 2, top))
+	m.handleMouse(mouse("motion", 20, top+2))
 	if m.textSel == nil || !m.textSel.active {
 		t.Fatal("dragging should start a selection")
 	}
 	want := m.selectedText()
-	cmd := m.handleMouse(mouse(tea.MouseActionRelease, 20, top+2))
+	cmd := m.handleMouse(mouse("release", 20, top+2))
 	if cmd == nil || want == "" || len(m.toasts) == 0 || !strings.HasPrefix(m.toasts[len(m.toasts)-1].title, "Copied") {
 		t.Fatalf("release should copy %q and toast: %+v", want, m.toasts)
 	}
 
 	// A press and release without movement selects the entry instead.
 	m.textSel = nil
-	m.handleMouse(mouse(tea.MouseActionPress, 5, top+1))
-	m.handleMouse(mouse(tea.MouseActionRelease, 5, top+1))
+	m.handleMouse(mouse("press", 5, top+1))
+	m.handleMouse(mouse("release", 5, top+1))
 	if !m.chatFocus || m.textSel != nil {
 		t.Fatalf("click should focus the transcript and select an entry: focus=%v", m.chatFocus)
 	}
@@ -132,26 +140,26 @@ func TestDragSelectCopiesAndClickSelects(t *testing.T) {
 func TestReleaseAfterLostSelection(t *testing.T) {
 	m := longChat(t)
 	top := m.chatTop()
-	m.handleMouse(mouse(tea.MouseActionPress, 2, top)) // release never arrives
-	m.textSel = nil                                    // e.g. a panel cleared it
-	m.handleMouse(mouse(tea.MouseActionRelease, 2, top))
-	m.handleMouse(mouse(tea.MouseActionPress, 2, top))
-	m.handleMouse(mouse(tea.MouseActionPress, 2, m.height-1)) // outside the chat
-	m.handleMouse(mouse(tea.MouseActionRelease, 2, m.height-1))
+	m.handleMouse(mouse("press", 2, top)) // release never arrives
+	m.textSel = nil                       // e.g. a panel cleared it
+	m.handleMouse(mouse("release", 2, top))
+	m.handleMouse(mouse("press", 2, top))
+	m.handleMouse(mouse("press", 2, m.height-1)) // outside the chat
+	m.handleMouse(mouse("release", 2, m.height-1))
 }
 
 func TestDragScrollbar(t *testing.T) {
 	m := longChat(t)
-	bottom := m.vp.YOffset
-	m.handleMouse(mouse(tea.MouseActionPress, m.chatWidth(), m.chatTop()))
-	if !m.dragBar || m.vp.YOffset >= bottom {
-		t.Fatalf("pressing the top of the track should scroll up: drag=%v offset %d -> %d", m.dragBar, bottom, m.vp.YOffset)
+	bottom := m.vp.YOffset()
+	m.handleMouse(mouse("press", m.chatWidth(), m.chatTop()))
+	if !m.dragBar || m.vp.YOffset() >= bottom {
+		t.Fatalf("pressing the top of the track should scroll up: drag=%v offset %d -> %d", m.dragBar, bottom, m.vp.YOffset())
 	}
-	m.handleMouse(mouse(tea.MouseActionMotion, m.chatWidth(), m.chatTop()+m.vp.Height-1))
+	m.handleMouse(mouse("motion", m.chatWidth(), m.chatTop()+m.vp.Height()-1))
 	if !m.vp.AtBottom() {
 		t.Fatal("dragging to the bottom of the track should reach the end")
 	}
-	m.handleMouse(mouse(tea.MouseActionRelease, m.chatWidth(), m.chatTop()+m.vp.Height-1))
+	m.handleMouse(mouse("release", m.chatWidth(), m.chatTop()+m.vp.Height()-1))
 	if m.dragBar {
 		t.Fatal("release should end the drag")
 	}

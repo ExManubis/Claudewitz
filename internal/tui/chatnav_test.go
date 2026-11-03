@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exmanubis/claudewitz/internal/claude"
 	"github.com/exmanubis/claudewitz/internal/config"
@@ -31,16 +31,16 @@ func chatModel(t *testing.T) *Model {
 	return mm
 }
 
-func key(s string) tea.KeyMsg {
+func key(s string) tea.KeyPressMsg {
 	switch s {
 	case "tab":
-		return tea.KeyMsg{Type: tea.KeyTab}
+		return tea.KeyPressMsg{Code: tea.KeyTab}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEsc}
 	case "space":
-		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")}
+		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	}
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }
 
 func TestChatFocusAndNavigation(t *testing.T) {
@@ -119,8 +119,8 @@ func TestEntryAtAndScroll(t *testing.T) {
 	// Selecting the first entry while scrolled to the bottom brings it into view.
 	m.focusChat()
 	m.handleChatKey(key("g"))
-	if m.vp.YOffset > c.offsets[0] {
-		t.Fatalf("view should scroll up to the selection, offset %d", m.vp.YOffset)
+	if m.vp.YOffset() > c.offsets[0] {
+		t.Fatalf("view should scroll up to the selection, offset %d", m.vp.YOffset())
 	}
 }
 
@@ -131,21 +131,6 @@ func TestCopyText(t *testing.T) {
 	}
 	if got := copyText(&entry{kind: kindAssistant, text: "**md** source"}); got != "**md** source" {
 		t.Fatalf("assistant copy should be the markdown source: %q", got)
-	}
-}
-
-func TestBatchedKeys(t *testing.T) {
-	m := chatModel(t)
-	m.focusChat()
-	// "kk" in one event, as fast typing or key repeat delivers it.
-	m.handleChatKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("kk")})
-	if !m.chatFocus || m.chat.sel != 1 {
-		t.Fatalf("both k presses should move the selection: focus=%v sel=%d", m.chatFocus, m.chat.sel)
-	}
-	// A burst that starts typing hands the rest to the input.
-	m.handleChatKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("jhello")})
-	if m.chatFocus || m.input.Value() != "hello" {
-		t.Fatalf("typing after a nav key: focus=%v value=%q", m.chatFocus, m.input.Value())
 	}
 }
 

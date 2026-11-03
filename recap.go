@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
 
 	"github.com/exmanubis/claudewitz/internal/config"
@@ -50,6 +51,6 @@ func runRecap(args []string) {
 		if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 			width = w
 		}
-		fmt.Println(tui.RecapCard(r, cfg, width))
+		lipgloss.Println(tui.RecapCard(r, cfg, width))
 	}
 }
