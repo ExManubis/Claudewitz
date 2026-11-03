@@ -169,6 +169,24 @@ var themes = []theme{
 		chromaLight: "github",
 	},
 	{
+		// Crush's Keanu: phosphor green on black, with red and amber kept
+		// for errors and warnings. Light is green ink on pale mint.
+		name:        "keanu",
+		desc:        "Phosphor green, Matrix-style",
+		accent:      ac{Light: "#006E24", Dark: "#00FF41"}, // neon green
+		second:      ac{Light: "#00663A", Dark: "#7DFFA6"}, // pale phosphor
+		muted:       ac{Light: "#4A7A55", Dark: "#00A838"}, // dim green
+		subtle:      ac{Light: "#C6E5CC", Dark: "#183C22"},
+		text:        ac{Light: "#0B3B18", Dark: "#00D447"},
+		user:        ac{Light: "#00796B", Dark: "#00D9C3"}, // teal
+		ok:          ac{Light: "#1E7A32", Dark: "#C8FF4D"}, // lime, apart from the text
+		err:         ac{Light: "#C62828", Dark: "#FF5252"},
+		warn:        ac{Light: "#A35C00", Dark: "#FF9F43"}, // amber
+		bg:          ac{Light: "#F0FFF2", Dark: "#000000"},
+		chromaDark:  "keanu-dark",
+		chromaLight: "keanu-light",
+	},
+	{
 		name:        "mono",
 		desc:        "Greyscale, minimal colour",
 		accent:      ac{Light: "#111111", Dark: "#F5F5F5"},
@@ -202,6 +220,7 @@ var (
 
 func init() {
 	registerFlexoki()
+	registerKeanu()
 	detectedBG = lipgloss.HasDarkBackground()
 	darkBG = detectedBG
 	applyTheme(themes[0].name)
